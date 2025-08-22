@@ -1,0 +1,73 @@
+<div class="app-header">
+  <div class="header-content">
+    <img src="assets/site_logo.png" alt="MTGenesis.AI Logo" class="site-logo">
+    <div class="header-text">
+      <h1>{{ title }}</h1>
+      <p>Create custom Magic: The Gathering cards with AI</p>
+    </div>
+  </div>
+</div>
+
+<main class="app-container">
+  <!-- Status messages -->
+  <div class="status-container">
+    <!-- Success message -->
+    <div *ngIf="successMessage" class="status-message success">
+      <div class="message-content">
+        <span class="material-icons">check_circle</span>
+        <p>{{ successMessage }}</p>
+      </div>
+      <button class="close-button" (click)="clearSuccessMessage()">×</button>
+    </div>
+    
+    <!-- Error messages -->
+    <div *ngIf="error || textError || artError" class="status-message error">
+      <div class="message-content">
+        <span class="material-icons">error</span>
+        <div>
+          <p *ngIf="error">{{ error }}</p>
+          <p *ngIf="textError">{{ textError }}</p>
+          <p *ngIf="artError">{{ artError }}</p>
+        </div>
+      </div>
+      <button class="close-button" (click)="clearError()">×</button>
+    </div>
+  </div>
+
+  <div class="card-preview-section">
+    <!-- Loading overlay for the card preview -->
+    <div *ngIf="isGenerating || isGeneratingArt || isGeneratingText" class="loading-overlay">
+      <div class="loading-spinner"></div>
+      <p *ngIf="isGenerating">Generating card...</p>
+      <p *ngIf="isGeneratingText && !isGenerating">Generating card text...</p>
+      <p *ngIf="isGeneratingArt && !isGenerating">Generating card art...</p>
+    </div>
+    
+    <app-card-preview [card]="currentCard"></app-card-preview>
+    
+    <!-- Download button -->
+    <div class="download-section">
+      <button 
+        (click)="downloadCardImage()" 
+        [disabled]="!currentCard.imageUrl"
+        class="download-button">
+        <span class="material-icons">download</span>
+        Download Image
+      </button>
+    </div>
+    
+  </div>
+  
+  <div class="card-form-section">
+    <app-card-form 
+      (cardChange)="updateCard($event)" 
+      (generateCard)="generateCard($event)"></app-card-form>
+  </div>
+</main>
+
+<footer class="app-footer">
+  <div class="footer-content">
+    <img src="assets/site_logo.png" alt="MTGenesis.AI Logo" class="footer-logo">
+    <p>&copy; 2025 MTGenesis.AI - Create custom Magic: The Gathering cards</p>
+  </div>
+</footer>

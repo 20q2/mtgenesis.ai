@@ -1,0 +1,29 @@
+<div class="card-preview-wrapper">
+  <div class="card-container" [style.background]="getCardBackground()">
+    <div class="card-header">
+      <div class="card-name">{{ card.name || 'Card Name' }}</div>
+      <div class="card-mana" [innerHTML]="getManaSymbolsHtml()"></div>
+    </div>
+    
+    <div class="card-image">
+      <img [src]="card.imageUrl || placeholderImage" alt="Card Image">
+    </div>
+    
+    <div class="card-type-line">
+      {{ getFullTypeLine() }}
+    </div>
+    
+    <div class="card-text-box">
+      <p>{{ card.description || 'Enter card text in the form' }}</p>
+    </div>
+    
+    <!-- Power/Toughness box for creatures -->
+    <div class="power-toughness" *ngIf="shouldShowPowerToughness()">
+      {{ card.power || '0' }}/{{ card.toughness || '0' }}
+    </div>
+    
+    <div class="card-footer">
+      <div class="mtg-copyright">™ & © 2025 MTGenesis.ai</div>
+    </div>
+  </div>
+</div>
