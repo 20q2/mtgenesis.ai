@@ -179,6 +179,7 @@ export class CardFormComponent implements OnInit {
 
   // Helper to check if regenerate button should be shown
   shouldShowRegenerateButton(): boolean {
+    return false;
     return this.hasGeneratedCard && this.cardForm.pristine && !this.isGenerating;
   }
 

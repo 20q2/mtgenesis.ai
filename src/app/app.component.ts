@@ -1,4 +1,5 @@
 import { Component, ViewChild, OnInit } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { catchError, finalize, Observable, of } from 'rxjs';
 import { CardGenerationRequest } from './models/api.model';
 import { Card, Rarity } from './models/card.model';
@@ -13,6 +14,9 @@ import { CardFormComponent } from './components/card-form/card-form.component';
 })
 export class AppComponent implements OnInit {
   @ViewChild(CardFormComponent) cardFormComponent!: CardFormComponent;
+  
+  // Make Math available to template
+  Math = Math;
   
   title = 'MTGenesis.AI';
   currentCard: Card = {
@@ -30,6 +34,16 @@ export class AppComponent implements OnInit {
   isGenerating = false;
   isGeneratingText = false;
   isGeneratingArt = false;
+  generationProgress = 0;
+  generationStartTime = 0;
+  progressInterval: any = null;
+  showExtendedMessage = false;
+  
+  // Message rotation properties
+  currentMessage = { title: 'Generating Your Magic Card', subtitle: 'Creating artwork and card text with AI...' };
+  generationMessages: any[] = [];
+  messageInterval: any = null;
+  messageVisible = true;
   
   // Error states
   error: string | null = null;
@@ -42,6 +56,9 @@ export class AppComponent implements OnInit {
   // Display toggle
   showCompleteCard: boolean = false;
   
+  // Card transition state
+  cardExiting: boolean = false;
+  
   // Health check states
   isCheckingHealth = true;
   healthStatus: HealthStatus | null = null;
@@ -51,7 +68,8 @@ export class AppComponent implements OnInit {
   
   constructor(
     private cardService: CardService, 
-    private healthService: HealthService
+    private healthService: HealthService,
+    private http: HttpClient
   ) {}
 
   ngOnInit(): void {
@@ -60,13 +78,29 @@ export class AppComponent implements OnInit {
       this.showHealthBanner = true;
     }, 500);
     
+    this.loadGenerationMessages();
     this.checkModelsHealth();
   }
   
   updateCard(card: Card): void {
     console.log('AppComponent: updateCard called with colors:', card.colors);
-    this.currentCard = { ...card };
-    console.log('AppComponent: currentCard updated to:', this.currentCard);
+    
+    // If we had a complete card and form changed, trigger exit animation
+    if (this.currentCard.cardImageUrl && !card.cardImageUrl) {
+      this.cardExiting = true;
+      
+      // After animation completes, update the card
+      setTimeout(() => {
+        this.currentCard = { ...card };
+        this.cardExiting = false;
+        console.log('AppComponent: currentCard updated to:', this.currentCard);
+      }, 600); // Match animation duration
+    } else {
+      // No animation needed, update immediately
+      this.currentCard = { ...card };
+      console.log('AppComponent: currentCard updated to:', this.currentCard);
+    }
+    
     // Clear any previous errors or success messages when card is updated
     this.error = null;
     this.textError = null;
@@ -86,8 +120,9 @@ export class AppComponent implements OnInit {
     this.artError = null;
     this.successMessage = null;
     
-    // Set loading state
+    // Set loading state and start progress tracking
     this.isGenerating = true;
+    this.startProgressTracking();
     
     // Use the unified card generation service
     console.log('AppComponent: About to generate card with colors:', card.colors);
@@ -101,6 +136,7 @@ export class AppComponent implements OnInit {
         }),
         finalize(() => {
           this.isGenerating = false;
+          this.stopProgressTracking();
           // Reset the form's loading state
           if (this.cardFormComponent) {
             this.cardFormComponent.setGenerating(false);
@@ -295,6 +331,102 @@ export class AppComponent implements OnInit {
       this.isCheckingHealth = false;
       this.modelsReady = false;
       this.healthError = error.message || 'Health check failed';
+    }
+  }
+
+  // Progress tracking methods
+  startProgressTracking(): void {
+    this.generationProgress = 0;
+    this.generationStartTime = Date.now();
+    this.showExtendedMessage = false;
+    
+    // Reset to first message
+    this.currentMessage = this.generationMessages.length > 0 
+      ? this.generationMessages[0] 
+      : { title: 'Generating Your Magic Card', subtitle: 'Creating artwork and card text with AI...' };
+    
+    // Start message rotation every 5 seconds
+    this.startMessageRotation();
+    
+    this.progressInterval = setInterval(() => {
+      const elapsed = Date.now() - this.generationStartTime;
+      const expectedDuration = 120000; // 2 minutes for warm runs
+      const extendedThreshold = 180000; // 3 minutes threshold for cold start
+      
+      if (elapsed >= extendedThreshold && !this.showExtendedMessage) {
+        this.showExtendedMessage = true;
+        this.generationProgress = 95; // Show near completion but not 100%
+      } else if (elapsed < expectedDuration) {
+        // Progress smoothly from 0 to 90% over 2 minutes
+        this.generationProgress = Math.min(90, (elapsed / expectedDuration) * 90);
+      } else {
+        // After 2 minutes, slowly approach 95% over the next minute
+        this.generationProgress = Math.min(95, 90 + ((elapsed - expectedDuration) / 60000) * 5);
+      }
+    }, 100); // Update every 100ms for smooth progress
+  }
+
+  stopProgressTracking(): void {
+    if (this.progressInterval) {
+      clearInterval(this.progressInterval);
+      this.progressInterval = null;
+    }
+    
+    this.stopMessageRotation();
+    
+    this.generationProgress = 100;
+    this.showExtendedMessage = false;
+    
+    // Reset progress after a short delay
+    setTimeout(() => {
+      this.generationProgress = 0;
+    }, 500);
+  }
+
+  loadGenerationMessages(): void {
+    this.http.get<{messages: any[]}>('/assets/generation-messages.json')
+      .subscribe({
+        next: (data) => {
+          this.generationMessages = data.messages;
+          console.log(`Loaded ${this.generationMessages.length} generation messages`);
+        },
+        error: (error) => {
+          console.error('Failed to load generation messages:', error);
+          // Fallback messages if file fails to load
+          this.generationMessages = [
+            { title: 'Generating Your Magic Card', subtitle: 'Creating artwork and card text with AI...' },
+            { title: 'Shuffling the Digital Deck', subtitle: 'No mulligans needed here!' },
+            { title: 'Tapping Mana Sources', subtitle: 'Converting coffee into card magic...' }
+          ];
+        }
+      });
+  }
+
+  startMessageRotation(): void {
+    if (this.generationMessages.length <= 1) return;
+    
+    let messageIndex = 0;
+    this.messageInterval = setInterval(() => {
+      // Don't rotate messages if we're showing extended message
+      if (this.showExtendedMessage) return;
+      
+      // Fade out current message
+      this.messageVisible = false;
+      
+      // After fade out completes, change message and fade back in
+      setTimeout(() => {
+        messageIndex = (messageIndex + 1) % this.generationMessages.length;
+        this.currentMessage = this.generationMessages[messageIndex];
+        this.messageVisible = true;
+      }, 300); // 300ms to match CSS transition
+      
+    }, 5000); // Change message every 5 seconds
+  }
+
+  stopMessageRotation(): void {
+    if (this.messageInterval) {
+      clearInterval(this.messageInterval);
+      this.messageInterval = null;
     }
   }
 

@@ -61,17 +61,49 @@
   <div class="card-preview-section">
     <!-- Loading overlay for the card preview -->
     <div *ngIf="isGenerating || isGeneratingArt || isGeneratingText" class="loading-overlay">
-      <div class="loading-spinner"></div>
-      <p *ngIf="isGenerating">Generating card...</p>
-      <p *ngIf="isGeneratingText && !isGenerating">Generating card text...</p>
-      <p *ngIf="isGeneratingArt && !isGenerating">Generating card art...</p>
+      <div class="generation-progress" *ngIf="isGenerating">
+        <div class="progress-content">
+          <div class="progress-icon">
+            <span class="material-icons">auto_awesome</span>
+          </div>
+          
+          <div class="progress-text" *ngIf="!showExtendedMessage" [class.fade-in]="messageVisible" [class.fade-out]="!messageVisible">
+            <h3>{{ currentMessage.title }}</h3>
+          </div>
+          
+          <div class="progress-text" *ngIf="showExtendedMessage">
+            <h3>Almost Ready!</h3>
+            <p>The model is taking longer than expected. Please wait...</p>
+          </div>
+          
+          <div class="progress-bar-container">
+            <div class="progress-bar">
+              <div class="progress-fill" [style.width.%]="generationProgress"></div>
+            </div>
+            <div class="progress-percentage">{{ Math.round(generationProgress) }}%</div>
+          </div>
+          
+          <div class="progress-time">
+            <small *ngIf="showExtendedMessage">Please be patient, generation is still in progress</small>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Keep simple spinners for text/art only generation -->
+      <div *ngIf="!isGenerating && (isGeneratingText || isGeneratingArt)" class="simple-loading">
+        <div class="loading-spinner"></div>
+        <p *ngIf="isGeneratingText">Generating card text...</p>
+        <p *ngIf="isGeneratingArt">Generating card art...</p>
+      </div>
     </div>
     
     <!-- Blueprint-style preview: only show when complete card is not available -->
     <app-card-preview [card]="currentCard" *ngIf="!currentCard.cardImageUrl"></app-card-preview>
     
     <!-- Complete card image displayed automatically underneath preview -->
-    <div class="complete-card-display" *ngIf="currentCard.cardImageUrl">
+    <div class="complete-card-display" 
+         *ngIf="currentCard.cardImageUrl || cardExiting"
+         [class.card-exit-animation]="cardExiting">
       <img [src]="currentCard.cardImageUrl" alt="Complete Magic Card" class="complete-card-image">
     </div>
     

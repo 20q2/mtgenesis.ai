@@ -57,7 +57,7 @@ class MagicCardRenderer:
         
         # Set symbol/logo positioning (right side of type line, properly aligned)
         self.logo_pos = (self.card_width - 63, self.type_pos[1] - 2)  # Moved 4px more left (59 + 4 = 63)
-        self.logo_size = 22  # Made bigger (was 18, now 22)
+        self.logo_size = 25  # Made bigger (15% increase: 22 * 1.15 = 25.3, rounded to 25)
     
     def _load_image_cached(self, image_path: str) -> Image.Image:
         """
@@ -70,7 +70,6 @@ class MagicCardRenderer:
             PIL Image object
         """
         if image_path not in self._image_cache:
-            print(f"Loading and caching image: {os.path.basename(image_path)}")
             self._image_cache[image_path] = Image.open(image_path)
         return self._image_cache[image_path].copy()  # Return copy to avoid modifying cached image
     
@@ -118,27 +117,35 @@ class MagicCardRenderer:
     def load_fonts(self):
         """Load the Beleren fonts for card text"""
         try:
-            beleren_bold_path = os.path.join(self.fonts_dir, 'Beleren2016-Bold.ttf')
+            self.beleren_bold_path = os.path.join(self.fonts_dir, 'Beleren2016-Bold.ttf')
             beleren_smallcaps_path = os.path.join(self.fonts_dir, 'Beleren2016SmallCaps-Bold.ttf')
-            elegant_garamond_path = os.path.join(self.assets_dir, 'Elegant Garamond Regular.otf')
+            self.elegant_garamond_path = os.path.join(self.assets_dir, 'Elegant Garamond Regular.otf')
             
             # Different font sizes for different text elements
-            self.title_font = ImageFont.truetype(beleren_bold_path, 22)  # Increased by 1 more (21 + 1 = 22)
-            self.type_font = ImageFont.truetype(beleren_bold_path, 20)  # Increased by 1 more (19 + 1 = 20)
+            self.title_font = ImageFont.truetype(self.beleren_bold_path, 22)  # Increased by 1 more (21 + 1 = 22)
+            self.type_font = ImageFont.truetype(self.beleren_bold_path, 20)  # Increased by 1 more (19 + 1 = 20)
             
-            # Try to load Elegant Garamond for rules text, fallback to Beleren if not available
+            # Check if Elegant Garamond is available for rules text
             try:
-                self.text_font = ImageFont.truetype(elegant_garamond_path, 17)  # Elegant Garamond for rules text (increased by 1pt)
-                print("Using Elegant Garamond for rules text")
+                # Test load to see if Elegant Garamond is available
+                ImageFont.truetype(self.elegant_garamond_path, 27)
+                self.use_elegant_garamond = True
+                print("Elegant Garamond available for dynamic rules text sizing")
             except Exception as font_e:
                 print(f"Could not load Elegant Garamond font: {font_e}")
-                print("Falling back to Beleren for rules text")
-                self.text_font = ImageFont.truetype(beleren_bold_path, 17)  # Also increase fallback font size
+                print("Will use Beleren for dynamic rules text sizing")
+                self.use_elegant_garamond = False
             
-            self.mana_font = ImageFont.truetype(beleren_bold_path, 16)
-            self.pt_font = ImageFont.truetype(beleren_bold_path, 24)
+            # Default rules text font (will be dynamically sized)
+            self.text_font = self.get_text_font(27)  # Start with 27px default
             
-            print("Fonts loaded successfully")
+            self.mana_font = ImageFont.truetype(self.beleren_bold_path, 16)
+            self.pt_font = ImageFont.truetype(self.beleren_bold_path, 24)
+            
+            # Available rules box height (from text_pos to roughly PT area)
+            self.available_text_height = 190  # Conservative estimate (640 - 440 - margin)
+            
+            print("Fonts loaded successfully with dynamic sizing capability")
         except Exception as e:
             print(f"Error loading fonts: {e}")
             # Fallback to default font
@@ -147,6 +154,87 @@ class MagicCardRenderer:
             self.text_font = ImageFont.load_default()
             self.mana_font = ImageFont.load_default()
             self.pt_font = ImageFont.load_default()
+    
+    def get_text_font(self, size: int):
+        """Get rules text font at specified size"""
+        if self.use_elegant_garamond:
+            return ImageFont.truetype(self.elegant_garamond_path, size)
+        else:
+            return ImageFont.truetype(self.beleren_bold_path, size)
+    
+    def calculate_optimal_font_size(self, text: str, max_width: int, max_height: int) -> int:
+        """
+        Calculate the optimal font size for text to fit within given constraints.
+        Uses progressive font size reduction from 27px down to minimum readable size.
+        """
+        # Font size tiers (MTG standard 27px down to minimum readable)
+        font_sizes = [27, 24, 21, 18, 15, 12]  # Progressive reduction
+        
+        for font_size in font_sizes:
+            if self._text_fits_in_bounds(text, max_width, max_height, font_size):
+                print(f"📏 Optimal font size for rules text: {font_size}px")
+                return font_size
+        
+        # If even minimum doesn't fit, use smallest anyway and let it overflow
+        print(f"⚠️  Text too large even at minimum size, using 12px")
+        return 12
+    
+    def _text_fits_in_bounds(self, text: str, max_width: int, max_height: int, font_size: int) -> bool:
+        """Check if text fits within bounds at given font size"""
+        try:
+            font = self.get_text_font(font_size)
+            
+            # Create a temporary image for text measurement
+            temp_img = Image.new('RGB', (max_width + 100, max_height + 100), 'white')
+            draw = ImageDraw.Draw(temp_img)
+            
+            # Simulate the same text wrapping logic as draw_text_with_mana_symbols
+            # but just measure height instead of actually drawing
+            
+            paragraphs = text.split('\n')
+            line_height = int(font_size * 1.2)  # 1.2x line spacing
+            ability_separation = int(font_size * 1.45)  # Extra space between abilities (increased from 1.35x)
+            
+            total_height = 0
+            
+            for i, paragraph in enumerate(paragraphs):
+                if not paragraph.strip():
+                    continue
+                    
+                # Count wrapped lines for this paragraph
+                words = paragraph.split(' ')
+                current_line_words = []
+                
+                for word in words:
+                    # Clean word of mana symbols for width calculation (approximate)
+                    clean_word = word.replace('{', '').replace('}', '').replace('/', '')
+                    test_line = ' '.join(current_line_words + [clean_word])
+                    
+                    bbox = draw.textbbox((0, 0), test_line, font=font)
+                    if bbox[2] <= max_width:
+                        current_line_words.append(clean_word)
+                    else:
+                        if current_line_words:
+                            total_height += line_height
+                        current_line_words = [clean_word]
+                
+                # Add final line of paragraph
+                if current_line_words:
+                    total_height += line_height
+                
+                # Add ability separation (except for last paragraph)
+                if i < len(paragraphs) - 1:
+                    total_height += (ability_separation - line_height)
+            
+            fits = total_height <= max_height
+            if not fits:
+                print(f"   Font size {font_size}px: {total_height}px height > {max_height}px limit")
+            
+            return fits
+            
+        except Exception as e:
+            print(f"Error measuring text at font size {font_size}: {e}")
+            return False
     
     def sort_colors_for_pipes(self, colors: List[str]) -> List[str]:
         """Sort colors for pipe display - ensure proper visual ordering for common combinations"""
@@ -174,13 +262,11 @@ class MagicCardRenderer:
         colors_set = set(colors)
         for (c1, c2), preferred_order in guild_orders.items():
             if colors_set == {c1, c2}:
-                print(f"Using guild ordering for {preferred_order}: {c1} (left) → {c2} (right)")
                 return preferred_order
         
         # Fallback to WUBRG order if no specific guild match
         wubrg_order = ['W', 'U', 'B', 'R', 'G']
         result = [color for color in wubrg_order if color in colors]
-        print(f"Using WUBRG fallback ordering: {result}")
         return result
     
     def extract_pinlines_from_frame(self, frame_color: str) -> Image.Image:
@@ -438,7 +524,6 @@ class MagicCardRenderer:
         """Get single character code for frame colors"""
         # FIRST check if this is an artifact (based on typeline, not colors)
         if 'artifact' in card_type.lower():
-            print(f"🔍 ARTIFACT DETECTED from typeline: '{card_type}'")
             return 'Artifact'  # Use special artifact frame
         elif not colors or colors == ['C']:
             return 'A'  # Regular colorless
@@ -448,27 +533,7 @@ class MagicCardRenderer:
             return 'M'  # Multicolor
     
     def get_color_specific_mask(self, mana_colors: List[str]) -> str:
-        """
-        Get color-specific mask file for colored artifacts
-        Color-specific masks use RGB tints instead of black for better masking
-        """
-        if not mana_colors:
-            return 'm15MaskBorderSliver.png'  # Default generic mask
-        
-        # For single color, use color-specific mask
-        if len(mana_colors) == 1:
-            color = mana_colors[0].lower()
-            if color == 'r':
-                return 'm15MaskBorderSliver_red.png'
-            # Add other colors when available
-            # elif color == 'u':
-            #     return 'm15MaskBorderSliver_blue.png'
-            # elif color == 'g':
-            #     return 'm15MaskBorderSliver_green.png'
-            # etc.
-        
-        # For multicolor or unknown, use generic mask
-        return 'm15MaskBorderSliver.png'
+        return 'm15MaskBorderSliver_red.png'
     
     def load_base_frame(self, colors: List[str], is_legendary: bool = False, card_type: str = '', mana_cost: str = '') -> Image.Image:
         """
@@ -556,13 +621,7 @@ class MagicCardRenderer:
             print(f"🎭 Selected color-specific mask: {mask_file}")
             
             # Load the color-specific mask (always from m15 directory)
-            mask_path = os.path.join(self.m15_dir, mask_file)
-            print(f"🔍 Looking for mask at: {mask_path}")
-            
-            if not os.path.exists(mask_path):
-                print(f"❌ Mask file not found at: {mask_path}")
-                # Fallback to generic mask
-                mask_path = os.path.join(self.m15_dir, 'm15MaskBorderSliver.png')
+            mask_path = os.path.join(self.m15_dir, mask_file)        
             
             sliver_mask = self._load_image_cached(mask_path)
             sliver_mask = sliver_mask.resize((self.card_width, self.card_height), Image.Resampling.LANCZOS)
@@ -714,7 +773,6 @@ class MagicCardRenderer:
         try:
             # Special handling for two-color cards - create gradient blend
             if len(colors) == 2 and all(c in ['W', 'U', 'B', 'R', 'G'] for c in colors):
-                print(f"Creating gradient crown for two-color legendary: {colors}")
                 crown = self.blend_two_color_crown(colors)
                 if crown is None:
                     print("Gradient crown creation failed, falling back to multicolor")
@@ -750,7 +808,6 @@ class MagicCardRenderer:
                 new_width = self.card_width - 26  # Was 27, now 26 (1px wider)
                 new_height = int(crown.height * scale_factor) - 10  # Was -14, now -10 (taller)
                 crown = crown.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                print(f"Scaled crown to {new_width}x{new_height}")
             
             # Center crown horizontally at the top of the card
             crown_x = (self.card_width - crown.width) // 2
@@ -765,7 +822,6 @@ class MagicCardRenderer:
             rect_y2 = crown_y + 15
             
             draw.rectangle([rect_x1, rect_y1, rect_x2, rect_y2], fill='black')
-            print(f"Added black rectangle behind crown: ({rect_x1}, {rect_y1}) to ({rect_x2}, {rect_y2})")
             
             # Paste crown over frame (assumes crown has transparency)
             frame.paste(crown, (crown_x, crown_y), crown if crown.mode == 'RGBA' else None)
@@ -773,22 +829,28 @@ class MagicCardRenderer:
             # Log appropriate message based on crown type
             if len(colors) == 2 and all(c in ['W', 'U', 'B', 'R', 'G'] for c in colors):
                 sorted_colors = self.sort_colors_for_pipes(colors)
-                print(f"Added gradient legendary crown: {sorted_colors[0]}→{sorted_colors[1]} at position ({crown_x}, {crown_y})")
             else:
                 color_code = self.get_color_code(colors, card_type)
                 crown_type = "artifact" if color_code == 'Artifact' else color_code
-                print(f"Added legendary crown: {crown_type} at position ({crown_x}, {crown_y})")
                 
         except Exception as e:
             print(f"Error adding legendary crown: {e}")
         
         return frame
     
-    def load_pt_box(self, colors: List[str], card_type: str = '', mana_cost: str = '') -> Optional[Image.Image]:
-        """Load power/toughness box for creatures - use color-specific P/T box matching card frame"""
+    def load_pt_box(self, colors: List[str], card_type: str = '', mana_cost: str = '', subtype: str = '') -> Optional[Image.Image]:
+        """Load power/toughness box for creatures and vehicles - use color-specific P/T box matching card frame"""
         try:
-            # Special logic for colored artifacts
-            if 'artifact' in card_type.lower():
+            # Vehicles should use colored P/T boxes like creatures, even if they're artifacts
+            # Check both main type and subtype for Vehicle (e.g., "Artifact - Vehicle")
+            if 'vehicle' in card_type.lower() or 'vehicle' in subtype.lower():
+                print(f"Vehicle P/T: using colored frame P/T box for colors: {colors}")
+                # For vehicles, always use colored P/T box based on frame colors
+                color_code = self.get_color_code(colors, card_type)
+                pt_file = f'm15PT{color_code}.png'
+                pt_path = os.path.join(self.m15_dir, pt_file)
+            elif 'artifact' in card_type.lower():
+                # Special logic for non-vehicle artifacts
                 # Check if artifact has colored mana symbols
                 mana_colors = self.extract_colors_from_mana_cost(mana_cost) if mana_cost else []
                 
@@ -1186,21 +1248,30 @@ class MagicCardRenderer:
         return segments
     
     def draw_text_with_mana_symbols(self, card_image: Image.Image, text: str, position: Tuple[int, int], 
-                                   max_width: int, font: ImageFont.ImageFont, fill='black') -> int:
+                                   max_width: int, font: ImageFont.ImageFont = None, fill='black') -> int:
         """
-        Draw text with embedded mana symbols, handling word wrapping and explicit newlines
+        Draw text with embedded mana symbols, handling word wrapping and explicit newlines.
+        Uses dynamic font sizing to fit text within available space.
         Returns the height used by the text
         """
         draw = ImageDraw.Draw(card_image)
         
+        # Calculate optimal font size if no font provided
+        if font is None:
+            optimal_font_size = self.calculate_optimal_font_size(text, max_width, self.available_text_height)
+            font = self.get_text_font(optimal_font_size)
+            font_size = optimal_font_size
+            print(f"🎨 Using dynamic font size: {optimal_font_size}px for rules text")
+        else:
+            # Use provided font - assume current size (17px fallback)
+            font_size = 17
+        
         # First handle explicit newlines by splitting text into paragraphs
         paragraphs = text.split('\n')
-        
-        # Calculate sizing with different line heights
-        base_line_height = 20  # Base line height for text
-        wrapped_line_height = int(base_line_height * 1.0)  # 1.0x for wrapped lines within same ability
-        ability_separation_height = int(base_line_height * 1.15)  # 1.15x for separating abilities
-        symbol_size = 14  # Even smaller for rules text (was 16)
+        base_line_height = int(font_size * 1.2)  # 1.2x font size for line height
+        wrapped_line_height = int(base_line_height * 0.85)  # 0.85x for wrapped lines within same ability (tighter)
+        ability_separation_height = int(base_line_height * 1.3)  # 1.3x for separating abilities (increased from 1.15x)
+        symbol_size = max(12, int(font_size * 0.8))  # Proportional to font size (80% of font height, min 12px)
         current_x = position[0]
         current_y = position[1]
         line_start_x = position[0]
@@ -1358,11 +1429,16 @@ class MagicCardRenderer:
             
             # Card data loaded successfully
             
+            # Log artifact detection once at start of rendering
+            if 'artifact' in card_type.lower():
+                print(f"🔍 ARTIFACT DETECTED from typeline: '{card_type}'")
+            
             # Check if legendary
             is_legendary = 'Legendary' in supertype if supertype else False
             is_creature = 'Creature' in card_type
             # Vehicles also need P/T boxes since they become creatures when crewed
-            is_vehicle = 'Vehicle' in card_type
+            # Check both main type and subtype for Vehicle (e.g., "Artifact - Vehicle")
+            is_vehicle = 'Vehicle' in card_type or 'Vehicle' in subtype
             needs_pt_box = is_creature or is_vehicle
             
             print(f"Is legendary: {is_legendary}, Is creature: {is_creature}, Is vehicle: {is_vehicle}, Needs P/T: {needs_pt_box}")
@@ -1387,11 +1463,11 @@ class MagicCardRenderer:
             # Step 3: Load and position P/T box for creatures and vehicles
             pt_box_start = time.time()
             if needs_pt_box and (power is not None and toughness is not None):
-                pt_box = self.load_pt_box(colors, card_type, mana_cost)
+                pt_box = self.load_pt_box(colors, card_type, mana_cost, subtype)
                 if pt_box:
-                    # Position P/T box in bottom right corner (moved 8px left and 8px up)
-                    pt_box_pos = (self.card_width - pt_box.width - 23,  # 15 + 8 = 23 (8px more left)
-                                 self.card_height - pt_box.height - 23)  # 15 + 8 = 23 (8px more up)
+                    # Position P/T box in bottom right corner (moved 11px left and 14px up from original)
+                    pt_box_pos = (self.card_width - pt_box.width - 26,  # 15 + 8 + 2 + 1 = 26 (11px more left)
+                                 self.card_height - pt_box.height - 29)  # 15 + 8 + 8 - 2 = 29 (14px more up)
                     card_image.paste(pt_box, pt_box_pos, pt_box if pt_box.mode == 'RGBA' else None)
                     print(f"Added P/T box at position {pt_box_pos}")
                 else:
@@ -1469,7 +1545,7 @@ class MagicCardRenderer:
             if text:
                 print(f"Drawing card text with mana symbols at position {self.text_pos}: '{text}'")
                 self.draw_text_with_mana_symbols(card_image, text, self.text_pos, 
-                                                self.text_width, self.text_font)
+                                                self.text_width)
             else:
                 print("No card text to draw")
             rules_text_time = time.time() - rules_text_start
@@ -1481,10 +1557,10 @@ class MagicCardRenderer:
                 pt_text = f"{power}/{toughness}"
                 
                 # If we have a P/T box, center text in it
-                pt_box = self.load_pt_box(colors, card_type, mana_cost)
+                pt_box = self.load_pt_box(colors, card_type, mana_cost, subtype)
                 if pt_box:
-                    pt_box_pos = (self.card_width - pt_box.width - 23,  # 15 + 8 = 23 (8px more left)
-                                 self.card_height - pt_box.height - 23)  # 15 + 8 = 23 (8px more up)
+                    pt_box_pos = (self.card_width - pt_box.width - 26,  # 15 + 8 + 2 + 1 = 26 (11px more left)
+                                 self.card_height - pt_box.height - 29)  # 15 + 8 + 8 - 2 = 29 (14px more up)
                     pt_text_pos = (pt_box_pos[0] + pt_box.width // 2 + 4,
                                   pt_box_pos[1] + pt_box.height // 2)
                     draw.text(pt_text_pos, pt_text, fill='black', font=self.pt_font, anchor='mm')
@@ -1496,7 +1572,7 @@ class MagicCardRenderer:
             
             # Step 11: Add rounded corners to the final card image
             corners_start = time.time()
-            card_image_rounded = self.add_rounded_corners(card_image, radius=15)
+            card_image_rounded = self.add_rounded_corners(card_image, radius=18)
             corners_time = time.time() - corners_start
             print(f"   🔲 Rounded corners: {corners_time:.3f}s")
             

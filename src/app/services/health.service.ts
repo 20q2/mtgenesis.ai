@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Observable, BehaviorSubject, timer, EMPTY } from 'rxjs';
 import { catchError, retry, switchMap, takeUntil } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
@@ -10,6 +10,7 @@ export interface HealthStatus {
     image_model: 'ready' | 'loading' | 'error';
     content_model: 'ready' | 'loading' | 'error';
   };
+  first_job_completed: boolean;
   message: string;
 }
 
@@ -17,7 +18,7 @@ export interface HealthStatus {
   providedIn: 'root'
 })
 export class HealthService {
-  private readonly apiUrl = environment.production ? '/health' : `${environment.apiUrl}/health`;
+  private readonly apiUrl = `${environment.apiUrl}/health`;
   private healthStatusSubject = new BehaviorSubject<HealthStatus | null>(null);
   private isCheckingSubject = new BehaviorSubject<boolean>(false);
   
@@ -30,7 +31,12 @@ export class HealthService {
    * Perform a single health check
    */
   checkHealth(): Observable<HealthStatus> {
-    return this.http.get<HealthStatus>(this.apiUrl).pipe(
+    // Add header to bypass ngrok browser warning
+    const headers = new HttpHeaders({
+      'ngrok-skip-browser-warning': 'true'
+    });
+    
+    return this.http.get<HealthStatus>(this.apiUrl, { headers }).pipe(
       catchError((error: HttpErrorResponse) => {
         console.error('Health check failed:', error);
         
@@ -46,6 +52,7 @@ export class HealthService {
               image_model: 'error' as const,
               content_model: 'error' as const
             },
+            first_job_completed: false,
             message: 'Cannot connect to server'
           }];
         } else {
@@ -56,6 +63,7 @@ export class HealthService {
               image_model: 'error' as const,
               content_model: 'error' as const
             },
+            first_job_completed: false,
             message: `Health check failed: ${error.message}`
           }];
         }
@@ -103,6 +111,7 @@ export class HealthService {
           image_model: 'error',
           content_model: 'error'
         },
+        first_job_completed: false,
         message: 'Health check failed'
       };
       
@@ -155,5 +164,13 @@ export class HealthService {
   areModelsReady(): boolean {
     const status = this.getCurrentStatus();
     return status?.status === 'healthy';
+  }
+
+  /**
+   * Check if the first job has been completed (for dynamic loading times)
+   */
+  isFirstJobCompleted(): boolean {
+    const status = this.getCurrentStatus();
+    return status?.first_job_completed ?? false;
   }
 }

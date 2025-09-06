@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Observable, throwError, of } from 'rxjs';
-import { catchError, retry, map, tap, switchMap } from 'rxjs/operators';
+import { catchError, retry, map, tap, switchMap, timeout } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
+import { HealthService } from './health.service';
 import { 
   CardValidationRequest, 
   CardValidationResponse,
@@ -39,12 +40,31 @@ export class CardService {
    * Default HTTP headers for Lambda proxy
    */
   private readonly defaultHeaders = new HttpHeaders({
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': 'true'
   });
 
-  constructor(private http: HttpClient) { }
+  constructor(
+    private http: HttpClient,
+    private healthService: HealthService
+  ) { }
 
-
+  /**
+   * Get the appropriate timeout value based on whether this is a cold start or warm run
+   */
+  private getDynamicTimeout(): number {
+    const isFirstJobCompleted = this.healthService.isFirstJobCompleted();
+    
+    if (isFirstJobCompleted) {
+      // Warm run - use shorter timeout
+      console.log(`🚀 Using warm run timeout: ${environment.warmRunTimeoutMs}ms`);
+      return environment.warmRunTimeoutMs;
+    } else {
+      // Cold start - use longer timeout
+      console.log(`🔥 Using cold start timeout: ${environment.coldStartTimeoutMs}ms`);
+      return environment.coldStartTimeoutMs;
+    }
+  }
 
   /**
    * Validate a card against Magic: The Gathering rules
@@ -77,7 +97,7 @@ export class CardService {
       height: environment.defaultCardHeight,
       cardData: {
         name: card.name,
-        manaCost: card.manaCost,  // Added missing mana cost field
+        manaCost: card.manaCost,
         supertype: card.supertype,
         colors: card.colors,
         type: card.type,
@@ -95,8 +115,9 @@ export class CardService {
 
     return this.http.post<CardGenerationResponse>(url, request, { headers: this.defaultHeaders })
       .pipe(
+        timeout(this.getDynamicTimeout()),
         retry({ count: this.retryCount, delay: this.retryDelay }),
-        map(response => {
+        map((response: any) => {
           const updatedCard: Card = { ...card };
           
           // Process card data if available
@@ -160,8 +181,9 @@ export class CardService {
 
     return this.http.post<CardGenerationResponse>(url, request, { headers: this.defaultHeaders })
       .pipe(
+        timeout(this.getDynamicTimeout()),
         retry({ count: this.retryCount, delay: this.retryDelay }),
-        map(response => {
+        map((response: CardGenerationResponse) => {
           const updatedCardData: Partial<Card> = {};
           
           // Process only card data (ignore image)
@@ -215,8 +237,9 @@ export class CardService {
 
     return this.http.post<CardGenerationResponse>(url, request, { headers: this.defaultHeaders })
       .pipe(
+        timeout(this.getDynamicTimeout()),
         retry({ count: this.retryCount, delay: this.retryDelay }),
-        map(response => {
+        map((response: any) => {
           const updatedCardData: Partial<Card> = {};
           
           // Process only image data (ignore card content)

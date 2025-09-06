@@ -15,6 +15,20 @@ USE_CUDA = True  # <-- Change this to True when you want GPU mode
 # "light" - CompVis/stable-diffusion-v1-4 (lighter, works better on CPU)
 # "placeholder" - disable image generation entirely (for testing/debugging)
 MODEL_SIZE = "heavy"  # <-- CUDA enabled! Using SDXL-Turbo for best quality
+
+# ===== TIMEOUT CONFIGURATION =====
+# Global timeout settings for all operations (in seconds)
+COLD_START_TIMEOUT = 180    # 3 minutes for first-time model loading
+WARM_RUN_TIMEOUT = 120      # 2 minutes for subsequent generations
+MAX_REQUEST_AGE = 300       # 5 minutes max age before cleanup (was 600)
+CLEANUP_INTERVAL = 60       # Check for old requests every 60 seconds
+DELAYED_CLEANUP = 30        # Wait 30 seconds before cleaning completed requests
+
+# Track model loading state for cold vs warm timeout detection
+_models_loaded = {
+    'image': False,
+    'content': False
+}
 # ==============================
 
 from flask import Flask, request, jsonify
@@ -82,7 +96,6 @@ class RequestQueue:
             self.active_requests[request_id] = request_item
         
         self.queue.put(request_item)
-        print(f"📝 Request {request_id} added to queue. Queue size: {self.queue.qsize()}")
         return request_id
     
     def get_status(self, request_id):
@@ -93,12 +106,12 @@ class RequestQueue:
                 req = self.active_requests[request_id]
                 current_time = time.time()
                 
-                # Check for timeout (10 minutes = 600 seconds)
-                if current_time - req['created_at'] > 600:
+                # Check for timeout using global config
+                if current_time - req['created_at'] > MAX_REQUEST_AGE:
                     if not req['completed']:
                         req['completed'] = True
-                        req['error'] = 'Request timed out after 10 minutes'
-                        print(f"⏰ Request {request_id} timed out after 10 minutes")
+                        req['error'] = f'Request timed out after {MAX_REQUEST_AGE // 60} minutes'
+                        print(f"⏰ Request {request_id} timed out after {MAX_REQUEST_AGE // 60} minutes")
                         # Clean up from active requests after timeout
                         if req['started']:
                             self.current_concurrent = max(0, self.current_concurrent - 1)
@@ -123,7 +136,7 @@ class RequestQueue:
                     import threading
                     def delayed_cleanup():
                         import time
-                        time.sleep(30)  # Wait 30 seconds for client to retrieve result
+                        time.sleep(DELAYED_CLEANUP)  # Wait for client to retrieve result
                         with self.lock:
                             if request_id in self.active_requests:
                                 del self.active_requests[request_id]
@@ -157,7 +170,6 @@ class RequestQueue:
                             self.current_concurrent += 1
                             request_item['started'] = True
                             request_item['started_at'] = time.time()
-                            print(f"🔄 Starting request {request_item['id']}. Active: {self.current_concurrent}/{self.max_concurrent}")
                             break
                     time.sleep(0.1)  # Wait a bit before checking again
                 
@@ -165,7 +177,11 @@ class RequestQueue:
                 try:
                     result = request_item['func'](*request_item['args'], **request_item['kwargs'])
                     request_item['result'] = result
-                    print(f"✅ Request {request_item['id']} completed successfully")
+                    # Mark first job as completed globally (for dynamic loading times)
+                    global first_job_completed
+                    if not first_job_completed:
+                        first_job_completed = True
+                        
                 except Exception as e:
                     request_item['error'] = str(e)
                     print(f"❌ Request {request_item['id']} failed: {e}")
@@ -174,7 +190,6 @@ class RequestQueue:
                 with self.lock:
                     request_item['completed'] = True
                     self.current_concurrent -= 1
-                    print(f"🔓 Request {request_item['id']} finished. Active: {self.current_concurrent}/{self.max_concurrent}")
                 
                 self.queue.task_done()
                 
@@ -188,7 +203,7 @@ class RequestQueue:
         import time
         while True:
             try:
-                time.sleep(60)  # Check every minute
+                time.sleep(CLEANUP_INTERVAL)  # Check periodically
                 current_time = time.time()
                 cleanup_count = 0
                 
@@ -217,6 +232,9 @@ class RequestQueue:
 # Initialize global request queue
 request_queue = RequestQueue(max_concurrent=2)  # Allow max 2 concurrent card generations
 
+# Global state tracking for first job completion (for dynamic loading times)
+first_job_completed = False
+
 def process_card_generation(prompt, width, height, original_card_data):
     """
     Process a card generation request - wrapper function for the queue
@@ -241,19 +259,26 @@ def process_card_generation(prompt, width, height, original_card_data):
             # Submit both tasks to run in parallel with card data
             image_future = executor.submit(createCardImage, prompt, width, height, original_card_data)
             content_future = executor.submit(createCardContent, prompt, original_card_data)
-            print(f"📋 Both futures submitted, waiting for completion...")
             
             # Wait for both to complete and get results
-            print(f"⏳ Waiting for image generation (timeout: 600s)...")
+            # Use cold start timeout for first run, warm timeout for subsequent runs
+            image_timeout = COLD_START_TIMEOUT if not _models_loaded['image'] else WARM_RUN_TIMEOUT
+            content_timeout = COLD_START_TIMEOUT if not _models_loaded['content'] else WARM_RUN_TIMEOUT
+            
+            print(f"⏳ Waiting for image generation (timeout: {image_timeout}s, {'cold start' if not _models_loaded['image'] else 'warm run'})...")
             try:
-                image_data = image_future.result(timeout=600)  # 10 minute timeout for image
+                image_data = image_future.result(timeout=image_timeout)
                 image_end_time = time.time()
                 image_generation_time = image_end_time - image_start_time
                 print(f"✅ Image generation completed in {image_generation_time:.2f} seconds")
+                # Mark image model as loaded for future warm runs
+                _models_loaded['image'] = True
             except concurrent.futures.TimeoutError:
                 image_end_time = time.time()
                 image_generation_time = image_end_time - image_start_time
-                print(f"⏰ Image generation timed out after {image_generation_time:.2f} seconds (10 minute limit)")
+                print(f"⏰ Image generation timed out after {image_generation_time:.2f} seconds ({image_timeout}s limit)")
+                # Cancel the future to stop background processing
+                image_future.cancel()
                 image_data = None
             except Exception as e:
                 image_end_time = time.time()
@@ -263,9 +288,9 @@ def process_card_generation(prompt, width, height, original_card_data):
                 traceback.print_exc()
                 image_data = None
             
-            print(f"⏳ Waiting for content generation (timeout: 120s)...")
+            print(f"⏳ Waiting for content generation (timeout: {content_timeout}s, {'cold start' if not _models_loaded['content'] else 'warm run'})...")
             try:
-                generated_card_text = content_future.result(timeout=120)  # 2 minute timeout for content
+                generated_card_text = content_future.result(timeout=content_timeout)
                 content_end_time = time.time()
                 content_generation_time = content_end_time - content_start_time
                 print(f"✅ Content generation completed in {content_generation_time:.2f} seconds")
@@ -273,10 +298,14 @@ def process_card_generation(prompt, width, height, original_card_data):
                 print(f"🔍 Content generation full result: {repr(generated_card_text)}")
                 print(f"🔍 Content type: {type(generated_card_text)}")
                 print(f"🔍 Content length: {len(generated_card_text) if generated_card_text else 0}")
+                # Mark content model as loaded for future warm runs
+                _models_loaded['content'] = True
             except concurrent.futures.TimeoutError:
                 content_end_time = time.time()
                 content_generation_time = content_end_time - content_start_time
-                print(f"⏰ Content generation timed out after {content_generation_time:.2f} seconds")
+                print(f"⏰ Content generation timed out after {content_generation_time:.2f} seconds ({content_timeout}s limit)")
+                # Cancel the future to stop background processing
+                content_future.cancel()
                 generated_card_text = None
             except Exception as e:
                 content_end_time = time.time()
@@ -299,7 +328,6 @@ def process_card_generation(prompt, width, height, original_card_data):
             print(f"🔍 Original card data keys: {list(original_card_data.keys())}")
             print(f"🔍 Original description: {repr(original_card_data.get('description', 'NO DESCRIPTION'))}")
             if generated_card_text:
-                print(f"🔧 Processing generated text: {repr(generated_card_text[:100])}...")
                 try:
                     # Try to parse structured card data
                     parsed_text = json.loads(generated_card_text)
@@ -324,24 +352,30 @@ def process_card_generation(prompt, width, height, original_card_data):
                 # Apply text processing and ability reordering to the description
                 if 'description' in updated_card_data and updated_card_data['description']:
                     original_text = updated_card_data['description']
-                    print(f"🔧 Applying text processing to: {repr(original_text[:100])}...")
                     
                     # Apply the text processing steps that were missing
                     processed_text = original_text
+                    print(f"🔍 Step 0 - Original: {repr(processed_text)}")
                     
                     # Step 1: Clean up text formatting
                     processed_text = processed_text.replace('\n\n', '\n')  # Double newlines to single
                     processed_text = processed_text.replace(' ~ ', f' {updated_card_data.get("name", "~")} ')  # Replace ~ with card name
                     processed_text = processed_text.replace('~', updated_card_data.get("name", "~"))  # Replace any remaining ~
+                    print(f"🔍 Step 1 - After cleanup: {repr(processed_text)}")
                     
-                    # Step 2: Apply ability reordering
-                    processed_text = reorder_abilities_properly(processed_text, updated_card_data)
+                    # Step 1.5: Fix markdown bullet points (convert "* item" to "item")
+                    processed_text = fix_markdown_bullet_points(processed_text)
+                    print(f"🔍 Step 1.5 - After bullet fix: {repr(processed_text)}")
+                    
+                    # Step 2: Skip ability reordering - already done in createCardContent()
+                    # processed_text = reorder_abilities_properly(processed_text, updated_card_data)
                     
                     # Step 3: Ensure periods on abilities
                     processed_text = ensure_periods_on_abilities(processed_text)
+                    print(f"🔍 Step 3 - After period fix: {repr(processed_text)}")
                     
                     updated_card_data['description'] = processed_text
-                    print(f"✅ Text processing complete: {repr(processed_text[:100])}...")
+                    print(f"🔧 Content model parsed output: {repr(processed_text)}")
             else:
                 print("No card text found, using original description")
                 if 'description' not in updated_card_data:
@@ -430,9 +464,14 @@ def process_card_generation(prompt, width, height, original_card_data):
         print(f"   📊 Models: {model_percentage:.1f}% | Cleanup: {cleanup_percentage:.1f}%")
         
         if image_data is None and generated_card_text is None:
-            raise Exception('Both image and content generation failed')
+            # Determine if this was due to timeout or other failure
+            timeout_msg = ""
+            if (image_generation_time >= (image_timeout - 1)) or (content_generation_time >= (content_timeout - 1)):
+                timeout_msg = " (timeout occurred)"
+            raise Exception(f'Both image and content generation failed{timeout_msg}. Please try again.')
         elif image_data is None:
-            print("⚠️ Warning: Image generation failed, returning content only")
+            timeout_msg = " (timeout occurred)" if image_generation_time >= (image_timeout - 1) else ""
+            print(f"⚠️ Warning: Image generation failed{timeout_msg}, returning content only")
             return {
                 'cardData': generated_card_text,
                 'imageData': None,
@@ -441,7 +480,8 @@ def process_card_generation(prompt, width, height, original_card_data):
                 'generation_time': total_generation_time
             }
         elif generated_card_text is None:
-            print("⚠️ Warning: Content generation failed, returning image only")
+            timeout_msg = " (timeout occurred)" if content_generation_time >= (content_timeout - 1) else ""
+            print(f"⚠️ Warning: Content generation failed{timeout_msg}, returning image only")
             return {
                 'cardData': None,
                 'imageData': image_data,
@@ -990,17 +1030,6 @@ def createCardImage(prompt, width=408, height=336, card_data=None):
             print(f"🔍 Generated image size: {image.size}")
             print(f"🔍 Generated image mode: {image.mode}")
             
-            # Check if image is actually black
-            img_array = np.array(image)
-            avg_brightness = np.mean(img_array)
-            print(f"🔍 Image average brightness: {avg_brightness:.2f} (0=black, 255=white)")
-            
-            if avg_brightness < 10:
-                print("⚠️  WARNING: Generated image appears to be nearly black!")
-                print("🔍 Image min/max values:", np.min(img_array), "/", np.max(img_array))
-            else:
-                print("✅ Generated image has normal brightness levels")
-            
             if inference_time > 10:
                 print(f"⚠️ SLOW INFERENCE DETECTED! Expected ~2-4s, got {inference_time:.2f}s")
                 print("💡 This suggests GPU optimization issues. Consider:")
@@ -1147,13 +1176,57 @@ def remove_typeline_contamination(abilities_list, card_data):
     
     return cleaned_abilities
 
+def clean_ability_quotes(ability: str) -> str:
+    """
+    Remove outer double quotes from abilities while preserving intentional quotes within the text.
+    
+    Examples:
+    - '"Flying"' -> 'Flying'  
+    - '"{T}: Add one mana"' -> '{T}: Add one mana'
+    - '"Whenever you cast a spell, say "Hello""' -> 'Whenever you cast a spell, say "Hello"'
+    """
+    ability = ability.strip()
+    
+    # Check if ability starts and ends with double quotes
+    if len(ability) >= 2 and ability.startswith('"') and ability.endswith('"'):
+        # Remove outer quotes
+        inner_text = ability[1:-1]
+        
+        # Check if there are intentional quotes inside (odd number of quotes means unmatched quote)
+        inner_quote_count = inner_text.count('"')
+        
+        if inner_quote_count == 0:
+            # No internal quotes, just return cleaned text
+            return inner_text
+        elif inner_quote_count % 2 == 0:
+            # Even number of internal quotes (properly paired), return cleaned text
+            return inner_text
+        else:
+            # Odd number of internal quotes, the outer quote was probably intentional closing quote
+            # Keep the closing quote
+            return inner_text + '"'
+    
+    return ability
+
 def smart_split_by_periods(text):
     """
     Split text by periods, but respect quoted sections.
     Periods inside quotes should not cause splits.
+    Also split on trigger words that clearly start new abilities.
     """
     if not text:
         return []
+    
+    # First, handle trigger word splits within quoted sections
+    # Look for patterns like ". Whenever" or ". When" or ". At the beginning"
+    import re
+    
+    # Pattern to find period + space + trigger words that should start new abilities
+    trigger_split_pattern = r'(\.\s+)(When(?:ever)?|At\s+the\s+beginning|At\s+end\s+of|During)'
+    
+    # Replace with period + SPLIT_MARKER + trigger word
+    SPLIT_MARKER = "||ABILITY_SPLIT||"
+    text_with_markers = re.sub(trigger_split_pattern, r'\1' + SPLIT_MARKER + r'\2', text, flags=re.IGNORECASE)
     
     parts = []
     current_part = ""
@@ -1161,8 +1234,17 @@ def smart_split_by_periods(text):
     quote_char = None
     
     i = 0
-    while i < len(text):
-        char = text[i]
+    while i < len(text_with_markers):
+        # Check for split marker
+        if text_with_markers[i:i+len(SPLIT_MARKER)] == SPLIT_MARKER:
+            # This is a split point - finish current part
+            if current_part.strip():
+                parts.append(current_part.strip())
+            current_part = ""
+            i += len(SPLIT_MARKER)
+            continue
+            
+        char = text_with_markers[i]
         
         # Handle quote characters
         if char in ['"', "'"]:
@@ -1194,6 +1276,38 @@ def smart_split_by_periods(text):
     
     return parts
 
+def parse_quoted_abilities(card_text):
+    """
+    Parse abilities from quoted format where each ability is wrapped in double quotes.
+    Input: '"Flying, trample" "When this enters, draw a card" "{T}: Add one mana"'
+    Output: ['Flying, trample', 'When this enters, draw a card', '{T}: Add one mana']
+    
+    Falls back to traditional parsing if no quoted abilities are found.
+    """
+    import re
+    
+    if not card_text:
+        return []
+    
+    # Pattern to match quoted abilities: "ability text"
+    quoted_pattern = r'"([^"]+)"'
+    quoted_matches = re.findall(quoted_pattern, card_text)
+    
+    if quoted_matches:
+        # Found quoted abilities - use them
+        abilities = [ability.strip() for ability in quoted_matches if ability.strip()]
+        return abilities
+    else:
+        # No quotes found - fall back to traditional parsing
+        print(f"   ⚠️  No quoted abilities found, falling back to traditional parsing")
+        if '\n' in card_text:
+            abilities = [ability.strip() for ability in card_text.split('\n') if ability.strip()]
+            return abilities
+        else:
+            # Smart period splitting that respects quotes
+            abilities = smart_split_by_periods(card_text)
+            return abilities
+
 def reorder_abilities_properly(card_text, card_data=None):
     """
     Reorder abilities in proper Magic order based on card type
@@ -1208,11 +1322,8 @@ def reorder_abilities_properly(card_text, card_data=None):
     is_enchantment = 'enchantment' in card_type
     is_planeswalker = 'planeswalker' in card_type
     
-    print(f"🎯 Processing {card_type} - creature: {is_creature}, instant/sorcery: {is_instant_sorcery}")
-    
     # For instant/sorcery cards, don't apply creature-style ability reordering
     if is_instant_sorcery:
-        print(f"📜 Instant/Sorcery detected - using simple text processing")
         # Just clean up the text and ensure proper periods (but not after quotes)
         cleaned_text = card_text.strip()
         if cleaned_text and not cleaned_text.endswith(('.', '!', '?', '"', "'")):
@@ -1254,18 +1365,12 @@ def reorder_abilities_properly(card_text, card_data=None):
         'embalm', 'eternalize', 'afflict', 'rampage', 'changeling', 'convoke', 'delve', 'splice'
     }
     
-    # Split text into abilities
-    print(f"🔧 PARSING ABILITIES FROM: {repr(card_text)}")
-    if '\n' in card_text:
-        abilities = [ability.strip() for ability in card_text.split('\n') if ability.strip()]
-        print(f"   📋 Split by newlines: {abilities}")
-    else:
-        # Smart period splitting that respects quotes
-        abilities = smart_split_by_periods(card_text)
-        print(f"   📋 Split by periods (quote-aware): {abilities}")
+    # Parse abilities using the new quote-aware parser
+    abilities = parse_quoted_abilities(card_text)
     
     keyword_abilities = []
-    passive_triggered_abilities = []
+    passive_abilities = []
+    triggered_abilities = []
     active_abilities = []
     
     for ability in abilities:
@@ -1274,24 +1379,59 @@ def reorder_abilities_properly(card_text, card_data=None):
         # Debug individual ability classification
         print(f"   🔍 Classifying: '{ability}' → {ability_type}")
         
+        # Clean outer quotes from ability
+        ability = clean_ability_quotes(ability.strip())
+        
         # Ensure ability ends with a period (unless it's a keyword or ends with other punctuation or quotes)
-        ability = ability.strip()
         if ability and ability_type != 'keyword' and not ability.endswith(('.', '!', '?', ':', '"', "'")):
             ability += '.'
         
         if ability_type == 'keyword':
             keyword_abilities.append(ability)
+        elif ability_type == 'passive':
+            passive_abilities.append(ability)
+        elif ability_type == 'triggered':
+            triggered_abilities.append(ability)
         elif ability_type == 'active':
             active_abilities.append(ability)
-        else:  # passive/triggered
-            passive_triggered_abilities.append(ability)
     
-    # Clean up typeline contamination from passive/triggered abilities
+    # Clean up typeline contamination from passive and triggered abilities
     if card_data:
-        passive_triggered_abilities = remove_typeline_contamination(passive_triggered_abilities, card_data)
+        passive_abilities = remove_typeline_contamination(passive_abilities, card_data)
+        triggered_abilities = remove_typeline_contamination(triggered_abilities, card_data)
     
-    # Combine in proper order: Keywords -> Passive/Triggered -> Active
-    # BUT: Keywords should be comma-separated on one line, other abilities use newlines
+    # Remove AI generation artifacts that mention "rules text"
+    def filter_rules_text_artifacts(abilities_list):
+        """Remove abilities that are AI generation artifacts mentioning 'rules text'"""
+        filtered = []
+        for ability in abilities_list:
+            if 'rules text' in ability.lower():
+                print(f"🗑️  Removed AI generation artifact: '{ability}'")
+            else:
+                filtered.append(ability)
+        return filtered
+    
+    # Apply rules text artifact filtering to all ability types
+    keyword_abilities = filter_rules_text_artifacts(keyword_abilities)
+    passive_abilities = filter_rules_text_artifacts(passive_abilities)
+    triggered_abilities = filter_rules_text_artifacts(triggered_abilities)
+    active_abilities = filter_rules_text_artifacts(active_abilities)
+    
+    # Clean unwanted formatting characters from all ability arrays
+    abilities_dict = {
+        'keyword': keyword_abilities,
+        'passive': passive_abilities, 
+        'triggered': triggered_abilities,
+        'active': active_abilities
+    }
+    cleaned_abilities = clean_ability_arrays(abilities_dict)
+    keyword_abilities = cleaned_abilities['keyword']
+    passive_abilities = cleaned_abilities['passive']
+    triggered_abilities = cleaned_abilities['triggered']
+    active_abilities = cleaned_abilities['active']
+    
+    # Combine in proper order: Keywords -> Passive -> Triggered -> Active
+    # Keywords should be comma-separated on one line, other abilities use newlines
     final_ability_blocks = []
     
     # Add keywords as a single comma-separated line
@@ -1299,8 +1439,11 @@ def reorder_abilities_properly(card_text, card_data=None):
         keywords_line = ', '.join(keyword_abilities)
         final_ability_blocks.append(keywords_line)
     
-    # Add passive/triggered abilities (each on its own line)
-    final_ability_blocks.extend(passive_triggered_abilities)
+    # Add passive abilities (each on its own line)
+    final_ability_blocks.extend(passive_abilities)
+    
+    # Add triggered abilities (each on its own line)
+    final_ability_blocks.extend(triggered_abilities)
     
     # Add active abilities (each on its own line) 
     final_ability_blocks.extend(active_abilities)
@@ -1308,26 +1451,43 @@ def reorder_abilities_properly(card_text, card_data=None):
     # Use newlines to separate different ability BLOCKS (not individual keywords)
     result = '\n'.join(final_ability_blocks)
     
-    # Enhanced debug output for ability reorganization
-    print(f"🎯 ABILITY REORGANIZATION DEBUG:")
-    print(f"   📝 Input text: {repr(card_text)}")
-    print(f"   🔑 Keywords ({len(keyword_abilities)}): {keyword_abilities}")
-    print(f"   ⚡ Passive/Triggered ({len(passive_triggered_abilities)}): {passive_triggered_abilities}")
-    print(f"   🎯 Active ({len(active_abilities)}): {active_abilities}")
-    print(f"   📋 Final ability blocks: {final_ability_blocks}")
-    print(f"   📤 Output text: {repr(result)}")
-    
     return result
 
 def classify_ability(ability, keywords):
     """
-    Classify an ability as keyword, active, or passive/triggered
+    Classify an ability as keyword, active, passive, or triggered
     """
     import re
     
     clean_ability = ability.rstrip('.,!?').lower()
     
-    # Check for active abilities (have activation cost with colon)
+    # FIRST: Check for triggered abilities (highest priority to prevent misclassification)
+    # This must be checked before active abilities because triggered abilities can contain colons
+    triggered_words = ['when', 'whenever', 'at the beginning', 'at the end', 'at end of', 'during']
+    
+    # More specific triggered ability detection
+    triggered_patterns = [
+        r'\b(when|whenever)\b',  # Word boundaries for when/whenever
+        r'\bat\s+the\s+(beginning|end)\b',  # "at the beginning" / "at the end"
+        r'\bat\s+end\s+of\b',  # "at end of"
+        r'\bduring\b'  # during
+    ]
+    
+    # If ability starts with trigger words or contains trigger patterns, it's triggered
+    if (any(clean_ability.startswith(trigger) for trigger in ['when', 'whenever', 'at the beginning', 'at the end', 'at end of', 'during']) or
+        any(re.search(pattern, clean_ability, re.IGNORECASE) for pattern in triggered_patterns)):
+        return 'triggered'
+    
+    # SECOND: Check for activation condition clauses (these modify activated abilities)
+    # These should be treated as active ability modifiers, not passive abilities
+    activation_condition_patterns = [
+        r'\bactivate\s+this\s+ability\s+only\b',  # "Activate this ability only if/when..."
+        r'\bactivate\s+only\b',  # "Activate only if/when..."
+    ]
+    if any(re.search(pattern, clean_ability, re.IGNORECASE) for pattern in activation_condition_patterns):
+        return 'active'
+    
+    # THIRD: Check for active abilities (have activation cost with colon)
     # Patterns: {cost}: effect OR {cost}, additional cost: effect
     # Examples: {T}: Add mana OR {T}, Sacrifice this: Draw a card
     active_patterns = [
@@ -1337,13 +1497,7 @@ def classify_ability(ability, keywords):
     if any(re.search(pattern, ability) for pattern in active_patterns):
         return 'active'
     
-    # Check for triggered abilities first (including "At" triggers)
-    # This should be checked before keywords to ensure proper classification
-    triggered_words = ['when', 'whenever', 'at the beginning', 'at the end', 'at end of', 'during', 'if']
-    if any(trigger in clean_ability for trigger in triggered_words):
-        return 'passive_triggered'
-    
-    # Check for keyword abilities
+    # FOURTH: Check for keyword abilities
     # Single keyword or comma-separated keywords
     if ',' in clean_ability and not any(trigger in clean_ability for trigger in ['when', 'whenever', 'at', 'if', 'target', 'choose', 'search', 'draw', 'deal', 'gain', 'lose']):
         # Likely a keyword list like "Trample, haste" or "Deathtouch, menace"
@@ -1357,8 +1511,8 @@ def classify_ability(ability, keywords):
         if not any(trigger in clean_ability for trigger in ['when', 'whenever', 'at', 'target', '{', ':']):
             return 'keyword'
     
-    # Everything else is passive/triggered
-    return 'passive_triggered'
+    # Everything else is passive (static abilities)
+    return 'passive'
 
 def ensure_periods_on_abilities(card_text):
     """
@@ -1380,6 +1534,81 @@ def ensure_periods_on_abilities(card_text):
         fixed_abilities.append(ability)
     
     return '\n'.join(fixed_abilities)
+
+def clean_ability_text(ability):
+    """
+    Clean unwanted formatting characters from individual ability strings.
+    Removes quotes, stars, and bullets from the start and end of ability text.
+    """
+    if not ability:
+        return ability
+    
+    # Characters to remove from start and end
+    unwanted_chars = ['"', "'", '*', '•', ' ']
+    
+    # Keep cleaning until no more unwanted characters at start/end
+    cleaned = ability
+    while cleaned and (cleaned[0] in unwanted_chars or cleaned[-1] in unwanted_chars):
+        # Remove from start
+        if cleaned and cleaned[0] in unwanted_chars:
+            cleaned = cleaned[1:]
+        # Remove from end  
+        if cleaned and cleaned[-1] in unwanted_chars:
+            cleaned = cleaned[:-1]
+    
+    return cleaned.strip()
+
+def clean_ability_arrays(abilities_dict):
+    """
+    Clean all ability arrays in the abilities dictionary.
+    Removes quotes, stars, and bullets from start and end of each ability.
+    """
+    if not abilities_dict:
+        return abilities_dict
+    
+    cleaned_dict = {}
+    for ability_type, abilities_list in abilities_dict.items():
+        if isinstance(abilities_list, list):
+            cleaned_list = [clean_ability_text(ability) for ability in abilities_list if ability]
+            # Remove any empty strings that resulted from cleaning
+            cleaned_list = [ability for ability in cleaned_list if ability.strip()]
+            cleaned_dict[ability_type] = cleaned_list
+        else:
+            cleaned_dict[ability_type] = abilities_list
+    
+    return cleaned_dict
+
+def fix_markdown_bullet_points(card_text):
+    """
+    Convert markdown-style bullet points (* item) to proper Magic card formatting.
+    Magic cards don't use bullet points - they use proper sentence structure.
+    """
+    if not card_text:
+        return card_text
+    
+    # Split into lines and process each one
+    lines = card_text.split('\n')
+    fixed_lines = []
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            fixed_lines.append('')
+            continue
+            
+        # Check if line starts with "* " (markdown bullet point)
+        if line.startswith('* '):
+            # Remove the "* " and treat as a regular ability
+            fixed_line = line[2:].strip()
+            # Ensure it starts with a capital letter
+            if fixed_line and fixed_line[0].islower():
+                fixed_line = fixed_line[0].upper() + fixed_line[1:]
+            fixed_lines.append(fixed_line)
+        else:
+            fixed_lines.append(line)
+    
+    return '\n'.join(fixed_lines)
+
 
 def format_ability_newlines(card_text):
     """
@@ -1484,42 +1713,101 @@ def generate_creature_stats(card_data: dict) -> dict:
         # Ultimate fallback: 2/2
         return {'power': '2', 'toughness': '2'}
 
-def generate_vehicle_crew_cost(card_data: dict) -> int:
+def calculate_card_power_level(card_data: dict) -> float:
     """
-    Generate appropriate crew cost for vehicles based on power/toughness and mana cost
-    Returns crew cost as integer (1-6)
+    Calculate comprehensive power level of a card considering multiple factors
+    Returns float from 0.0 (weak) to 10.0 (extremely powerful)
     """
     try:
-        # Extract power/toughness if available
+        # Extract basic stats
         power = int(card_data.get('power', 0)) if card_data.get('power', '').isdigit() else 0
         toughness = int(card_data.get('toughness', 0)) if card_data.get('toughness', '').isdigit() else 0
-        total_stats = power + toughness
+        cmc = card_data.get('cmc', 0)
+        mana_cost = card_data.get('manaCost', '')
         
-        # Extract CMC
+        # Base power level from stats
+        stats_total = power + toughness
+        base_power = stats_total * 0.5  # Base scaling factor
+        
+        # CMC efficiency factor (higher stats for lower CMC = higher power level)
+        if cmc > 0:
+            efficiency = stats_total / cmc
+            efficiency_bonus = max(0, efficiency - 1.5) * 2  # Bonus for above-curve stats
+        else:
+            efficiency_bonus = 0
+        
+        # Count colored mana pips for commitment penalty/bonus
+        colored_pips = 0
+        if mana_cost:
+            import re
+            # Count single colored mana symbols
+            colored_pips += len(re.findall(r'\{[WUBRG]\}', mana_cost))
+            # Count hybrid mana symbols (count as 1.5 pips each)
+            hybrid_matches = re.findall(r'\{[WUBRG]/[WUBRG]\}', mana_cost)
+            colored_pips += len(hybrid_matches) * 1.5
+        
+        # Color commitment factor (more colors = slightly higher power level potential)
+        color_bonus = min(colored_pips * 0.3, 2.0)  # Cap at +2.0
+        
+        # Power vs Toughness distribution factor
+        power_focus_bonus = 0
+        if power > 0 and toughness > 0:
+            total_stats = power + toughness
+            power_ratio = power / total_stats
+            # Favor aggressive power-heavy creatures slightly
+            if power_ratio > 0.6:
+                power_focus_bonus = 0.5
+            elif power_ratio > 0.75:
+                power_focus_bonus = 1.0
+        
+        # Calculate final power level
+        power_level = base_power + efficiency_bonus + color_bonus + power_focus_bonus
+        
+        # Normalize to 0-10 scale and cap
+        power_level = max(0.0, min(power_level, 10.0))
+        
+        print(f"💪 Power level calculation: P/T {power}/{toughness}, CMC {cmc}, Colored pips: {colored_pips:.1f}")
+        print(f"💪 Components: Base {base_power:.1f} + Efficiency {efficiency_bonus:.1f} + Color {color_bonus:.1f} + Power focus {power_focus_bonus:.1f} = {power_level:.2f}")
+        
+        return power_level
+        
+    except Exception as e:
+        print(f"❌ Error calculating power level: {e}")
+        # Fallback: moderate power level
+        return 3.0
+
+def generate_vehicle_crew_cost(card_data: dict) -> int:
+    """
+    Generate appropriate crew cost for vehicles based on comprehensive power level
+    Returns crew cost as integer (1-5)
+    """
+    try:
+        # Calculate comprehensive power level
+        power_level = calculate_card_power_level(card_data)
+        
+        # Extract basic stats for logging
+        power = int(card_data.get('power', 0)) if card_data.get('power', '').isdigit() else 0
+        toughness = int(card_data.get('toughness', 0)) if card_data.get('toughness', '').isdigit() else 0
         cmc = card_data.get('cmc', 0)
         
-        print(f"🚗 Vehicle stats analysis: P/T {power}/{toughness} (total: {total_stats}), CMC: {cmc}")
+        print(f"🚗 Vehicle analysis: P/T {power}/{toughness}, CMC {cmc}, Power level: {power_level:.2f}")
         
-        # Base crew cost on power level and mana cost
-        if total_stats <= 3 or cmc <= 2:
-            crew_cost = 1  # Small vehicles
-        elif total_stats <= 6 or cmc <= 4:
-            crew_cost = 2  # Medium vehicles  
-        elif total_stats <= 9 or cmc <= 6:
-            crew_cost = 3  # Large vehicles
+        # Base crew cost on comprehensive power level
+        if power_level <= 2.0:
+            crew_cost = 1  # Weak vehicles
+        elif power_level <= 3.5:
+            crew_cost = 2  # Moderate vehicles
+        elif power_level <= 5.0:
+            crew_cost = 3  # Strong vehicles
+        elif power_level <= 7.0:
+            crew_cost = 4  # Very strong vehicles
         else:
-            crew_cost = 4  # Huge vehicles (cap at 4 for balance)
-        
-        # Adjust based on power vs toughness ratio (high power = higher crew cost)
-        if power > 0 and toughness > 0:
-            power_ratio = power / (power + toughness)
-            if power_ratio > 0.6:  # High power vehicle
-                crew_cost = min(crew_cost + 1, 5)
+            crew_cost = 5  # Extremely powerful vehicles
         
         # Ensure minimum crew 1, maximum crew 5
         crew_cost = max(1, min(crew_cost, 5))
         
-        print(f"🚗 Generated crew cost: {crew_cost} (based on stats {total_stats}, CMC {cmc})")
+        print(f"🚗 Generated crew cost: {crew_cost} (based on power level {power_level:.2f})")
         return crew_cost
         
     except Exception as e:
@@ -1982,7 +2270,7 @@ def validate_rules_text(rules_text: str, card_data: dict) -> bool:
             print(f"    Required: Must include explanation like 'where X is the amount of mana spent' or 'enters with X +1/+1 counters'")
             return False
         else:
-            print(f"✅ X mana cost validation passed - found X usage and explanation in rules text")
+            pass  # X validation passed
     
     # Check for duplicate tap symbols (invalid in Magic rules)
     duplicate_tap_patterns = [
@@ -2050,12 +2338,12 @@ def validate_rules_text(rules_text: str, card_data: dict) -> bool:
             print(f"    Recommended: Include effects like 'Enchanted creature gets +1/+1' or similar")
             # Don't fail validation for this, just warn, as some Auras might have other effects
         else:
-            print(f"✅ Aura enchantment validation passed - has proper 'Enchant' and effects")
+            pass  # Aura validation passed
     
     # Check for overuse of "draw cards" effects (encourage variety)
     draw_patterns = [
-        r'DRAW\s+(\d+|X|\w+)\s+(CARD|CARDS)',  # "Draw X cards", "Draw three cards", etc.
-        r'DRAW\s+A\s+CARD',  # "Draw a card"
+        r'\bDRAW\s+(\d+|X|A|ONE|TWO|THREE|FOUR|FIVE)\s+(CARD|CARDS)\b',  # "Draw X cards", "Draw three cards", etc.
+        r'\bDRAW\s+A\s+CARD\b',  # "Draw a card" - word boundaries to avoid "CREW" matches
     ]
     
     rules_text_upper = rules_text.upper()
@@ -2111,7 +2399,7 @@ def validate_rules_text(rules_text: str, card_data: dict) -> bool:
             print(f"   Required: Must include definition like 'This creature's power is equal to the number of...'")
             return False
         else:
-            print(f"✅ Asterisk P/T validation passed - found definition in rules text")
+            pass  # Asterisk validation passed
     
     return True
 
@@ -2344,7 +2632,7 @@ def createCardContent(prompt, card_data=None):
                 subtype = (card_data.get('subtype') or '').lower()
                 
                 if 'equipment' in subtype or 'equipment' in full_type:
-                    type_specific_guidance += " EQUIPMENT: MANDATORY - All Equipment MUST have an 'Equip {cost}' ability (e.g., 'Equip {1}', 'Equip {2}', 'Equip {3}', etc.). Focus on 'Equipped creature gets/has...' effects that enhance creatures with stats, keywords, or abilities. The equip cost is essential and required for all Equipment."
+                    type_specific_guidance += " EQUIPMENT: MANDATORY - All Equipment MUST have an 'Equip {cost}' ability (e.g., 'Equip {1}', 'Equip {2}', 'Equip {3}', etc.). Focus on 'Equipped creature gets/has...' effects that enhance creatures with stats, keywords, or abilities. The equip cost is essential and required for all Equipment. EXAMPLE FORMAT: 'Equipped creature gets +2/+1 and has flying. Equip {3}' or 'Equipped creature gets +1/+1. Whenever equipped creature deals combat damage to a player, draw a card. Equip {2}'. Notice the pattern: [Enhancement effect] + [Optional triggered/static ability] + [Equip cost]. The equip ability always comes LAST."
                 elif 'vehicle' in subtype or 'vehicle' in full_type:
                     type_specific_guidance += " VEHICLE MANDATORY RULES: ALL Vehicles MUST have 'Crew X (Tap any number of creatures you control with total power X or greater: This Vehicle becomes an artifact creature until end of turn.)' ability. CRITICAL FORMAT: Crew is a STANDALONE ability - just 'Crew X', NEVER '{T}, Crew X' or any other cost additions. Examples: 'Crew 2', 'Crew 1', 'Crew 3' (standalone abilities). Common crew costs: Crew 1 (small vehicles), Crew 2 (medium vehicles), Crew 3 (large vehicles), Crew 4+ (huge vehicles). Vehicles start as non-creature artifacts and only become creatures when crewed. They should have strong creature stats (power/toughness) to justify the crew cost. Vehicle abilities should focus on: combat abilities (flying, trample, vigilance), triggered abilities when attacking, or static abilities while crewed. Balance: Higher crew cost = better stats/abilities. NEVER add additional costs to crew abilities - crew activates by tapping other creatures, not the vehicle itself."
                 elif 'food' in subtype or 'food' in full_type:
@@ -2392,6 +2680,35 @@ def createCardContent(prompt, card_data=None):
             
             # Enhanced creature-specific guidance with stats balancing
             creature_guidance = ""
+            
+            # Flying restrictions for ALL creatures (not just legendary)
+            creature_flying_guidance = ""
+            if 'creature' in card_type:
+                subtype = card_data.get('subtype', '')
+                if subtype:
+                    subtype_lower = subtype.lower()
+                    
+                    # Define creature types that should rarely have flying
+                    flying_restricted_types = [
+                        'human', 'dwarf', 'elf', 'orc', 'goblin', 'zombie', 'skeleton', 
+                        'beast', 'bear', 'wolf', 'cat', 'dog', 'plant', 'tree', 'wall',
+                        'construct', 'golem', 'giant', 'minotaur', 'centaur', 'knight',
+                        'warrior', 'soldier', 'rogue', 'assassin', 'wizard', 'shaman',
+                        'cleric', 'berserker', 'barbarian', 'archer', 'scout'
+                    ]
+                    
+                    # Define creature types that naturally fly
+                    flying_encouraged_types = [
+                        'dragon', 'angel', 'demon', 'spirit', 'bird', 'bat', 'insect',
+                        'sphinx', 'drake', 'phoenix', 'elemental', 'faerie', 'imp', 
+                        'gargoyle', 'djinn', 'pegasus', 'griffin', 'hippogriff'
+                    ]
+                    
+                    if any(restricted_type in subtype_lower for restricted_type in flying_restricted_types):
+                        creature_flying_guidance = f" FLYING RESTRICTION: {subtype} creatures should rarely have flying unless there's a compelling magical or mechanical reason. Prioritize grounded keywords like trample, vigilance, first strike, deathtouch, reach, menace, or lifelink instead of flying."
+                    elif any(flying_type in subtype_lower for flying_type in flying_encouraged_types):
+                        creature_flying_guidance = f" FLYING NATURAL: {subtype} creatures are natural fliers and flying is highly appropriate for this creature type."
+            
             if 'creature' in card_type and power and toughness:
                 try:
                     p = int(power) if power.isdigit() else 0
@@ -2479,6 +2796,25 @@ def createCardContent(prompt, card_data=None):
                         legendary_guidance += " As a Human, consider versatile abilities that could represent leadership, innovation, adaptability, or cooperation with other creatures."
                     
                     legendary_guidance += f" The subtype '{subtype}' should strongly influence the flavor and mechanics of the abilities."
+                
+                # Flying restrictions based on creature types
+                flying_restricted_types = [
+                    'human', 'dwarf', 'elf', 'orc', 'goblin', 'zombie', 'skeleton', 
+                    'beast', 'bear', 'wolf', 'cat', 'dog', 'plant', 'tree', 'wall',
+                    'construct', 'golem', 'giant', 'minotaur', 'centaur', 'knight',
+                    'warrior', 'soldier', 'rogue', 'assassin', 'wizard', 'shaman'
+                ]
+                
+                flying_encouraged_types = [
+                    'dragon', 'angel', 'demon', 'spirit', 'bird', 'bat', 'insect',
+                    'sphinx', 'drake', 'phoenix', 'elemental', 'faerie', 'imp', 
+                    'gargoyle', 'djinn'
+                ]
+                
+                if any(restricted_type in subtype_lower for restricted_type in flying_restricted_types):
+                    legendary_guidance += f" FLYING RESTRICTION: {subtype} creatures rarely have flying unless there's a specific magical reason (enchantment, spell effect, etc.). Consider grounded abilities like trample, first strike, vigilance, deathtouch, or reach instead."
+                elif any(flying_type in subtype_lower for flying_type in flying_encouraged_types):
+                    legendary_guidance += f" FLYING ENCOURAGED: {subtype} creatures naturally fly and should strongly consider having flying as an ability."
             
             # Add card name inspiration for creative abilities
             name_inspiration = ""
@@ -2486,7 +2822,7 @@ def createCardContent(prompt, card_data=None):
             if card_name and len(card_name) > 2:
                 name_inspiration += f" CARD NAME INSPIRATION: This card is named '{card_name}' - use this name as creative inspiration for unique abilities. Extract thematic concepts from the name: if it mentions elements (fire, ice, storm), create elemental effects; if it mentions creatures (dragon, angel, demon), incorporate those creature themes; if it mentions objects (sword, tome, crown), design abilities that reflect those items; if it mentions actions (strike, whisper, shatter), create abilities based on those verbs; if it mentions places (tower, grove, sanctum), include location-based effects. Make the abilities feel specifically tied to this card's identity, not generic effects."
             
-            enhanced_prompt += f" The card costs {cmc} mana and should be {power_level}.{color_guidance}{type_specific_guidance}{creature_guidance}{legendary_guidance}{name_inspiration}{x_guidance}"
+            enhanced_prompt += f" The card costs {cmc} mana and should be {power_level}.{color_guidance}{type_specific_guidance}{creature_guidance}{creature_flying_guidance}{legendary_guidance}{name_inspiration}{x_guidance}"
         
         # Add CMC guidance that respects rarity limits (rarity limits take precedence)
         if card_data and 'creature' in card_data.get('type', '').lower():
@@ -2502,7 +2838,7 @@ def createCardContent(prompt, card_data=None):
             else:
                 enhanced_prompt += f" CMC GUIDANCE: High-cost creatures (6+ mana) should feel impactful within your {rarity} rarity limit. Focus on game-changing effects appropriate for the mana investment."
             
-            enhanced_prompt += " REMEMBER: Activated abilities (costs like {T}:, {1}:) are the most complex. Keyword abilities (Haste, Trample, Deathtouch, Menace, Lifelink, Reach, etc.) and triggered abilities (When/Whenever) are simpler. Lower mana cost = fewer and simpler abilities. VARIETY: Avoid overusing 'Flying' and 'Vigilance' together - consider diverse keyword combinations. CREATURE COHESION: All abilities must work together thematically. Good creature themes include: aggressive (Haste + Trample + attack benefits), defensive (Vigilance + blocking rewards), graveyard-focused (death triggers + graveyard recursion), token-maker (creates tokens + sacrifice outlets), tribal (creature type synergies), or utility (mana abilities + activated effects). AVOID mixing unrelated mechanics like 'Flying + Graveyard recursion + Mana production + Life gain' - pick 1-2 related themes. IMPORTANT: Multiple keywords should be comma-separated on one line (like 'Flying, trample'), not on separate lines."
+            enhanced_prompt += " REMEMBER: Activated abilities (costs like {T}:, {1}:) are the most complex. Keyword abilities (Haste, Trample, Deathtouch, Menace, Lifelink, Reach, etc.) and triggered abilities (When/Whenever) are simpler. Lower mana cost = fewer and simpler abilities. KEYWORD SELECTIVITY: Flying should only be given to creatures that logically can fly (dragons, angels, birds, spirits, etc.). Ground-based creatures like humans, elves, goblins, beasts, and warriors should use other keywords like trample, vigilance, first strike, deathtouch, reach, menace, or lifelink. VARIETY: Consider diverse keyword combinations beyond the overused 'Flying + Vigilance' pairing. CREATURE COHESION: All abilities must work together thematically. Good creature themes include: aggressive (Haste + Trample + attack benefits), defensive (Vigilance + blocking rewards), graveyard-focused (death triggers + graveyard recursion), token-maker (creates tokens + sacrifice outlets), tribal (creature type synergies), or utility (mana abilities + activated effects). AVOID mixing unrelated mechanics like 'Flying + Graveyard recursion + Mana production + Life gain' - pick 1-2 related themes. IMPORTANT: Multiple keywords should be comma-separated on one line (like 'Trample, menace'), not on separate lines."
         
         # Type-specific formatting instructions
         if 'planeswalker' in card_type:
@@ -2514,7 +2850,18 @@ def createCardContent(prompt, card_data=None):
         else:
             enhanced_prompt += " FORMATTING: Keywords should be comma-separated on ONE line (like 'Trample, menace'), while other abilities use separate lines. For activated abilities use format '{cost}: {effect}'. For triggered abilities use 'When/Whenever/At' format. Example: 'Trample, menace\\n{T}: Add one mana of any color\\n{2}: Target creature gains first strike until end of turn'."
         
-        enhanced_prompt += " CREATIVITY AND UNIQUENESS REQUIREMENTS: 1) AVOID OVERUSED GENERIC ABILITIES: Never use these repetitive effects: 'Draw 3 cards', 'Draw a card', '{T}: Add one mana of any color', 'Tap: Create 1 mana', 'When this enters the battlefield, draw a card', 'Sacrifice this: Draw a card'. These are boring and overused. 2) FOCUS ON THE CARD'S IDENTITY: Use the card's name, type, and power level as inspiration. If the card is named 'Sword of Fire', create fire-themed combat abilities. If it's called 'Ancient Tome', focus on knowledge/library effects, not generic card draw. If it's a 'Dragon Engine', combine draconic and mechanical themes. 3) PRIORITIZE UNIQUE MECHANICS: Instead of generic effects, create interesting abilities like: temporary creature theft, conditional countering, combat phase manipulation, alternate win conditions, unique token creation, innovative triggered conditions, creative activated abilities that aren't just mana generation, spell copying with twists, unique protection effects, interesting sacrifice effects, creative pump effects, unique evasion beyond flying. 4) MAKE IT MEMORABLE: Every ability should feel distinctive and tied to the card's concept. VARIETY REQUIREMENT: Avoid overused effects like 'draw cards' and 'add mana' - instead prioritize diverse, creative effects that match the card's colors and type. Explore unique mechanics, interesting interactions, and varied effect types. COHESION REQUIREMENT: All abilities on a single card must work together thematically and mechanically. Do NOT combine random unrelated abilities. Instead, create cards with unified themes such as: sacrifice synergies (sacrifice creatures → get benefits), +1/+1 counter themes (place counters → counter-based benefits), graveyard strategies (mill → graveyard value), tribal synergies (creature types matter), or mana ramp strategies (produce mana → expensive effects). Each ability should support or enhance the others. Example of GOOD cohesion: 'When this enters, create two 1/1 tokens' + '{T}, Sacrifice a creature: Draw a card' (token generation supports sacrifice). Example of BAD cohesion: 'Flying' + '{T}: Add mana' + 'Whenever a creature dies, gain 2 life' + 'Discard a card: Deal 1 damage' (random unrelated abilities). CRITICAL OUTPUT FORMAT: Generate ONLY a single block of rules text - nothing else. Do NOT include: card names, mana costs (like {3}{U}{U}), type lines (like 'Instant' or 'Creature - Human'), power/toughness numbers, flavor text, card titles, set symbols, or any other card elements. Your response should contain ONLY the text that would appear inside the rules text box of the card. IMPORTANT: Use {T} for tap symbol, never write 'Tap:'. Use standard Magic card formatting without surrounding quotes. NEVER include ability type labels like 'Triggered Ability:', 'Passive Ability:', 'Active Ability:', 'Keywords:', etc. Just write the abilities directly. Example of CORRECT output: 'Counter target spell' or 'Flying\\nWhenever this creature attacks, gain 2 life' or 'Flying\\n{T}: Add one mana of any color'. Example of INCORRECT output: 'Lightning Bolt {2}{R}\\nInstant\\nDeal 3 damage to any target' or 'Keywords: Flying\\nTriggered Ability: When this enters, draw a card'. Generate ONLY the raw abilities or effects as they would appear on an actual Magic card - no labels, no categories, no other formatting."
+        enhanced_prompt += (" CREATIVITY AND UNIQUENESS REQUIREMENTS: 1) AVOID OVERUSED GENERIC ABILITIES: Never use these repetitive effects: 'Draw 3 cards', 'Draw a card', '{T}: Add one mana of any color', 'Tap: Create 1 mana', 'When this enters the battlefield, draw a card', 'Sacrifice this: Draw a card'. These are boring and overused. "
+                           "2) FOCUS ON THE CARD'S IDENTITY: Use the card's name, type, and power level as inspiration. If the card is named 'Sword of Fire', create fire-themed combat abilities. If it's called 'Ancient Tome', focus on knowledge/library effects, not generic card draw. If it's a 'Dragon Engine', combine draconic and mechanical themes. "
+                           "3) PRIORITIZE UNIQUE MECHANICS: Instead of generic effects, create interesting abilities like: temporary creature theft, conditional countering, combat phase manipulation, alternate win conditions, unique token creation, innovative triggered conditions, creative activated abilities that aren't just mana generation, spell copying with twists, unique protection effects, interesting sacrifice effects, creative pump effects, unique evasion beyond flying. "
+                           "4) MAKE IT MEMORABLE: Every ability should feel distinctive and tied to the card's concept. VARIETY REQUIREMENT: Avoid overused effects like 'draw cards' and 'add mana' - instead prioritize diverse, creative effects that match the card's colors and type. Explore unique mechanics, interesting interactions, and varied effect types. "
+                           "COHESION REQUIREMENT: All abilities on a single card must work together thematically and mechanically. Do NOT combine random unrelated abilities. Instead, create cards with unified themes such as: sacrifice synergies (sacrifice creatures → get benefits), +1/+1 counter themes (place counters → counter-based benefits), graveyard strategies (mill → graveyard value), tribal synergies (creature types matter), or mana ramp strategies (produce mana → expensive effects). Each ability should support or enhance the others. "
+                           "Example of GOOD cohesion: 'When this enters, create two 1/1 tokens' + '{T}, Sacrifice a creature: Draw a card' (token generation supports sacrifice). Example of BAD cohesion: 'Flying' + '{T}: Add mana' + 'Whenever a creature dies, gain 2 life' + 'Discard a card: Deal 1 damage' (random unrelated abilities). "
+                           "CRITICAL OUTPUT FORMAT: Generate ONLY a single block of rules text - nothing else. Do NOT include: card names, mana costs (like {3}{U}{U}), type lines (like 'Instant' or 'Creature - Human'), power/toughness numbers, flavor text, card titles, set symbols, or any other card elements. Your response should contain ONLY the text that would appear inside the rules text box of the card. "
+                           "MANDATORY QUOTE WRAPPING: Each distinct ability must be wrapped in double quotes to prevent parsing errors. This is CRITICAL for proper card rendering. Each complete ability (from start to end, including all sentences that belong together) should be enclosed in quotes. "
+                           "IMPORTANT: Use {T} for tap symbol, never write 'Tap:'. Use standard Magic card formatting. NEVER include ability type labels like 'Triggered Ability:', 'Passive Ability:', 'Active Ability:', 'Keywords:', etc. Just write the abilities directly. "
+                           "Example of CORRECT output: '\"Flying, trample\"' or '\"Flying, trample\" \"Whenever this creature attacks, gain 2 life\"' or '\"Flying, trample\" \"{T}: Add one mana of any color\" \"When this enters the battlefield, create a 1/1 token\"'. "
+                           "Example of INCORRECT output without quotes: 'Flying, trample\\nWhenever this creature attacks, gain 2 life' or output with labels: 'Keywords: Flying\\nTriggered Ability: When this enters, draw a card'. "
+                           "Each ability must be in its own quoted section - this prevents multi-sentence abilities from being split incorrectly during parsing. Generate ONLY the quoted abilities as they would appear on an actual Magic card.")
         
         # Generate and validate rules text (retry if contaminated)
         max_attempts = 3
@@ -2528,11 +2875,10 @@ def createCardContent(prompt, card_data=None):
             
             # Clean up the response
             card_text = response['response'].strip()
-            print(f"📜 Original model output: {repr(card_text)}")
+            print(f"📜 Content model raw output: {repr(card_text)}")
             
             # Validate the response doesn't contain type line elements
             if validate_rules_text(card_text, card_data):
-                print(f"✅ Rules text validation passed on attempt {attempt + 1}")
                 break
             else:
                 print(f"❌ Rules text validation failed on attempt {attempt + 1}, regenerating...")
@@ -2592,7 +2938,9 @@ def createCardContent(prompt, card_data=None):
         
         # Limit to 3-4 sentences by splitting on periods and taking first 4
         sentences = [s.strip() for s in card_text.split('.') if s.strip()]
+        print(f"🔍 Found {len(sentences)} sentences: {sentences}")
         if len(sentences) > 4:
+            print(f"⚠️  Truncating from {len(sentences)} to 4 sentences")
             card_text = '. '.join(sentences[:4]) + '.'
         
         # UNIFIED SANITATION PIPELINE - Applied to ALL card types
@@ -2616,7 +2964,9 @@ def createCardContent(prompt, card_data=None):
                 card_text = sanitize_permanent_abilities(card_text)
             
             # Step 2: Universal ability reordering (ALL card types benefit from proper ordering)
+            print(f"🔍 Before reordering: {repr(card_text)}")
             card_text = reorder_abilities_properly(card_text, card_data)
+            print(f"🔍 After reordering: {repr(card_text)}")
             
             # Step 3: Universal complexity limits (prevent overpowered cards)
             card_text = apply_universal_complexity_limits(card_text, card_data)
@@ -2673,8 +3023,7 @@ def create_card():
         # Extract card data for enhanced prompting
         original_card_data = data.get('cardData', {})
         
-        print(f"🔄 Synchronous card generation request (queued)")
-        print(f"Prompt: {prompt}")
+        print(f"🔄 Card generation request: {prompt}")
         
         # Generate unique request ID
         request_id = str(uuid.uuid4())
@@ -2691,7 +3040,7 @@ def create_card():
         
         # Wait for completion (synchronous behavior for frontend compatibility)
         print(f"⏳ Waiting for request {request_id} to complete...")
-        max_wait_time = 300  # 5 minutes max wait
+        max_wait_time = MAX_REQUEST_AGE  # Use global timeout configuration
         start_wait = time.time()
         
         while True:
@@ -2710,7 +3059,7 @@ def create_card():
             
             elif time.time() - start_wait > max_wait_time:
                 print(f"⏰ Request timed out after {max_wait_time} seconds")
-                response = jsonify({'error': 'Request timed out - took longer than 5 minutes'})
+                response = jsonify({'error': 'Request timed out - took longer than 10 minutes'})
                 return add_ngrok_headers(response), 504
             
             else:
@@ -2757,8 +3106,7 @@ def create_card_async():
         # Extract card data for enhanced prompting
         original_card_data = data.get('cardData', {})
         
-        print(f"📨 Async card generation request received")
-        print(f"Prompt: {prompt}")
+        print(f"📨 Async card generation request: {prompt}")
         
         # Generate unique request ID
         request_id = str(uuid.uuid4())
@@ -2840,8 +3188,7 @@ def create_card_sync():
         # Extract card data for enhanced prompting
         original_card_data = data.get('cardData', {})
         
-        print(f"🔄 Synchronous card generation request")
-        print(f"Prompt: {prompt}")
+        print(f"🔄 Sync card generation request: {prompt}")
         
         # Generate unique request ID
         request_id = str(uuid.uuid4())
@@ -2858,7 +3205,7 @@ def create_card_sync():
         
         # Poll for completion (synchronous behavior)
         print(f"⏳ Waiting for request {request_id} to complete...")
-        max_wait_time = 300  # 5 minutes max wait
+        max_wait_time = MAX_REQUEST_AGE  # Use global timeout configuration
         start_wait = time.time()
         
         while True:
@@ -2876,7 +3223,7 @@ def create_card_sync():
             
             elif time.time() - start_wait > max_wait_time:
                 print(f"⏰ Request timed out after {max_wait_time} seconds")
-                response = jsonify({'error': 'Request timed out - took longer than 5 minutes'})
+                response = jsonify({'error': 'Request timed out - took longer than 10 minutes'})
                 return add_ngrok_headers(response), 504
             
             else:
@@ -2915,12 +3262,14 @@ def get_queue_status():
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint - always returns 200 to indicate server is running"""
+    global first_job_completed
     response = jsonify({
         'status': 'healthy',
         'models': {
             'image_model': 'ready',
             'content_model': 'ready'
         },
+        'first_job_completed': first_job_completed,
         'message': 'Server is running'
     })
     return add_ngrok_headers(response), 200
