@@ -1,3 +1,26 @@
+<!-- Health Check Banner - Only show when checking or there's an error, with delay -->
+<div *ngIf="showHealthBanner && (isCheckingHealth || (healthError && !modelsReady))" class="health-banner">
+  <div class="banner-content">
+    <!-- Loading state -->
+    <div *ngIf="isCheckingHealth" class="banner-loading">
+      <mat-spinner diameter="20"></mat-spinner>
+      <div class="banner-text">
+        <span class="banner-title">Initializing MTGenesis.AI</span>
+        <span class="banner-subtitle">Loading AI models... This may take a few minutes.</span>
+      </div>
+    </div>
+    
+    <!-- Error state -->
+    <div *ngIf="healthError && !isCheckingHealth && !modelsReady" class="banner-error">
+      <span class="material-icons">warning</span>
+      <div class="banner-text">
+        <span class="banner-title">Models Not Available</span>
+        <span class="banner-subtitle">{{ healthError }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="app-header">
   <div class="header-content">
     <img src="assets/site_logo.png" alt="MTGenesis.AI Logo" class="site-logo">
@@ -9,6 +32,7 @@
 </div>
 
 <main class="app-container">
+
   <!-- Status messages -->
   <div class="status-container">
     <!-- Success message -->
@@ -43,16 +67,29 @@
       <p *ngIf="isGeneratingArt && !isGenerating">Generating card art...</p>
     </div>
     
-    <app-card-preview [card]="currentCard"></app-card-preview>
+    <!-- Blueprint-style preview: only show when complete card is not available -->
+    <app-card-preview [card]="currentCard" *ngIf="!currentCard.cardImageUrl"></app-card-preview>
     
-    <!-- Download button -->
+    <!-- Complete card image displayed automatically underneath preview -->
+    <div class="complete-card-display" *ngIf="currentCard.cardImageUrl">
+      <img [src]="currentCard.cardImageUrl" alt="Complete Magic Card" class="complete-card-image">
+    </div>
+    
+    <!-- Download buttons -->
     <div class="download-section">
       <button 
         (click)="downloadCardImage()" 
         [disabled]="!currentCard.imageUrl"
         class="download-button">
         <span class="material-icons">download</span>
-        Download Image
+        Download Artwork
+      </button>
+      <button 
+        *ngIf="currentCard.cardImageUrl"
+        (click)="downloadCompleteCard()" 
+        class="download-button complete-card-download">
+        <span class="material-icons">download</span>
+        Download Complete Card
       </button>
     </div>
     
@@ -60,6 +97,7 @@
   
   <div class="card-form-section">
     <app-card-form 
+      [modelsReady]="modelsReady"
       (cardChange)="updateCard($event)" 
       (generateCard)="generateCard($event)"></app-card-form>
   </div>

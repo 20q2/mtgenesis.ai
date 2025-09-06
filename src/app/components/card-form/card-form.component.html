@@ -156,8 +156,26 @@
 
     <!-- Submit Button -->
     <div class="form-actions">
-      <button type="submit" mat-raised-button color="primary">
-        Generate Card
+      <button type="button" mat-stroked-button (click)="clearForm()" class="clear-form-btn" [disabled]="isGenerating">
+        Clear Form
+      </button>
+      <button type="submit" mat-raised-button color="primary" [disabled]="isGenerating || !modelsReady">
+        <span *ngIf="!isGenerating && modelsReady">Generate Card</span>
+        <span *ngIf="!isGenerating && !modelsReady">Models Loading...</span>
+        <span *ngIf="isGenerating">
+          <mat-spinner diameter="20" style="display: inline-block; margin-right: 8px;"></mat-spinner>
+          Generating...
+        </span>
+      </button>
+      <button 
+        type="button" 
+        mat-stroked-button 
+        color="accent" 
+        (click)="onRegenerateText()" 
+        class="regenerate-text-btn"
+        [disabled]="isGenerating"
+        *ngIf="shouldShowRegenerateButton()">
+        Regenerate Text
       </button>
     </div>
   </form>

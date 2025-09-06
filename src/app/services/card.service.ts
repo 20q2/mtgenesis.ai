@@ -36,7 +36,7 @@ export class CardService {
   private readonly retryDelay = environment.retryDelay;
 
   /**
-   * Default HTTP headers
+   * Default HTTP headers for Lambda proxy
    */
   private readonly defaultHeaders = new HttpHeaders({
     'Content-Type': 'application/json'
@@ -77,6 +77,7 @@ export class CardService {
       height: environment.defaultCardHeight,
       cardData: {
         name: card.name,
+        manaCost: card.manaCost,  // Added missing mana cost field
         supertype: card.supertype,
         colors: card.colors,
         type: card.type,
@@ -118,6 +119,11 @@ export class CardService {
             updatedCard.imageUrl = `data:image/png;base64,${response.imageData}`;
           }
           
+          // Process complete card image if available
+          if (response.card_image) {
+            updatedCard.cardImageUrl = `data:image/png;base64,${response.card_image}`;
+          }
+          
           return updatedCard;
         }),
         tap(card => console.log('Unified card generation successful:', card)),
@@ -139,6 +145,7 @@ export class CardService {
       height: environment.defaultCardHeight,
       cardData: {
         name: card.name,
+        manaCost: card.manaCost,  // Added missing mana cost field
         supertype: card.supertype,
         colors: card.colors,
         type: card.type,
@@ -193,6 +200,7 @@ export class CardService {
       height: environment.defaultCardHeight,
       cardData: {
         name: card.name,
+        manaCost: card.manaCost,  // Added missing mana cost field
         supertype: card.supertype,
         colors: card.colors,
         type: card.type,
@@ -244,7 +252,7 @@ export class CardService {
   }
 
   /**
-   * Error handler for HTTP requests
+   * Enhanced error handler for Lambda proxy requests
    * @param operation Name of the operation that failed
    * @returns Error handler function
    */
@@ -257,12 +265,42 @@ export class CardService {
       
       if (error.error instanceof ErrorEvent) {
         // Client-side error
-        errorMessage = `Client error: ${error.error.message}`;
+        errorMessage = `Network error: ${error.error.message}`;
       } else {
-        // Server-side error
+        // Server-side error - handle Lambda proxy specific responses
         try {
-          const apiError = error.error as ApiErrorResponse;
-          errorMessage = apiError.message || `Server error: ${error.status} ${error.statusText}`;
+          const apiError = error.error as any;
+          
+          // Check for Lambda proxy error responses
+          if (apiError.error && apiError.details) {
+            if (error.status === 504) {
+              errorMessage = 'Request timeout - the card generation is taking longer than expected. Please try again.';
+            } else if (error.status === 502) {
+              errorMessage = `Proxy error: ${apiError.details}`;
+            } else {
+              errorMessage = apiError.error;
+            }
+          } else if (apiError.message) {
+            errorMessage = apiError.message;
+          } else {
+            // Standard HTTP error
+            switch (error.status) {
+              case 0:
+                errorMessage = 'Unable to connect to server. Please check your internet connection.';
+                break;
+              case 504:
+                errorMessage = 'Request timeout. The server is taking too long to respond.';
+                break;
+              case 502:
+                errorMessage = 'Bad Gateway. The proxy server received an invalid response.';
+                break;
+              case 500:
+                errorMessage = 'Internal server error. Please try again later.';
+                break;
+              default:
+                errorMessage = `Server error: ${error.status} ${error.statusText}`;
+            }
+          }
         } catch (e) {
           errorMessage = `Server error: ${error.status} ${error.statusText}`;
         }

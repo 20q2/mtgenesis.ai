@@ -1,4 +1,4 @@
-import { Component, EventEmitter, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { 
   Card, 
@@ -29,9 +29,13 @@ export class CardFormComponent implements OnInit {
   
   showPowerToughness = false;
   filteredSubtypes: string[] = [];
+  isGenerating = false;
+  hasGeneratedCard = false;
   
+  @Input() modelsReady: boolean = false;
   @Output() cardChange = new EventEmitter<Card>();
   @Output() generateCard = new EventEmitter<Card>();
+  @Output() regenerateText = new EventEmitter<Card>();
 
   constructor(private fb: FormBuilder, private manaService: ManaService) {}
 
@@ -43,6 +47,10 @@ export class CardFormComponent implements OnInit {
     
     // Subscribe to form changes to emit updates
     this.cardForm.valueChanges.subscribe(() => {
+      // Reset generated card flag when form becomes dirty
+      if (this.cardForm.dirty && this.hasGeneratedCard) {
+        this.hasGeneratedCard = false;
+      }
       this.onFormValueChanges();
     });
 
@@ -50,14 +58,31 @@ export class CardFormComponent implements OnInit {
     this.cardForm.get('type')?.valueChanges.subscribe(type => {
       this.updateTypeRelatedFields(type);
     });
+
+    // Subscribe to subtype changes as well (for vehicles)
+    this.cardForm.get('subtype')?.valueChanges.subscribe(subtype => {
+      this.updatePowerToughnessVisibility();
+    });
   }
 
   updateTypeRelatedFields(type: string): void {
-    // Show power/toughness for creatures
-    this.showPowerToughness = type?.toLowerCase().includes('creature') || false;
-    
     // Update available subtypes based on main type
     this.updateFilteredSubtypes(type);
+    
+    // Update power/toughness visibility (considering both type and subtype)
+    this.updatePowerToughnessVisibility();
+  }
+
+  updatePowerToughnessVisibility(): void {
+    const type = this.cardForm.get('type')?.value?.toLowerCase() || '';
+    const subtype = this.cardForm.get('subtype')?.value?.toLowerCase() || '';
+    
+    // Show power/toughness for:
+    // 1. Creatures (main type includes 'creature')
+    // 2. Vehicles (subtype includes 'vehicle') - since they become creatures when crewed
+    this.showPowerToughness = type.includes('creature') || subtype.includes('vehicle');
+    
+    console.log(`Power/Toughness visibility updated: type="${type}", subtype="${subtype}", show=${this.showPowerToughness}`);
     
     // Update validators as needed
     if (this.showPowerToughness) {
@@ -127,7 +152,34 @@ export class CardFormComponent implements OnInit {
   }
 
   onSubmit(): void {
+    if (this.isGenerating) {
+      return; // Prevent double submission
+    }
+    
+    this.isGenerating = true;
     this.generateCard.emit(this.cardForm.value as Card);
+  }
+
+  // Method to reset loading state - should be called by parent component
+  setGenerating(generating: boolean): void {
+    this.isGenerating = generating;
+    if (!generating) {
+      // Card generation completed
+      this.hasGeneratedCard = true;
+    }
+  }
+
+  onRegenerateText(): void {
+    if (this.isGenerating) {
+      return; // Prevent action while generating
+    }
+    
+    this.regenerateText.emit(this.cardForm.value as Card);
+  }
+
+  // Helper to check if regenerate button should be shown
+  shouldShowRegenerateButton(): boolean {
+    return this.hasGeneratedCard && this.cardForm.pristine && !this.isGenerating;
   }
 
   isFieldInvalid(field: string): boolean {
@@ -298,6 +350,25 @@ export class CardFormComponent implements OnInit {
       prompt += 'notable and interesting features, ';
     }
     
+    // Add CMC-based scale hints for creatures
+    if (type && type.toLowerCase().includes('creature')) {
+      const cmc = this.cardForm.get('cmc')?.value || 0;
+      
+      if (cmc <= 1) {
+        prompt += 'small scale, ';
+      } else if (cmc <= 2) {
+        prompt += 'modest size, ';
+      } else if (cmc <= 4) {
+        prompt += 'medium scale, ';
+      } else if (cmc <= 6) {
+        prompt += 'large and imposing, ';
+      } else if (cmc <= 8) {
+        prompt += 'massive scale, ';
+      } else {
+        prompt += 'colossal and overwhelming, ';
+      }
+    }
+    
     // Add power level indication for creatures
     if (type && type.toLowerCase().includes('creature') && power && toughness) {
       const p = parseInt(power) || 0;
@@ -398,5 +469,39 @@ export class CardFormComponent implements OnInit {
   // Get formatted symbol data for buttons
   getFormattedSymbolForButton(manaSymbol: any) {
     return this.manaService.formatSymbolForButton(manaSymbol);
+  }
+
+  // Clear entire form and reset to empty card
+  clearForm(): void {
+    const emptyCard = createEmptyCard();
+    this.cardForm.patchValue({
+      name: emptyCard.name,
+      manaCost: emptyCard.manaCost,
+      supertype: emptyCard.supertype,
+      type: emptyCard.type,
+      subtype: emptyCard.subtype,
+      colors: emptyCard.colors,
+      cmc: emptyCard.cmc,
+      rarity: emptyCard.rarity,
+      description: emptyCard.description,
+      power: emptyCard.power,
+      toughness: emptyCard.toughness,
+      powerToughness: '',
+      flavorText: emptyCard.flavorText,
+      setCode: emptyCard.setCode,
+      cardNumber: emptyCard.cardNumber
+    });
+    
+    // Mark the form as dirty to trigger updates
+    this.cardForm.markAsDirty();
+    
+    // Reset UI state
+    this.showPowerToughness = false;
+    this.filteredSubtypes = [];
+    
+    // Emit the changes
+    this.onFormValueChanges();
+    
+    console.log('Form cleared to empty state');
   }
 }

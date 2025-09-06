@@ -3,7 +3,7 @@ export interface ApiConfig {
 }
 
 export const apiConfig: ApiConfig = {
-  // Single API endpoint for card generation
-  cardGenerationUrl: 'http://127.0.0.1:5000/api/v1/create_card'
+  // Lambda proxy URL for card generation (proxies to ngrok)
+  cardGenerationUrl: 'https://0eccb5a667ac.ngrok-free.app'
 };
 

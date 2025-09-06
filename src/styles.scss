@@ -1,30 +1,30 @@
 /* You can add global styles to this file, and also import other style files */
 @use '@angular/material' as mat;
 
-// Beleren font declarations
-@font-face {
-  font-family: 'Beleren';
-  src: url('./assets/Beleren2016-Bold.ttf') format('truetype');
-  font-weight: bold;
-  font-style: normal;
-  font-display: swap;
-}
+// Beleren font declarations - commented out until fonts are added
+// @font-face {
+//   font-family: 'Beleren';
+//   src: url('./assets/Beleren2016-Bold.ttf') format('truetype');
+//   font-weight: bold;
+//   font-style: normal;
+//   font-display: swap;
+// }
 
-@font-face {
-  font-family: 'BelerenSmallCaps';
-  src: url('./assets/Beleren2016SmallCaps-Bold.ttf') format('truetype');
-  font-weight: bold;
-  font-style: normal;
-  font-display: swap;
-}
+// @font-face {
+//   font-family: 'BelerenSmallCaps';
+//   src: url('./assets/Beleren2016SmallCaps-Bold.ttf') format('truetype');
+//   font-weight: bold;
+//   font-style: normal;
+//   font-display: swap;
+// }
 
-@font-face {
-  font-family: 'BelerenSmallCaps';
-  src: url('./assets/Beleren2016SmallCaps-BoldItalic.ttf') format('truetype');
-  font-weight: bold;
-  font-style: italic;
-  font-display: swap;
-}
+// @font-face {
+//   font-family: 'BelerenSmallCaps';
+//   src: url('./assets/Beleren2016SmallCaps-BoldItalic.ttf') format('truetype');
+//   font-weight: bold;
+//   font-style: italic;
+//   font-display: swap;
+// }
 
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Bellefair&display=swap');

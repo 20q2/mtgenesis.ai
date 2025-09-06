@@ -803,3 +803,66 @@ input, textarea, button {
     }
   }
 }
+
+// Form actions styling
+.form-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+  
+  .clear-form-btn {
+    min-width: 120px;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  
+  button[type="submit"] {
+    min-width: 140px;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .regenerate-text-btn {
+    min-width: 130px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background-color: #f8f9fa;
+    color: #6c757d;
+    border-color: #6c757d;
+    
+    &:hover:not(:disabled) {
+      background-color: #e9ecef;
+      border-color: #495057;
+      color: #495057;
+    }
+    
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  }
+  
+  // Responsive: stack buttons on mobile
+  @media (max-width: 480px) {
+    flex-direction: column;
+    
+    .clear-form-btn,
+    button[type="submit"],
+    .regenerate-text-btn {
+      width: 100%;
+      margin: 0;
+    }
+  }
+}

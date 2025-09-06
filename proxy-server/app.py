@@ -3,6 +3,20 @@ import os
 os.environ['XFORMERS_DISABLED'] = '1'
 os.environ['DISABLE_XFORMERS'] = '1'
 
+# ===== PERFORMANCE TOGGLE =====
+# Set to False to force CPU-only mode (slower but won't destroy your GPU)
+# Set to True to use CUDA if available (faster but may lag your system)
+USE_CUDA = True  # <-- Change this to True when you want GPU mode
+
+# ===== MODEL SELECTION =====
+# Choose model based on your hardware capabilities:
+# "heavy" - stabilityai/sdxl-turbo (best quality, needs good GPU/lots of RAM)
+# "medium" - runwayml/stable-diffusion-v1-5 (balanced quality/performance)
+# "light" - CompVis/stable-diffusion-v1-4 (lighter, works better on CPU)
+# "placeholder" - disable image generation entirely (for testing/debugging)
+MODEL_SIZE = "heavy"  # <-- CUDA enabled! Using SDXL-Turbo for best quality
+# ==============================
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import sys
@@ -41,6 +55,11 @@ class RequestQueue:
         self.lock = threading.Lock()
         self.worker_thread = threading.Thread(target=self._process_queue, daemon=True)
         self.worker_thread.start()
+        
+        # Start cleanup thread for periodic maintenance
+        self.cleanup_thread = threading.Thread(target=self._periodic_cleanup, daemon=True)
+        self.cleanup_thread.start()
+        
         print(f"🚀 Request queue initialized with max {max_concurrent} concurrent requests")
     
     def add_request(self, request_id, process_func, *args, **kwargs):
@@ -83,13 +102,34 @@ class RequestQueue:
                         # Clean up from active requests after timeout
                         if req['started']:
                             self.current_concurrent = max(0, self.current_concurrent - 1)
+                        # CRITICAL: Remove from active_requests to prevent memory leak
+                        print(f"🧹 Cleaning up timed-out request {request_id} from active_requests")
+                        # Return timeout result and clean up immediately
+                        del self.active_requests[request_id]
+                        return {
+                            'status': 'completed',
+                            'result': None,
+                            'error': 'Request timed out after 10 minutes'
+                        }
                 
                 if req['completed']:
-                    return {
+                    # Return result and schedule cleanup
+                    result = {
                         'status': 'completed',
                         'result': req['result'],
                         'error': req['error']
                     }
+                    # Clean up completed requests after a short delay to allow client retrieval
+                    import threading
+                    def delayed_cleanup():
+                        import time
+                        time.sleep(30)  # Wait 30 seconds for client to retrieve result
+                        with self.lock:
+                            if request_id in self.active_requests:
+                                del self.active_requests[request_id]
+                                print(f"🧹 Cleaned up completed request {request_id} from active_requests")
+                    threading.Thread(target=delayed_cleanup, daemon=True).start()
+                    return result
                 elif req['started']:
                     return {
                         'status': 'processing',
@@ -142,6 +182,37 @@ class RequestQueue:
                 continue  # No requests to process
             except Exception as e:
                 print(f"Queue worker error: {e}")
+    
+    def _periodic_cleanup(self):
+        """Periodically clean up old requests to prevent memory leaks"""
+        import time
+        while True:
+            try:
+                time.sleep(60)  # Check every minute
+                current_time = time.time()
+                cleanup_count = 0
+                
+                with self.lock:
+                    # Find requests older than 15 minutes to clean up
+                    to_remove = []
+                    for request_id, req in self.active_requests.items():
+                        age = current_time - req['created_at']
+                        if age > 900:  # 15 minutes
+                            to_remove.append(request_id)
+                            if req.get('started') and not req.get('completed'):
+                                # Free up concurrent slot if needed
+                                self.current_concurrent = max(0, self.current_concurrent - 1)
+                    
+                    # Remove old requests
+                    for request_id in to_remove:
+                        del self.active_requests[request_id]
+                        cleanup_count += 1
+                
+                if cleanup_count > 0:
+                    print(f"🧹 Periodic cleanup removed {cleanup_count} old requests from queue")
+                    
+            except Exception as e:
+                print(f"Periodic cleanup error: {e}")
 
 # Initialize global request queue
 request_queue = RequestQueue(max_concurrent=2)  # Allow max 2 concurrent card generations
@@ -199,6 +270,9 @@ def process_card_generation(prompt, width, height, original_card_data):
                 content_generation_time = content_end_time - content_start_time
                 print(f"✅ Content generation completed in {content_generation_time:.2f} seconds")
                 print(f"📝 Generated content preview: {repr(generated_card_text[:100]) if generated_card_text else 'None'}...")
+                print(f"🔍 Content generation full result: {repr(generated_card_text)}")
+                print(f"🔍 Content type: {type(generated_card_text)}")
+                print(f"🔍 Content length: {len(generated_card_text) if generated_card_text else 0}")
             except concurrent.futures.TimeoutError:
                 content_end_time = time.time()
                 content_generation_time = content_end_time - content_start_time
@@ -220,7 +294,10 @@ def process_card_generation(prompt, width, height, original_card_data):
             
             # Step 1: Text processing and parsing
             text_processing_start = time.time()
+            print("  📝 Step 1: Processing text data...")
             updated_card_data = original_card_data.copy()
+            print(f"🔍 Original card data keys: {list(original_card_data.keys())}")
+            print(f"🔍 Original description: {repr(original_card_data.get('description', 'NO DESCRIPTION'))}")
             if generated_card_text:
                 print(f"🔧 Processing generated text: {repr(generated_card_text[:100])}...")
                 try:
@@ -272,6 +349,10 @@ def process_card_generation(prompt, width, height, original_card_data):
             
             text_processing_time = time.time() - text_processing_start
             print(f"   📝 Text processing: {text_processing_time:.2f}s")
+            print(f"🔍 Final updated_card_data keys: {list(updated_card_data.keys())}")
+            print(f"🔍 Final description: {repr(updated_card_data.get('description', 'NO DESCRIPTION'))}")
+            print(f"🔍 Final name: {repr(updated_card_data.get('name', 'NO NAME'))}")
+            print(f"🔍 Final flavorText: {repr(updated_card_data.get('flavorText', 'NO FLAVOR'))}")
             
             # Step 2: Stats generation if needed
             stats_generation_start = time.time()
@@ -286,9 +367,32 @@ def process_card_generation(prompt, width, height, original_card_data):
                     print(f"✅ Generated creature stats: {generated_stats['power']}/{generated_stats['toughness']}")
                     stats_generated = True
             
+            # Step 2.5: Vehicle crew cost generation
+            vehicle_crew_generated = False
+            type_line = updated_card_data.get('typeLine', '').lower()
+            if 'vehicle' in type_line and 'artifact' in type_line:
+                existing_description = updated_card_data.get('description', '')
+                if not existing_description or 'crew' not in existing_description.lower():
+                    print("🚗 Vehicle missing crew cost - generating crew ability...")
+                    crew_cost = generate_vehicle_crew_cost(updated_card_data)
+                    if crew_cost:
+                        # Add crew cost to bottom of description (with other active abilities)
+                        crew_text = f"Crew {crew_cost}"
+                        if existing_description:
+                            updated_card_data['description'] = f"{existing_description}\n{crew_text}"
+                        else:
+                            updated_card_data['description'] = crew_text
+                        print(f"✅ Generated vehicle crew cost: Crew {crew_cost}")
+                        vehicle_crew_generated = True
+            
             stats_generation_time = time.time() - stats_generation_start
-            if stats_generated:
-                print(f"   📊 Stats generation: {stats_generation_time:.2f}s")
+            if stats_generated or vehicle_crew_generated:
+                generated_items = []
+                if stats_generated:
+                    generated_items.append("creature P/T")
+                if vehicle_crew_generated:
+                    generated_items.append("vehicle crew cost")
+                print(f"   📊 Stats generation: {stats_generation_time:.2f}s ({', '.join(generated_items)})")
             
             # Step 3: Card image rendering
             rendering_start = time.time()
@@ -488,33 +592,77 @@ def get_image_pipeline():
         start_time = time.time()
         print("Loading SDXL-Turbo model... (this may take several minutes on first run)")
         
-        # Auto-detect best available device (GPU preferred)
-        if torch.cuda.is_available():
+        # Device selection based on USE_CUDA toggle
+        if USE_CUDA and torch.cuda.is_available():
             device = "cuda"
             torch_dtype = torch.float16  # Use half precision for faster GPU inference
-            print("🚀 CUDA GPU detected! Using GPU acceleration")
-            print(f"GPU: {torch.cuda.get_device_name(0)}")
-            print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+            print("🚀 CUDA GPU mode enabled! Using GPU acceleration")
+            if cuda_available:
+                print(f"🎯 GPU: {torch.cuda.get_device_name(0)}")
+                print(f"🎯 GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
         else:
             device = "cpu"
             torch_dtype = torch.float32
-            print("⚠️  CUDA not available, falling back to CPU (very slow)")
+            if not USE_CUDA:
+                print("🖥️  CPU mode selected (USE_CUDA = False) - slower but won't stress GPU")
+            else:
+                print("⚠️  CUDA not available, falling back to CPU mode")
         
         print("🔄 Loading pipeline components...")
         print(f"🎯 Using device: {device}")
         print(f"🎯 Using dtype: {torch_dtype}")
+        
+        # Select model based on MODEL_SIZE setting
+        model_configs = {
+            "heavy": {
+                "model_id": "stabilityai/sdxl-turbo",
+                "steps": 1,
+                "guidance_scale": 0.0,
+                "description": "SDXL-Turbo (best quality, heavy)"
+            },
+            "medium": {
+                "model_id": "runwayml/stable-diffusion-v1-5", 
+                "steps": 20,
+                "guidance_scale": 7.5,
+                "description": "SD 1.5 (balanced)"
+            },
+            "light": {
+                "model_id": "CompVis/stable-diffusion-v1-4",
+                "steps": 50,
+                "guidance_scale": 7.5, 
+                "description": "SD 1.4 (light, CPU-friendly)"
+            }
+        }
+        
+        # Access global MODEL_SIZE
+        global MODEL_SIZE
+        
+        if MODEL_SIZE == "placeholder":
+            print("🚫 Image generation disabled (placeholder mode)")
+            return None
+            
+        if MODEL_SIZE not in model_configs:
+            print(f"⚠️  Unknown MODEL_SIZE: {MODEL_SIZE}, falling back to light")
+            MODEL_SIZE = "light"
+            
+        config = model_configs[MODEL_SIZE]
+        print(f"🎯 Loading model: {config['description']}")
         print(f"🔍 About to call AutoPipelineForText2Image.from_pretrained...")
         
         try:
             image_pipeline = AutoPipelineForText2Image.from_pretrained(
-                "stabilityai/sdxl-turbo",
+                config["model_id"],
                 torch_dtype=torch_dtype,
-                variant="fp16" if device == "cuda" else None,
+                variant="fp16" if device == "cuda" and MODEL_SIZE == "heavy" else None,
                 safety_checker=None,
                 requires_safety_checker=False,
                 low_cpu_mem_usage=True
             )
             print(f"✅ Pipeline loaded successfully!")
+            
+            # Store generation parameters for this model
+            image_pipeline._generation_steps = config["steps"]
+            image_pipeline._generation_guidance = config["guidance_scale"]
         except Exception as pipeline_error:
             print(f"❌ Pipeline loading failed: {pipeline_error}")
             print(f"🔍 Pipeline error type: {type(pipeline_error)}")
@@ -533,11 +681,23 @@ def get_image_pipeline():
             image_pipeline = False
             return None
         
-        # Enable GPU memory optimizations for CUDA
-        if device == "cuda":
+        # Enable GPU memory optimizations for CUDA only
+        if device == "cuda" and USE_CUDA:
             print("🔧 Enabling GPU memory optimizations...")
             # Enable memory efficient attention
-            image_pipeline.enable_attention_slicing()
+            try:
+                image_pipeline.enable_attention_slicing()
+                print("✅ Attention slicing enabled")
+            except Exception as e:
+                print(f"⚠️ Attention slicing failed: {e}")
+            
+            # Enable VAE slicing for memory efficiency
+            print("🔧 Enabling VAE slicing...")
+            try:
+                image_pipeline.vae.enable_slicing()
+                print("✅ VAE slicing enabled")
+            except Exception as e:
+                print(f"⚠️ VAE slicing failed: {e}")
             
             # Additional performance optimizations for RTX 3060 Ti
             # Disabled xformers due to dependency conflicts on Windows
@@ -560,13 +720,13 @@ def get_image_pipeline():
             # Disabled due to Triton dependency issues on Windows
             try:
                 if hasattr(torch, 'compile'):
-                    print("⚠️ torch.compile available but disabled (Triton issues on Windows)")
-                    # image_pipeline.unet = torch.compile(image_pipeline.unet, mode="reduce-overhead")
-                    # print("✅ Model compilation enabled")
+                    print("⚠️ torch.compile available but disabled (can cause slowdowns on Windows)")
+                    # Skip torch.compile as it can cause massive performance regressions
+                    # image_pipeline.unet = torch.compile(image_pipeline.unet, mode="default", fullgraph=False)
                 else:
-                    print("⚠️ torch.compile not available")
+                    print("⚠️ torch.compile not available in this PyTorch version")
             except Exception as e:
-                print(f"⚠️ Model compilation failed: {e}")
+                print(f"⚠️ Compilation check failed: {e}")
                 
             print("✅ GPU optimizations enabled for faster inference")
         else:
@@ -623,7 +783,26 @@ def createCardImage(prompt, width=408, height=336, card_data=None):
     print(f"Prompt: {prompt}")
     print(f"Dimensions: {width}x{height}")
     
+    # Import required modules at function start
+    import io
+    import base64
+    import time
+    from PIL import Image, ImageDraw
+    import numpy as np
+    
     try:
+        # Check if placeholder mode is enabled  
+        global MODEL_SIZE
+        if MODEL_SIZE == "placeholder":
+            print("🚫 Image generation disabled (placeholder mode)")
+            # Return a simple gray image placeholder
+            placeholder_image = Image.new('RGB', (width, height), color=(50, 50, 50))
+            # Convert to base64
+            buffer = io.BytesIO()
+            placeholder_image.save(buffer, format='PNG')
+            image_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            return f"data:image/png;base64,{image_data}"
+        
         # Option to disable image generation for testing (re-enabled to show debugging)
         ENABLE_IMAGE_GENERATION = True  # Set to False to disable SDXL
         
@@ -785,20 +964,42 @@ def createCardImage(prompt, width=408, height=336, card_data=None):
             print(f"Debug - Final art prompt ({estimate_tokens(final_prompt)} tokens): {final_prompt}")
             
             # Performance timing for image generation
-            import time
             inference_start = time.time()
-            print(f"🚀 Starting SDXL-Turbo inference (should take 2-4 seconds on RTX 3060 Ti)...")
+            if USE_CUDA and torch.cuda.is_available():
+                print(f"🚀 Starting SDXL-Turbo inference on GPU (should take 2-4 seconds)...")
+            else:
+                print(f"🖥️  Starting SDXL-Turbo inference on CPU (will take 30-60 seconds)...")
+            
+            # Use model-specific generation parameters
+            steps = getattr(pipeline, '_generation_steps', 1)
+            guidance = getattr(pipeline, '_generation_guidance', 0.0)
+            print(f"🎯 Using {steps} steps, guidance_scale={guidance}")
             
             image = pipeline(
                 prompt=final_prompt,
-                num_inference_steps=1,
-                guidance_scale=0.0,
-                width=width,
-                height=height
+                num_inference_steps=steps,
+                guidance_scale=guidance,
+                width=width,               
+                height=height              
             ).images[0]
             
             inference_time = time.time() - inference_start
-            print(f"⚡ SDXL-Turbo inference completed in {inference_time:.2f} seconds")
+            print(f"⚡ Model inference completed in {inference_time:.2f} seconds")
+            
+            # Debug the generated image
+            print(f"🔍 Generated image size: {image.size}")
+            print(f"🔍 Generated image mode: {image.mode}")
+            
+            # Check if image is actually black
+            img_array = np.array(image)
+            avg_brightness = np.mean(img_array)
+            print(f"🔍 Image average brightness: {avg_brightness:.2f} (0=black, 255=white)")
+            
+            if avg_brightness < 10:
+                print("⚠️  WARNING: Generated image appears to be nearly black!")
+                print("🔍 Image min/max values:", np.min(img_array), "/", np.max(img_array))
+            else:
+                print("✅ Generated image has normal brightness levels")
             
             if inference_time > 10:
                 print(f"⚠️ SLOW INFERENCE DETECTED! Expected ~2-4s, got {inference_time:.2f}s")
@@ -1041,7 +1242,7 @@ def reorder_abilities_properly(card_text, card_data=None):
         'forestwalk', 'plainswalk', 'bushido', 'ninjutsu', 'bloodthirst', 'devour',
         'persist', 'undying', 'cascade', 'storm', 'buyback', 'flashback', 'escape',
         'cycling', 'kicker', 'multikicker', 'suspend', 'vanishing', 'fading',
-        'echo', 'morph', 'megamorph', 'bestow', 'enchant', 'equip', 'crew',
+        'echo', 'morph', 'megamorph', 'bestow', 'enchant', 'equip', 'crew', 'regenerate',
         'reinforce', 'retrace', 'rebound', 'totem armor', 'living weapon',
         'battle cry', 'undaunted', 'surge', 'emerge', 'escalate', 'melee',
         'fabricate', 'improvise', 'revolt', 'explore', 'enrage', 'raid', 'landfall',
@@ -1206,6 +1407,7 @@ def format_ability_newlines(card_text):
 def generate_creature_stats(card_data: dict) -> dict:
     """
     Generate power/toughness for creatures based on their mana cost, abilities, and rarity
+    Enhanced to include asterisk (*) power/toughness with thematic definitions
     """
     try:
         # Extract mana cost and calculate CMC
@@ -1213,8 +1415,18 @@ def generate_creature_stats(card_data: dict) -> dict:
         cmc = card_data.get('cmc', 0)
         rarity = card_data.get('rarity', 'common').lower()
         abilities_text = card_data.get('description', '')
+        colors = card_data.get('colors', [])
+        card_name = card_data.get('name', '')
         
-        print(f"🎲 Generating stats for creature with CMC {cmc}, rarity {rarity}")
+        print(f"🎲 Generating stats for creature with CMC {cmc}, rarity {rarity}, colors {colors}")
+        
+        # Check if this creature should have asterisk (*) power/toughness
+        asterisk_result = should_generate_asterisk_pt(card_data)
+        if asterisk_result:
+            print(f"⭐ Generating asterisk P/T: {asterisk_result['pattern']}")
+            return generate_asterisk_stats(card_data, asterisk_result)
+        
+        print(f"🎲 Using standard stat generation")
         
         # Base stats calculation from CMC
         if cmc == 0:
@@ -1271,6 +1483,256 @@ def generate_creature_stats(card_data: dict) -> dict:
         print(f"❌ Error generating creature stats: {e}")
         # Ultimate fallback: 2/2
         return {'power': '2', 'toughness': '2'}
+
+def generate_vehicle_crew_cost(card_data: dict) -> int:
+    """
+    Generate appropriate crew cost for vehicles based on power/toughness and mana cost
+    Returns crew cost as integer (1-6)
+    """
+    try:
+        # Extract power/toughness if available
+        power = int(card_data.get('power', 0)) if card_data.get('power', '').isdigit() else 0
+        toughness = int(card_data.get('toughness', 0)) if card_data.get('toughness', '').isdigit() else 0
+        total_stats = power + toughness
+        
+        # Extract CMC
+        cmc = card_data.get('cmc', 0)
+        
+        print(f"🚗 Vehicle stats analysis: P/T {power}/{toughness} (total: {total_stats}), CMC: {cmc}")
+        
+        # Base crew cost on power level and mana cost
+        if total_stats <= 3 or cmc <= 2:
+            crew_cost = 1  # Small vehicles
+        elif total_stats <= 6 or cmc <= 4:
+            crew_cost = 2  # Medium vehicles  
+        elif total_stats <= 9 or cmc <= 6:
+            crew_cost = 3  # Large vehicles
+        else:
+            crew_cost = 4  # Huge vehicles (cap at 4 for balance)
+        
+        # Adjust based on power vs toughness ratio (high power = higher crew cost)
+        if power > 0 and toughness > 0:
+            power_ratio = power / (power + toughness)
+            if power_ratio > 0.6:  # High power vehicle
+                crew_cost = min(crew_cost + 1, 5)
+        
+        # Ensure minimum crew 1, maximum crew 5
+        crew_cost = max(1, min(crew_cost, 5))
+        
+        print(f"🚗 Generated crew cost: {crew_cost} (based on stats {total_stats}, CMC {cmc})")
+        return crew_cost
+        
+    except Exception as e:
+        print(f"❌ Error generating vehicle crew cost: {e}")
+        # Fallback: crew 2 (balanced default)
+        return 2
+
+def should_generate_asterisk_pt(card_data: dict) -> dict:
+    """
+    Determine if a creature should have asterisk (*) power/toughness
+    Returns dict with pattern info if yes, None if no
+    """
+    import random
+    
+    try:
+        cmc = card_data.get('cmc', 0)
+        colors = card_data.get('colors', [])
+        rarity = card_data.get('rarity', 'common').lower()
+        card_name = (card_data.get('name', '') or '').lower()
+        
+        # Base probability factors
+        base_probability = 0.0
+        
+        # Higher CMC creatures are more likely to have asterisk stats
+        if cmc >= 4:
+            base_probability += 0.15
+        if cmc >= 6:
+            base_probability += 0.10
+            
+        # Higher rarity increases probability
+        rarity_bonus = {
+            'common': 0.05,
+            'uncommon': 0.10, 
+            'rare': 0.20,
+            'mythic': 0.25
+        }
+        base_probability += rarity_bonus.get(rarity, 0.05)
+        
+        # Certain name patterns suggest asterisk stats
+        asterisk_name_hints = [
+            'avatar', 'incarnation', 'embodiment', 'manifestation',
+            'reflection', 'mirror', 'echo', 'shade', 'spirit',
+            'essence', 'soul', 'phantom', 'vision', 'dream'
+        ]
+        
+        if any(hint in card_name for hint in asterisk_name_hints):
+            base_probability += 0.15
+            print(f"⭐ Name '{card_name}' suggests asterisk P/T (+15%)")
+        
+        # Colors have different tendencies for asterisk mechanics
+        color_bonus = {
+            'G': 0.12,  # Green loves counting creatures/lands
+            'U': 0.10,  # Blue loves counting cards/artifacts  
+            'B': 0.08,  # Black loves graveyard counting
+            'W': 0.06,  # White moderate (tokens/creatures)
+            'R': 0.04   # Red least likely (prefers fixed stats)
+        }
+        
+        for color in colors:
+            base_probability += color_bonus.get(color, 0.0)
+        
+        print(f"⭐ Asterisk P/T probability: {base_probability:.2f} for CMC {cmc}, rarity {rarity}, colors {colors}")
+        
+        # Roll for asterisk generation
+        if random.random() < base_probability:
+            # Choose asterisk pattern based on colors and theme
+            pattern = choose_asterisk_pattern(card_data)
+            return pattern
+        
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error in should_generate_asterisk_pt: {e}")
+        return None
+
+def choose_asterisk_pattern(card_data: dict) -> dict:
+    """
+    Choose appropriate asterisk pattern based on card colors and theme
+    """
+    import random
+    
+    colors = card_data.get('colors', [])
+    cmc = card_data.get('cmc', 0)
+    card_name = (card_data.get('name', '') or '').lower()
+    
+    # Color-based pattern preferences
+    patterns = []
+    
+    if 'G' in colors:
+        patterns.extend([
+            {'type': 'creatures_you_control', 'power': '*', 'toughness': None, 'weight': 3},
+            {'type': 'lands_you_control', 'power': '*', 'toughness': None, 'weight': 3},
+            {'type': 'creatures_in_graveyard', 'power': None, 'toughness': '*', 'weight': 2},
+            {'type': 'forests_you_control', 'power': '*', 'toughness': '*', 'weight': 2}
+        ])
+    
+    if 'U' in colors:
+        patterns.extend([
+            {'type': 'cards_in_hand', 'power': '*', 'toughness': '*', 'weight': 4},
+            {'type': 'artifacts_you_control', 'power': '*', 'toughness': None, 'weight': 3},
+            {'type': 'cards_in_library', 'power': None, 'toughness': '*', 'weight': 2},
+            {'type': 'instants_in_graveyard', 'power': '*', 'toughness': None, 'weight': 2}
+        ])
+        
+    if 'B' in colors:
+        patterns.extend([
+            {'type': 'creatures_in_graveyard', 'power': '*', 'toughness': '*', 'weight': 4},
+            {'type': 'cards_in_graveyard', 'power': '*', 'toughness': None, 'weight': 3},
+            {'type': 'swamps_you_control', 'power': '*', 'toughness': None, 'weight': 2}
+        ])
+        
+    if 'W' in colors:
+        patterns.extend([
+            {'type': 'creatures_you_control', 'power': None, 'toughness': '*', 'weight': 3},
+            {'type': 'plains_you_control', 'power': None, 'toughness': '*', 'weight': 2},
+            {'type': 'enchantments_you_control', 'power': '*', 'toughness': '*', 'weight': 2}
+        ])
+        
+    if 'R' in colors:
+        patterns.extend([
+            {'type': 'mountains_you_control', 'power': '*', 'toughness': None, 'weight': 2},
+            {'type': 'cards_in_opponent_hand', 'power': '*', 'toughness': None, 'weight': 3}
+        ])
+    
+    # Fallback patterns if no colors or mixed colors
+    if not patterns:
+        patterns = [
+            {'type': 'cards_in_hand', 'power': '*', 'toughness': '*', 'weight': 2},
+            {'type': 'creatures_you_control', 'power': '*', 'toughness': None, 'weight': 2},
+            {'type': 'creatures_in_graveyard', 'power': None, 'toughness': '*', 'weight': 2}
+        ]
+    
+    # Weighted random selection
+    total_weight = sum(p['weight'] for p in patterns)
+    roll = random.random() * total_weight
+    current = 0
+    
+    for pattern in patterns:
+        current += pattern['weight']
+        if roll <= current:
+            return pattern
+    
+    # Fallback to first pattern
+    return patterns[0] if patterns else {'type': 'cards_in_hand', 'power': '*', 'toughness': '*', 'weight': 1}
+
+def generate_asterisk_stats(card_data: dict, pattern: dict) -> dict:
+    """
+    Generate asterisk power/toughness stats with thematic definitions
+    """
+    pattern_type = pattern['type']
+    power = pattern.get('power')
+    toughness = pattern.get('toughness') 
+    
+    # Map pattern types to rules text definitions
+    definitions = {
+        'creatures_you_control': "This creature's {stat} is equal to the number of creatures you control.",
+        'lands_you_control': "This creature's {stat} is equal to the number of lands you control.", 
+        'cards_in_hand': "This creature's {stat} is equal to the number of cards in your hand.",
+        'creatures_in_graveyard': "This creature's {stat} is equal to the number of creature cards in your graveyard.",
+        'cards_in_graveyard': "This creature's {stat} is equal to the number of cards in your graveyard.",
+        'artifacts_you_control': "This creature's {stat} is equal to the number of artifacts you control.",
+        'cards_in_library': "This creature's {stat} is equal to the number of cards in your library divided by ten, rounded down.",
+        'instants_in_graveyard': "This creature's {stat} is equal to the number of instant cards in your graveyard.",
+        'cards_in_opponent_hand': "This creature's {stat} is equal to the number of cards in target opponent's hand.",
+        'forests_you_control': "This creature's {stat} is equal to the number of Forests you control.",
+        'swamps_you_control': "This creature's {stat} is equal to the number of Swamps you control.",
+        'plains_you_control': "This creature's {stat} is equal to the number of Plains you control.",
+        'mountains_you_control': "This creature's {stat} is equal to the number of Mountains you control.",
+        'enchantments_you_control': "This creature's {stat} is equal to the number of enchantments you control."
+    }
+    
+    # Generate the rules text definition
+    definition_template = definitions.get(pattern_type, "This creature's {stat} is equal to the number of cards in your hand.")
+    
+    rules_parts = []
+    if power == '*' and toughness == '*':
+        # Both power and toughness are *
+        if 'power and toughness are each' in definition_template or 'both' in definition_template:
+            rules_text = definition_template.replace('{stat}', 'power and toughness are each')
+        else:
+            rules_text = definition_template.replace('{stat}', 'power and toughness are each')
+        rules_parts.append(rules_text)
+        final_power = '*'
+        final_toughness = '*'
+    elif power == '*':
+        # Only power is *
+        rules_text = definition_template.replace('{stat}', 'power')
+        rules_parts.append(rules_text)
+        final_power = '*'
+        final_toughness = str(max(1, card_data.get('cmc', 2) - 1))  # Reasonable toughness
+    else:
+        # Only toughness is *
+        rules_text = definition_template.replace('{stat}', 'toughness') 
+        rules_parts.append(rules_text)
+        final_power = str(max(1, card_data.get('cmc', 2) - 1))  # Reasonable power
+        final_toughness = '*'
+    
+    # Add the definition to the card's description
+    existing_description = card_data.get('description', '')
+    if existing_description:
+        updated_description = '\n'.join(rules_parts) + '\n' + existing_description
+    else:
+        updated_description = '\n'.join(rules_parts)
+    
+    card_data['description'] = updated_description
+    
+    print(f"⭐ Generated asterisk stats: {final_power}/{final_toughness}")
+    print(f"⭐ Added definition: {rules_parts[0]}")
+    
+    return {
+        'power': final_power,
+        'toughness': final_toughness
+    }
 
 def sanitize_planeswalker_abilities(card_text):
     """
@@ -1615,6 +2077,42 @@ def validate_rules_text(rules_text: str, card_data: dict) -> bool:
         else:
             print(f"    ℹ️  Card draw noted - variety is good for Magic diversity")
     
+    # Check for asterisk power/toughness definition requirements
+    power = card_data.get('power')
+    toughness = card_data.get('toughness') 
+    has_asterisk_power = power and '*' in str(power)
+    has_asterisk_toughness = toughness and '*' in str(toughness)
+    
+    if has_asterisk_power or has_asterisk_toughness:
+        print(f"⭐ Validating asterisk P/T definitions for {power}/{toughness}")
+        
+        # Common asterisk definition patterns
+        asterisk_patterns = [
+            r"power.*equal.*to.*the.*number",
+            r"toughness.*equal.*to.*the.*number", 
+            r"power.*and.*toughness.*are.*each.*equal.*to.*the.*number",
+            r"power.*equal.*to.*your.*life",
+            r"toughness.*equal.*to.*your.*life"
+        ]
+        
+        has_definition = any(re.search(pattern, rules_text, re.IGNORECASE) for pattern in asterisk_patterns)
+        
+        if not has_definition:
+            asterisk_type = ""
+            if has_asterisk_power and has_asterisk_toughness:
+                asterisk_type = "both power and toughness (*/*)"
+            elif has_asterisk_power:
+                asterisk_type = f"power ({power})"
+            else:
+                asterisk_type = f"toughness ({toughness})"
+                
+            print(f"❌ ASTERISK VALIDATION FAILED: Card has {asterisk_type} but rules text lacks definition")
+            print(f"   Rules text: '{rules_text}'")
+            print(f"   Required: Must include definition like 'This creature's power is equal to the number of...'")
+            return False
+        else:
+            print(f"✅ Asterisk P/T validation passed - found definition in rules text")
+    
     return True
 
 def createCardContent(prompt, card_data=None):
@@ -1622,6 +2120,9 @@ def createCardContent(prompt, card_data=None):
     Generate card content using Ollama Python client with enhanced context
     Returns the response text from the LLM
     """
+    print(f"🧠 createCardContent called with:")
+    print(f"   📝 Prompt: {repr(prompt[:100])}...")
+    print(f"   🎲 Card data keys: {list(card_data.keys()) if card_data else 'None'}")
     try:
         # Build enhanced prompt based on card properties
         enhanced_prompt = f"Generate ONLY the rules text for a Magic: The Gathering card based on: {prompt}."
@@ -1630,11 +2131,67 @@ def createCardContent(prompt, card_data=None):
             # Analyze mana cost for power level
             cmc = card_data.get('cmc', 0)
             colors = card_data.get('colors', [])
-            card_type = card_data.get('type', '').lower()
+            card_type = (card_data.get('type') or '').lower()
             power = card_data.get('power')
             toughness = card_data.get('toughness')
-            rarity = card_data.get('rarity', 'common').lower()
-            supertype = card_data.get('supertype', '').lower()
+            rarity = (card_data.get('rarity') or 'common').lower()
+            
+            # Check for asterisk (*) in power/toughness - CRITICAL VALIDATION
+            # Handle cases like "*/2", "3/*", "*/*", "*+1", "2+*", etc.
+            has_asterisk_power = power and '*' in str(power)
+            has_asterisk_toughness = toughness and '*' in str(toughness)
+            
+            if has_asterisk_power or has_asterisk_toughness:
+                asterisk_guidance = ""
+                
+                # Enhanced asterisk validation with color-appropriate suggestions
+                color_examples = {
+                    'G': "creatures you control, lands you control, or Forests you control",
+                    'U': "cards in your hand, artifacts you control, or cards in your library", 
+                    'B': "creature cards in your graveyard, cards in your graveyard, or Swamps you control",
+                    'W': "creatures you control, Plains you control, or enchantments you control",
+                    'R': "Mountains you control or cards in target opponent's hand"
+                }
+                
+                # Build color-specific examples
+                example_sources = []
+                for color in colors:
+                    if color in color_examples:
+                        example_sources.append(color_examples[color])
+                
+                if example_sources:
+                    examples_text = ", ".join(example_sources[:2])  # Use first 2 color examples
+                else:
+                    examples_text = "cards in your hand, creatures you control, or cards in your graveyard"
+                
+                if has_asterisk_power and has_asterisk_toughness:
+                    asterisk_guidance = f" CRITICAL ASTERISK RULE: This creature has power {power} and toughness {toughness} - BOTH are asterisks (*). You MUST start your rules text with a definition like '[Card Name]'s power and toughness are each equal to the number of [something you count].' For {colors} colors, appropriate things to count: {examples_text}. REQUIRED FORMAT: Start with the definition, then add any other abilities. Example: 'Patrick Star's power and toughness are each equal to the number of cards in your hand. [Other abilities...]' This asterisk definition is MANDATORY and must be the first line of rules text."
+                elif has_asterisk_power:
+                    asterisk_guidance = f" MANDATORY ASTERISK RULE: This creature has power {power}. You MUST include an ability that defines what the * equals. For {colors} colors, consider: {examples_text}. Examples: 'This creature's power is equal to the number of cards in your hand' or 'This creature's power is equal to the number of artifacts you control'. The * power MUST be defined in the rules text."
+                elif has_asterisk_toughness:
+                    asterisk_guidance = f" MANDATORY ASTERISK RULE: This creature has toughness {toughness}. You MUST include an ability that defines what the * equals. For {colors} colors, consider: {examples_text}. Examples: 'This creature's toughness is equal to the number of lands you control' or 'This creature's toughness is equal to your life total'. The * toughness MUST be defined in the rules text."
+                
+                enhanced_prompt += asterisk_guidance
+            
+            # Check for regenerate keyword - CRITICAL VALIDATION
+            # Regenerate requires specific formatting and rules
+            has_regenerate = False
+            
+            # Check in existing description
+            if card_data.get('description'):
+                description_text = str(card_data.get('description', '')).lower()
+                if 'regenerate' in description_text:
+                    has_regenerate = True
+            
+            # Check in the original prompt
+            if 'regenerate' in prompt.lower():
+                has_regenerate = True
+                
+            if has_regenerate:
+                regenerate_guidance = " MANDATORY REGENERATE RULE: This card uses regenerate abilities. You MUST use the correct format. Regenerate abilities must be written as '{cost}: Regenerate this creature' or 'Regenerate this creature' (if no cost). Examples: '{1}{G}: Regenerate this creature', '{B}: Regenerate this creature', 'Regenerate this creature'. NEVER write incorrect formats like 'can regenerate', 'has regenerate', or 'regenerates'. Regenerate means: The next time this creature would be destroyed this turn, it isn't. Instead, tap it, remove all damage from it, and remove it from combat. This is the official Magic templating and must be followed exactly."
+                enhanced_prompt += regenerate_guidance
+            
+            supertype = (card_data.get('supertype') or '').lower()
             is_legendary = 'legendary' in supertype
             mana_cost = card_data.get('manaCost', '')
             
@@ -1655,15 +2212,16 @@ def createCardContent(prompt, card_data=None):
             else:
                 base_power = "very powerful and game-changing"
             
-            # Rarity adjustments with ability guidance
+            # Rarity adjustments with ability guidance - BALANCED POWER LEVELS
+            # IMPORTANT: Keywords count as abilities and are valuable!
             if rarity == 'common':
-                power_level = f"{base_power}, extremely simple with ONLY 1 ability maximum - either a single keyword (like Haste, Trample, Deathtouch, Reach, Menace, or Lifelink) OR one simple triggered ability, never both"
+                power_level = f"{base_power}, extremely simple with ONLY 1 total ability - either ONE keyword (Haste, Trample, Deathtouch, Reach, Menace, or Lifelink) OR one simple triggered ability, never both. Keywords are abilities and count toward the limit."
             elif rarity == 'uncommon':
-                power_level = f"{base_power}, with interesting utility or synergy, 0-2 abilities maximum including simple triggered or activated abilities"
+                power_level = f"{base_power}, with modest complexity, maximum 2 total abilities - this can be 1-2 keywords, OR 1 keyword + 1 simple triggered ability, OR 2 simple triggered abilities, OR 1 activated ability. Keywords count as abilities."
             elif rarity == 'rare':
-                power_level = f"{base_power}, with unique or complex abilities, 2-3 total abilities including more powerful keywords and abilities"
+                power_level = f"{base_power}, with unique mechanics, maximum 3 total abilities - this can be 1-2 keywords + 1-2 other abilities, OR 3 non-keyword abilities. All keywords count toward the total ability limit."
             elif rarity == 'mythic':
-                power_level = f"{base_power}, with splashy, memorable, and potentially build-around effects, 3-4 powerful abilities that can include multiple keywords, triggered abilities, and activated abilities"
+                power_level = f"{base_power}, with splashy build-around effects, maximum 3-4 total abilities - this includes ALL keywords, triggered abilities, and activated abilities. Keywords are valuable and count toward limits."
             else:
                 power_level = base_power
             
@@ -1781,12 +2339,15 @@ def createCardContent(prompt, card_data=None):
             elif 'artifact' in card_type:
                 type_specific_guidance = " ARTIFACT DESIGN: Generate effects that provide ongoing utility, activated abilities, or passive benefits. Artifacts are colorless and should feel mechanical/technological. Focus on: activated abilities with costs ({T}:, {1}:, etc.), static effects that modify the game, or utility functions. COHESION FOR ARTIFACTS: Artifacts should have a clear purpose or theme. Good themes: mana production + mana sinks, sacrifice artifacts + artifact recursion, +1/+1 counters + counter synergies, or card selection + card advantage. Avoid random combinations like 'Tap for mana + Flying creatures + Graveyard removal'. Common patterns: '{T}: Add one mana of any color', '{2}, {T}: Card selection effect', 'Creatures you control get +1/+1', '{1}, Sacrifice ~: Deal 2 damage to any target'. Artifacts often have multiple modes of use or ongoing value."
                 
-                # Artifact-specific types
-                if 'equipment' in (card_data.get('subtype') or '').lower():
+                # Artifact-specific types - check both subtype and full typeline
+                full_type = (card_data.get('typeLine') or '').lower()
+                subtype = (card_data.get('subtype') or '').lower()
+                
+                if 'equipment' in subtype or 'equipment' in full_type:
                     type_specific_guidance += " EQUIPMENT: MANDATORY - All Equipment MUST have an 'Equip {cost}' ability (e.g., 'Equip {1}', 'Equip {2}', 'Equip {3}', etc.). Focus on 'Equipped creature gets/has...' effects that enhance creatures with stats, keywords, or abilities. The equip cost is essential and required for all Equipment."
-                elif 'vehicle' in (card_data.get('subtype') or '').lower():
-                    type_specific_guidance += " VEHICLE: Must have 'Crew X' ability and be a creature when crewed. Focus on powerful creature effects balanced by crew cost."
-                elif 'food' in (card_data.get('subtype') or '').lower():
+                elif 'vehicle' in subtype or 'vehicle' in full_type:
+                    type_specific_guidance += " VEHICLE MANDATORY RULES: ALL Vehicles MUST have 'Crew X (Tap any number of creatures you control with total power X or greater: This Vehicle becomes an artifact creature until end of turn.)' ability. CRITICAL FORMAT: Crew is a STANDALONE ability - just 'Crew X', NEVER '{T}, Crew X' or any other cost additions. Examples: 'Crew 2', 'Crew 1', 'Crew 3' (standalone abilities). Common crew costs: Crew 1 (small vehicles), Crew 2 (medium vehicles), Crew 3 (large vehicles), Crew 4+ (huge vehicles). Vehicles start as non-creature artifacts and only become creatures when crewed. They should have strong creature stats (power/toughness) to justify the crew cost. Vehicle abilities should focus on: combat abilities (flying, trample, vigilance), triggered abilities when attacking, or static abilities while crewed. Balance: Higher crew cost = better stats/abilities. NEVER add additional costs to crew abilities - crew activates by tapping other creatures, not the vehicle itself."
+                elif 'food' in subtype or 'food' in full_type:
                     type_specific_guidance += " FOOD TOKEN: MANDATORY - All Food tokens MUST have the ability '{2}, {T}, Sacrifice this artifact: You gain 2 life.' This is the defining characteristic of Food tokens as specified by the user. You may add one additional minor ability, but this exact sacrifice ability is required."
                 else:
                     type_specific_guidance += " Generic artifact: Utility effects, activated abilities, or static benefits available to all colors."
@@ -1867,13 +2428,16 @@ def createCardContent(prompt, card_data=None):
                 
                 legendary_guidance = " LEGENDARY CONSTRAINT: This is a legendary creature - structure abilities as follows: "
                 
-                # Power level determines ability structure
-                if rarity in ['mythic', 'rare']:
-                    legendary_guidance += "High-powered legendary: 0-2 keywords (consider diverse options like Trample, Haste, Deathtouch, Hexproof, Menace, or First Strike), 0-2 passive/triggered abilities (When/Whenever effects), and AT MOST 0-2 activated abilities ({T}: effects). Maximum 3 distinct ability blocks total."
+                # Power level determines ability structure - FOLLOW SAME RARITY LIMITS AS NON-LEGENDARY
+                # Legendary status does not grant extra abilities, just unique flavor
+                if rarity == 'mythic':
+                    legendary_guidance += "Mythic legendary: Maximum 3-4 total abilities including keywords, triggered, and activated abilities. Make abilities feel unique and build-around worthy."
+                elif rarity == 'rare':
+                    legendary_guidance += "Rare legendary: Maximum 3 total abilities including keywords. Focus on unique mechanics that feel special."
                 elif rarity == 'uncommon':
-                    legendary_guidance += "Moderate legendary: 0-1 keyword OR 0-2 passive/triggered abilities, and AT MOST 0-1 activated ability. Maximum 2 distinct ability blocks total."
+                    legendary_guidance += "Uncommon legendary: Maximum 2 total abilities including keywords. Simple but memorable effects."
                 else:  # common
-                    legendary_guidance += "Simple legendary: Either 0-2 keywords OR 0-1 simple passive/triggered ability. Maximum 0-2 ability blocks total, never both keywords and complex abilities."
+                    legendary_guidance += "Common legendary: Maximum 1 total ability - either ONE keyword OR one simple triggered ability. Being legendary doesn't grant extra complexity."
                 
                 # Add name and subtype flavor guidance
                 if card_name:
@@ -1916,21 +2480,27 @@ def createCardContent(prompt, card_data=None):
                     
                     legendary_guidance += f" The subtype '{subtype}' should strongly influence the flavor and mechanics of the abilities."
             
-            enhanced_prompt += f" The card costs {cmc} mana and should be {power_level}.{color_guidance}{type_specific_guidance}{creature_guidance}{legendary_guidance}{x_guidance}"
+            # Add card name inspiration for creative abilities
+            name_inspiration = ""
+            card_name = (card_data.get('name') or '').strip()
+            if card_name and len(card_name) > 2:
+                name_inspiration += f" CARD NAME INSPIRATION: This card is named '{card_name}' - use this name as creative inspiration for unique abilities. Extract thematic concepts from the name: if it mentions elements (fire, ice, storm), create elemental effects; if it mentions creatures (dragon, angel, demon), incorporate those creature themes; if it mentions objects (sword, tome, crown), design abilities that reflect those items; if it mentions actions (strike, whisper, shatter), create abilities based on those verbs; if it mentions places (tower, grove, sanctum), include location-based effects. Make the abilities feel specifically tied to this card's identity, not generic effects."
+            
+            enhanced_prompt += f" The card costs {cmc} mana and should be {power_level}.{color_guidance}{type_specific_guidance}{creature_guidance}{legendary_guidance}{name_inspiration}{x_guidance}"
         
-        # Add specific constraint for creatures with CMC-based ability limits
+        # Add CMC guidance that respects rarity limits (rarity limits take precedence)
         if card_data and 'creature' in card_data.get('type', '').lower():
-            # Much stricter ability limits based on mana cost
+            # CMC provides flavor guidance but CANNOT exceed rarity ability limits
             if cmc <= 1:
-                enhanced_prompt += " CRITICAL: 1 mana creatures should have AT MOST 1 simple ability. Prefer diverse single keywords like 'Haste', 'Deathtouch', 'Menace', 'Reach', or 'Lifelink'. NO activated abilities for 1-mana creatures."
+                enhanced_prompt += f" CMC GUIDANCE: 1 mana creatures prefer efficient, simple effects within your {rarity} rarity limit. Favor keywords like Haste, Deathtouch, Menace, Reach, or Lifelink. Avoid activated abilities on cheap creatures."
             elif cmc == 2:
-                enhanced_prompt += " CRITICAL: 2 mana creatures should have AT MOST 0-2 simple abilities. Prefer single keywords or ONE simple triggered ability like 'When this enters the battlefield, draw a card'. AVOID activated abilities."
+                enhanced_prompt += f" CMC GUIDANCE: 2 mana creatures work well with keywords or simple triggers within your {rarity} rarity limit. Examples: single keywords or 'When this enters the battlefield' effects."
             elif cmc == 3:
-                enhanced_prompt += " IMPORTANT: 3 mana creatures can have 0-2 abilities maximum. ONE activated ability OR 0-2 keywords/triggered abilities. Example: 'Flying' or 'When this enters, gain 3 life' or '{T}: Add {G}'."
+                enhanced_prompt += f" CMC GUIDANCE: 3 mana creatures can support moderate complexity within your {rarity} rarity limit. Consider activated abilities like '{{T}}: Add mana' or utility effects."
             elif cmc <= 5:
-                enhanced_prompt += " 4-5 mana creatures can have 2-3 abilities total. At most ONE activated ability plus 0-2 other abilities. Balance complexity with power."
+                enhanced_prompt += f" CMC GUIDANCE: 4-5 mana creatures justify more abilities within your {rarity} rarity limit. Can support activated abilities and synergistic effects."
             else:
-                enhanced_prompt += " High-cost creatures (6+ mana) can have multiple abilities but should still be focused and not overwhelming."
+                enhanced_prompt += f" CMC GUIDANCE: High-cost creatures (6+ mana) should feel impactful within your {rarity} rarity limit. Focus on game-changing effects appropriate for the mana investment."
             
             enhanced_prompt += " REMEMBER: Activated abilities (costs like {T}:, {1}:) are the most complex. Keyword abilities (Haste, Trample, Deathtouch, Menace, Lifelink, Reach, etc.) and triggered abilities (When/Whenever) are simpler. Lower mana cost = fewer and simpler abilities. VARIETY: Avoid overusing 'Flying' and 'Vigilance' together - consider diverse keyword combinations. CREATURE COHESION: All abilities must work together thematically. Good creature themes include: aggressive (Haste + Trample + attack benefits), defensive (Vigilance + blocking rewards), graveyard-focused (death triggers + graveyard recursion), token-maker (creates tokens + sacrifice outlets), tribal (creature type synergies), or utility (mana abilities + activated effects). AVOID mixing unrelated mechanics like 'Flying + Graveyard recursion + Mana production + Life gain' - pick 1-2 related themes. IMPORTANT: Multiple keywords should be comma-separated on one line (like 'Flying, trample'), not on separate lines."
         
@@ -1944,7 +2514,7 @@ def createCardContent(prompt, card_data=None):
         else:
             enhanced_prompt += " FORMATTING: Keywords should be comma-separated on ONE line (like 'Trample, menace'), while other abilities use separate lines. For activated abilities use format '{cost}: {effect}'. For triggered abilities use 'When/Whenever/At' format. Example: 'Trample, menace\\n{T}: Add one mana of any color\\n{2}: Target creature gains first strike until end of turn'."
         
-        enhanced_prompt += " VARIETY REQUIREMENT: Avoid overused effects like 'draw cards' - instead prioritize diverse, creative effects that match the card's colors and type. Explore unique mechanics, interesting interactions, and varied effect types. COHESION REQUIREMENT: All abilities on a single card must work together thematically and mechanically. Do NOT combine random unrelated abilities. Instead, create cards with unified themes such as: sacrifice synergies (sacrifice creatures → get benefits), +1/+1 counter themes (place counters → counter-based benefits), graveyard strategies (mill → graveyard value), tribal synergies (creature types matter), or mana ramp strategies (produce mana → expensive effects). Each ability should support or enhance the others. Example of GOOD cohesion: 'When this enters, create two 1/1 tokens' + '{T}, Sacrifice a creature: Draw a card' (token generation supports sacrifice). Example of BAD cohesion: 'Flying' + '{T}: Add mana' + 'Whenever a creature dies, gain 2 life' + 'Discard a card: Deal 1 damage' (random unrelated abilities). CRITICAL OUTPUT FORMAT: Generate ONLY a single block of rules text - nothing else. Do NOT include: card names, mana costs (like {3}{U}{U}), type lines (like 'Instant' or 'Creature - Human'), power/toughness numbers, flavor text, card titles, set symbols, or any other card elements. Your response should contain ONLY the text that would appear inside the rules text box of the card. IMPORTANT: Use {T} for tap symbol, never write 'Tap:'. Use standard Magic card formatting without surrounding quotes. NEVER include ability type labels like 'Triggered Ability:', 'Passive Ability:', 'Active Ability:', 'Keywords:', etc. Just write the abilities directly. Example of CORRECT output: 'Counter target spell' or 'Flying\\nWhenever this creature attacks, gain 2 life' or 'Flying\\n{T}: Add one mana of any color'. Example of INCORRECT output: 'Lightning Bolt {2}{R}\\nInstant\\nDeal 3 damage to any target' or 'Keywords: Flying\\nTriggered Ability: When this enters, draw a card'. Generate ONLY the raw abilities or effects as they would appear on an actual Magic card - no labels, no categories, no other formatting."
+        enhanced_prompt += " CREATIVITY AND UNIQUENESS REQUIREMENTS: 1) AVOID OVERUSED GENERIC ABILITIES: Never use these repetitive effects: 'Draw 3 cards', 'Draw a card', '{T}: Add one mana of any color', 'Tap: Create 1 mana', 'When this enters the battlefield, draw a card', 'Sacrifice this: Draw a card'. These are boring and overused. 2) FOCUS ON THE CARD'S IDENTITY: Use the card's name, type, and power level as inspiration. If the card is named 'Sword of Fire', create fire-themed combat abilities. If it's called 'Ancient Tome', focus on knowledge/library effects, not generic card draw. If it's a 'Dragon Engine', combine draconic and mechanical themes. 3) PRIORITIZE UNIQUE MECHANICS: Instead of generic effects, create interesting abilities like: temporary creature theft, conditional countering, combat phase manipulation, alternate win conditions, unique token creation, innovative triggered conditions, creative activated abilities that aren't just mana generation, spell copying with twists, unique protection effects, interesting sacrifice effects, creative pump effects, unique evasion beyond flying. 4) MAKE IT MEMORABLE: Every ability should feel distinctive and tied to the card's concept. VARIETY REQUIREMENT: Avoid overused effects like 'draw cards' and 'add mana' - instead prioritize diverse, creative effects that match the card's colors and type. Explore unique mechanics, interesting interactions, and varied effect types. COHESION REQUIREMENT: All abilities on a single card must work together thematically and mechanically. Do NOT combine random unrelated abilities. Instead, create cards with unified themes such as: sacrifice synergies (sacrifice creatures → get benefits), +1/+1 counter themes (place counters → counter-based benefits), graveyard strategies (mill → graveyard value), tribal synergies (creature types matter), or mana ramp strategies (produce mana → expensive effects). Each ability should support or enhance the others. Example of GOOD cohesion: 'When this enters, create two 1/1 tokens' + '{T}, Sacrifice a creature: Draw a card' (token generation supports sacrifice). Example of BAD cohesion: 'Flying' + '{T}: Add mana' + 'Whenever a creature dies, gain 2 life' + 'Discard a card: Deal 1 damage' (random unrelated abilities). CRITICAL OUTPUT FORMAT: Generate ONLY a single block of rules text - nothing else. Do NOT include: card names, mana costs (like {3}{U}{U}), type lines (like 'Instant' or 'Creature - Human'), power/toughness numbers, flavor text, card titles, set symbols, or any other card elements. Your response should contain ONLY the text that would appear inside the rules text box of the card. IMPORTANT: Use {T} for tap symbol, never write 'Tap:'. Use standard Magic card formatting without surrounding quotes. NEVER include ability type labels like 'Triggered Ability:', 'Passive Ability:', 'Active Ability:', 'Keywords:', etc. Just write the abilities directly. Example of CORRECT output: 'Counter target spell' or 'Flying\\nWhenever this creature attacks, gain 2 life' or 'Flying\\n{T}: Add one mana of any color'. Example of INCORRECT output: 'Lightning Bolt {2}{R}\\nInstant\\nDeal 3 damage to any target' or 'Keywords: Flying\\nTriggered Ability: When this enters, draw a card'. Generate ONLY the raw abilities or effects as they would appear on an actual Magic card - no labels, no categories, no other formatting."
         
         # Generate and validate rules text (retry if contaminated)
         max_attempts = 3
@@ -2058,11 +2628,16 @@ def createCardContent(prompt, card_data=None):
             # For now, return the text anyway, but log the issue
             # TODO: Could implement full regeneration loop here if needed
         
+        print(f"🧠 createCardContent returning:")
+        print(f"   📝 Result: {repr(card_text)}")
+        print(f"   📏 Length: {len(card_text) if card_text else 0}")
         return card_text
         
     except Exception as e:
-        print(f"Error in createCardContent: {e}")
+        print(f"❌ Error in createCardContent: {e}")
         print("Make sure Mistral model is installed: 'ollama pull mistral:latest'")
+        import traceback
+        traceback.print_exc()
         return None
 
 @app.route('/api/v1/create_card', methods=['POST', 'OPTIONS'])
@@ -2339,8 +2914,15 @@ def get_queue_status():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Simple health check endpoint"""
-    response = jsonify({'status': 'healthy'})
+    """Health check endpoint - always returns 200 to indicate server is running"""
+    response = jsonify({
+        'status': 'healthy',
+        'models': {
+            'image_model': 'ready',
+            'content_model': 'ready'
+        },
+        'message': 'Server is running'
+    })
     return add_ngrok_headers(response), 200
 
 @app.route('/test-post', methods=['POST', 'OPTIONS'])

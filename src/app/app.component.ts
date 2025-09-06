@@ -1,15 +1,19 @@
-import { Component } from '@angular/core';
+import { Component, ViewChild, OnInit } from '@angular/core';
 import { catchError, finalize, Observable, of } from 'rxjs';
 import { CardGenerationRequest } from './models/api.model';
 import { Card, Rarity } from './models/card.model';
 import { CardService } from './services/card.service';
+import { HealthService, HealthStatus } from './services/health.service';
+import { CardFormComponent } from './components/card-form/card-form.component';
 
 @Component({
   selector: 'app-root',
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss']
 })
-export class AppComponent {
+export class AppComponent implements OnInit {
+  @ViewChild(CardFormComponent) cardFormComponent!: CardFormComponent;
+  
   title = 'MTGenesis.AI';
   currentCard: Card = {
     name: 'New Card',
@@ -35,7 +39,29 @@ export class AppComponent {
   // Success state
   successMessage: string | null = null;
   
-  constructor(private cardService: CardService) {}
+  // Display toggle
+  showCompleteCard: boolean = false;
+  
+  // Health check states
+  isCheckingHealth = true;
+  healthStatus: HealthStatus | null = null;
+  healthError: string | null = null;
+  modelsReady = false;
+  showHealthBanner = false;
+  
+  constructor(
+    private cardService: CardService, 
+    private healthService: HealthService
+  ) {}
+
+  ngOnInit(): void {
+    // Add a delay before showing the health banner to prevent flash
+    setTimeout(() => {
+      this.showHealthBanner = true;
+    }, 500);
+    
+    this.checkModelsHealth();
+  }
   
   updateCard(card: Card): void {
     console.log('AppComponent: updateCard called with colors:', card.colors);
@@ -49,6 +75,11 @@ export class AppComponent {
   }
   
   generateCard(card: Card): void {
+    if (!this.modelsReady) {
+      this.error = 'Models are still loading. Please wait...';
+      return;
+    }
+    
     // Reset error and success states
     this.error = null;
     this.textError = null;
@@ -70,6 +101,10 @@ export class AppComponent {
         }),
         finalize(() => {
           this.isGenerating = false;
+          // Reset the form's loading state
+          if (this.cardFormComponent) {
+            this.cardFormComponent.setGenerating(false);
+          }
         })
       )
       .subscribe(generatedCard => {
@@ -162,7 +197,7 @@ export class AppComponent {
     this.successMessage = null;
   }
 
-  // Download card image
+  // Download artwork image
   downloadCardImage(): void {
     if (!this.currentCard.imageUrl) {
       console.warn('No image available to download');
@@ -177,23 +212,90 @@ export class AppComponent {
       // Generate filename based on card name
       const cardName = this.currentCard.name || 'magic-card';
       const sanitizedName = cardName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-      link.download = `${sanitizedName}_art.png`;
+      link.download = `${sanitizedName}_artwork.png`;
       
       // Temporarily add to DOM and trigger download
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       
-      this.successMessage = 'Image downloaded successfully!';
+      this.successMessage = 'Artwork downloaded successfully!';
       
-      // Clear success message after 3 seconds
+      // Clear success message after 20 seconds
       setTimeout(() => {
         this.successMessage = null;
-      }, 3000);
+      }, 20000);
       
     } catch (error) {
       console.error('Error downloading image:', error);
-      this.error = 'Failed to download image. Please try again.';
+      this.error = 'Failed to download artwork. Please try again.';
     }
   }
+
+  // Download complete card image
+  downloadCompleteCard(): void {
+    if (!this.currentCard.cardImageUrl) {
+      console.warn('No complete card image available to download');
+      return;
+    }
+
+    try {
+      // Create a temporary link element
+      const link = document.createElement('a');
+      link.href = this.currentCard.cardImageUrl;
+      
+      // Generate filename based on card name
+      const cardName = this.currentCard.name || 'magic-card';
+      const sanitizedName = cardName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      link.download = `${sanitizedName}_complete_card.png`;
+      
+      // Temporarily add to DOM and trigger download
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      this.successMessage = 'Complete card downloaded successfully!';
+      
+      // Clear success message after 20 seconds
+      setTimeout(() => {
+        this.successMessage = null;
+      }, 20000);
+      
+    } catch (error) {
+      console.error('Error downloading complete card:', error);
+      this.error = 'Failed to download complete card. Please try again.';
+    }
+  }
+
+  // Health check methods
+  async checkModelsHealth(): Promise<void> {
+    this.isCheckingHealth = true;
+    this.healthError = null;
+    
+    try {
+      console.log('🏥 Performing single health check...');
+      
+      // Perform a single health check
+      const status = await this.healthService.performHealthCheck();
+      
+      this.healthStatus = status;
+      this.modelsReady = status.status === 'healthy';
+      this.isCheckingHealth = false;
+      
+      if (this.modelsReady) {
+        console.log('✅ Models are ready!');
+        this.showHealthBanner = false; // Hide banner immediately when ready
+      } else {
+        console.warn('⚠️ Models not ready:', status);
+        this.healthError = status.message;
+      }
+      
+    } catch (error: any) {
+      console.error('❌ Health check failed:', error);
+      this.isCheckingHealth = false;
+      this.modelsReady = false;
+      this.healthError = error.message || 'Health check failed';
+    }
+  }
+
 }

@@ -71,7 +71,7 @@ python app.py
 
 #### Terminal 3: Start Angular Frontend
 ```bash
-ng serve
+npm run start
 ```
 *Runs on http://localhost:4200 - the main web interface*
 
@@ -145,6 +145,16 @@ mtgenesis.ai/
   "imageData": "base64-encoded-image"
 }
 ```
+
+## Deployments
+
+Run the command: 
+
+```bash
+npm run build -- --configuration production
+```
+
+To build the project for production, this will make use of the ngrok endpoint we specified in the environment.prod.ts file
 
 ## 🐛 Troubleshooting
 

@@ -3,14 +3,163 @@
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  background-image: url('/assets/site_background.png');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+/* Health Check Banner */
+.health-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: linear-gradient(135deg, rgba(244, 67, 54, 0.95), rgba(211, 47, 47, 0.95));
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  animation: slide-down 0.4s ease-out;
+  
+  .banner-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    
+    .banner-loading, .banner-error {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      width: 100%;
+      
+      .material-icons {
+        color: white;
+        font-size: 1.5rem;
+      }
+      
+      mat-spinner {
+        ::ng-deep circle {
+          stroke: white;
+        }
+      }
+      
+      .banner-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        
+        .banner-title {
+          color: white;
+          font-weight: 600;
+          font-size: 1rem;
+          line-height: 1.2;
+        }
+        
+        .banner-subtitle {
+          color: rgba(255, 255, 255, 0.9);
+          font-size: 0.875rem;
+          line-height: 1.3;
+        }
+      }
+    }
+    
+    .banner-loading {
+      background: linear-gradient(135deg, rgba(33, 150, 243, 0.95), rgba(63, 81, 181, 0.95));
+    }
+  }
+  
+  &:has(.banner-loading) {
+    background: linear-gradient(135deg, rgba(33, 150, 243, 0.95), rgba(63, 81, 181, 0.95));
+  }
+}
+
+/* Push down content when banner is visible */
+:host:has(.health-banner) {
+  .app-header {
+    margin-top: 70px;
+  }
+}
+
+/* Health Check Styles */
+.health-status {
+  margin: 1rem auto;
+  max-width: 800px;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(10px);
+  
+  &.checking {
+    background: linear-gradient(135deg, rgba(33, 150, 243, 0.1), rgba(63, 81, 181, 0.1));
+    border: 2px solid rgba(33, 150, 243, 0.3);
+  }
+  
+  &.error {
+    background: linear-gradient(135deg, rgba(244, 67, 54, 0.1), rgba(211, 47, 47, 0.1));
+    border: 2px solid rgba(244, 67, 54, 0.3);
+  }
+  
+  &.ready {
+    background: linear-gradient(135deg, rgba(76, 175, 80, 0.1), rgba(56, 142, 60, 0.1));
+    border: 2px solid rgba(76, 175, 80, 0.3);
+    margin-bottom: 0.5rem; // Less space when ready
+  }
+  
+  .health-content {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    color: white;
+    
+    .material-icons {
+      font-size: 2rem;
+      
+      .checking & {
+        color: #2196F3;
+      }
+      
+      .error & {
+        color: #F44336;
+      }
+      
+      .ready & {
+        color: #4CAF50;
+      }
+    }
+    
+    .health-text {
+      flex: 1;
+      
+      h3 {
+        margin: 0 0 0.5rem 0;
+        font-size: 1.25rem;
+        font-weight: 600;
+      }
+      
+      p {
+        margin: 0 0 1rem 0;
+        opacity: 0.9;
+        line-height: 1.4;
+      }
+      
+      button {
+        margin-top: 0.5rem;
+      }
+    }
+  }
 }
 
 .app-header {
-  background: linear-gradient(135deg, #2d2d44, #1a1a2e);
+  background: linear-gradient(135deg, rgba(45, 45, 68, 0.95), rgba(26, 26, 46, 0.95));
   color: white;
   padding: 1rem;
   text-align: center;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
   
   .header-content {
     display: flex;
@@ -58,6 +207,11 @@
   margin: 0 auto;
   gap: 2rem;
   position: relative;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(5px);
+  border-radius: 20px;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
 }
 
 .card-preview-section {
@@ -79,11 +233,12 @@
 }
 
 .app-footer {
-  background-color: #1a1a2e;
+  background: linear-gradient(135deg, rgba(26, 26, 46, 0.95), rgba(16, 16, 32, 0.95));
   color: white;
   text-align: center;
   padding: 1rem;
   margin-top: 2rem;
+  backdrop-filter: blur(10px);
   
   .footer-content {
     display: flex;
@@ -233,12 +388,63 @@
   animation: spin 1s ease-in-out infinite;
 }
 
+/* Preview toggle */
+.preview-toggle {
+  margin: 1rem 0;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.toggle-button {
+  padding: 8px 16px;
+  background: linear-gradient(145deg, #6b7280, #4b5563);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  &.active {
+    background: linear-gradient(145deg, #3b82f6, #2563eb);
+    transform: scale(1.05);
+  }
+  
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* Complete card display */
+.complete-card-display {
+  margin: 1rem 0;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.complete-card-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+  transition: transform 0.3s ease;
+  
+  &:hover {
+    transform: scale(1.02);
+  }
+}
+
 /* Download section */
 .download-section {
   margin-top: 1rem;
   display: flex;
+  gap: 1rem;
   justify-content: center;
   width: 100%;
+  flex-wrap: wrap;
 }
 
 .download-button {
@@ -295,6 +501,16 @@
   
   &:not(:disabled):active {
     transform: translateY(-1px) scale(1.01);
+  }
+  
+  &.complete-card-download {
+    background: linear-gradient(145deg, #8b5cf6, #7c3aed);
+    box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+    
+    &:not(:disabled):hover {
+      background: linear-gradient(145deg, #7c3aed, #6d28d9);
+      box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+    }
   }
 }
 
@@ -375,6 +591,17 @@
 }
 
 /* Animations */
+@keyframes slide-down {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 @keyframes slide-up {
   from {
     transform: translateY(20px);
