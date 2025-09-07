@@ -31,6 +31,8 @@ export class CardFormComponent implements OnInit {
   filteredSubtypes: string[] = [];
   isGenerating = false;
   hasGeneratedCard = false;
+  lastGenerationTime: number | null = null;
+  generationStartTime: number | null = null;
   
   @Input() modelsReady: boolean = false;
   @Output() cardChange = new EventEmitter<Card>();
@@ -157,6 +159,7 @@ export class CardFormComponent implements OnInit {
     }
     
     this.isGenerating = true;
+    this.generationStartTime = Date.now(); // Track when generation started
     this.generateCard.emit(this.cardForm.value as Card);
   }
 
@@ -166,6 +169,12 @@ export class CardFormComponent implements OnInit {
     if (!generating) {
       // Card generation completed
       this.hasGeneratedCard = true;
+      
+      // Calculate generation time if we have a start time
+      if (this.generationStartTime) {
+        this.lastGenerationTime = (Date.now() - this.generationStartTime) / 1000; // Convert to seconds
+        this.generationStartTime = null; // Reset start time
+      }
     }
   }
 

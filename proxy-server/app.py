@@ -19,7 +19,7 @@ MODEL_SIZE = "heavy"  # <-- CUDA enabled! Using SDXL-Turbo for best quality
 # ===== TIMEOUT CONFIGURATION =====
 # Global timeout settings for all operations (in seconds)
 COLD_START_TIMEOUT = 180    # 3 minutes for first-time model loading
-WARM_RUN_TIMEOUT = 120      # 2 minutes for subsequent generations
+WARM_RUN_TIMEOUT = 180      # 3 minutes for subsequent generations
 MAX_REQUEST_AGE = 300       # 5 minutes max age before cleanup (was 600)
 CLEANUP_INTERVAL = 60       # Check for old requests every 60 seconds
 DELAYED_CLEANUP = 30        # Wait 30 seconds before cleaning completed requests
@@ -277,9 +277,12 @@ def process_card_generation(prompt, width, height, original_card_data):
                 image_end_time = time.time()
                 image_generation_time = image_end_time - image_start_time
                 print(f"⏰ Image generation timed out after {image_generation_time:.2f} seconds ({image_timeout}s limit)")
-                # Cancel the future to stop background processing
+                # Cancel both futures to stop all background processing
                 image_future.cancel()
-                image_data = None
+                content_future.cancel()
+                print(f"🚫 Cancelled entire request due to image timeout")
+                # Fail the entire request immediately on timeout
+                raise Exception(f"Request cancelled: Image generation timed out after {image_timeout} seconds. Please try again.")
             except Exception as e:
                 image_end_time = time.time()
                 image_generation_time = image_end_time - image_start_time
@@ -304,9 +307,12 @@ def process_card_generation(prompt, width, height, original_card_data):
                 content_end_time = time.time()
                 content_generation_time = content_end_time - content_start_time
                 print(f"⏰ Content generation timed out after {content_generation_time:.2f} seconds ({content_timeout}s limit)")
-                # Cancel the future to stop background processing
+                # Cancel both futures to stop all background processing
+                image_future.cancel()
                 content_future.cancel()
-                generated_card_text = None
+                print(f"🚫 Cancelled entire request due to content timeout")
+                # Fail the entire request immediately on timeout
+                raise Exception(f"Request cancelled: Content generation timed out after {content_timeout} seconds. Please try again.")
             except Exception as e:
                 content_end_time = time.time()
                 content_generation_time = content_end_time - content_start_time
@@ -1130,7 +1136,7 @@ def limit_creature_active_abilities(card_text):
     print(f"Limited creature abilities from {len(active_abilities)} to {active_count} active abilities")
     return result
 
-def remove_typeline_contamination(abilities_list, card_data):
+def remove_typeline_contamination(abilities_list, card_data, ability_type="abilities"):
     """
     Remove any abilities that exactly match the card's typeline
     """
@@ -1162,17 +1168,26 @@ def remove_typeline_contamination(abilities_list, card_data):
         # Version with regular dash 
         typeline_dash = typeline_em.replace('—', '-')
         possible_typelines.append(typeline_dash)
+    
+    # Also add just the subtype alone (common contamination pattern)
+    if subtype:
+        possible_typelines.append(subtype)
         
-        print(f"Checking for typeline contamination: {possible_typelines}")
+    # Add main type alone too
+    if main_type:
+        possible_typelines.append(main_type)
     
     # Remove any abilities that exactly match a typeline variation
     cleaned_abilities = []
+    contamination_found = False
+    
     for ability in abilities_list:
         ability_clean = ability.strip().rstrip('.,!?')
         if not any(ability_clean.lower() == typeline.lower() for typeline in possible_typelines):
             cleaned_abilities.append(ability)
         else:
-            print(f"🗑️  Removed typeline contamination: '{ability}'")
+            print(f"🗑️  Removed typeline contamination from {ability_type}: '{ability}'")
+            contamination_found = True
     
     return cleaned_abilities
 
@@ -1397,16 +1412,31 @@ def reorder_abilities_properly(card_text, card_data=None):
     
     # Clean up typeline contamination from passive and triggered abilities
     if card_data:
-        passive_abilities = remove_typeline_contamination(passive_abilities, card_data)
-        triggered_abilities = remove_typeline_contamination(triggered_abilities, card_data)
+        passive_abilities = remove_typeline_contamination(passive_abilities, card_data, "passive abilities")
+        triggered_abilities = remove_typeline_contamination(triggered_abilities, card_data, "triggered abilities")
     
-    # Remove AI generation artifacts that mention "rules text"
+    # Remove AI generation artifacts that mention "rules text" or meta-commentary
     def filter_rules_text_artifacts(abilities_list):
-        """Remove abilities that are AI generation artifacts mentioning 'rules text'"""
+        """Remove abilities that are AI generation artifacts mentioning 'rules text' or meta-commentary"""
+        meta_commentary_patterns = [
+            'rules text',
+            'here is a',
+            'here are the',
+            'potential rules text',
+            'guidelines',
+            'based on your',
+            'i\'ll generate',
+            'let me create',
+            'card based on'
+        ]
+        
         filtered = []
         for ability in abilities_list:
-            if 'rules text' in ability.lower():
-                print(f"🗑️  Removed AI generation artifact: '{ability}'")
+            ability_lower = ability.lower()
+            is_meta_commentary = any(pattern in ability_lower for pattern in meta_commentary_patterns)
+            
+            if is_meta_commentary:
+                print(f"🗑️  Removed AI meta-commentary: '{ability}'")
             else:
                 filtered.append(ability)
         return filtered
@@ -2153,7 +2183,89 @@ def apply_universal_complexity_limits(card_text, card_data):
     
     return card_text
 
-def validate_rules_text(rules_text: str, card_data: dict) -> bool:
+def strip_non_rules_text(rules_text, card_data):
+    """
+    Remove any card title, type line, or other non-rules text that might have been included
+    """
+    if not rules_text or not card_data:
+        return rules_text
+    
+    cleaned_text = rules_text
+    
+    # Remove card name if it appears at the start followed by a dash or colon
+    card_name = card_data.get('name', '')
+    if card_name:
+        # Pattern: "CardName - " or "CardName: " or "CardName\n"
+        patterns_to_remove = [
+            f"{card_name} - ",
+            f"'{card_name}' - ",
+            f'"{card_name}" - ',
+            f"{card_name}: ",
+            f"'{card_name}': ",
+            f'"{card_name}": ',
+            f"{card_name}\n",
+            f"'{card_name}'\n",
+            f'"{card_name}"\n',
+        ]
+        for pattern in patterns_to_remove:
+            if cleaned_text.startswith(pattern):
+                cleaned_text = cleaned_text[len(pattern):].strip()
+                print(f"🧹 Stripped card name from start: {pattern}")
+                break
+    
+    # Remove type line if it appears
+    type_line = card_data.get('typeLine', '')
+    if not type_line:
+        # Build type line from components
+        supertype = card_data.get('supertype', '')
+        card_type = card_data.get('type', '')
+        subtype = card_data.get('subtype', '')
+        type_parts = []
+        if supertype:
+            type_parts.append(supertype)
+        if card_type:
+            type_parts.append(card_type)
+        if type_parts:
+            type_line = ' '.join(type_parts)
+            if subtype:
+                type_line += f" - {subtype}"
+    
+    if type_line:
+        # Remove type line patterns
+        patterns_to_remove = [
+            f"{type_line}. ",
+            f"{type_line}, ",
+            f"{type_line}\n",
+            f"{type_line} ",
+        ]
+        for pattern in patterns_to_remove:
+            if pattern.lower() in cleaned_text.lower():
+                # Case-insensitive removal
+                import re
+                cleaned_text = re.sub(re.escape(pattern), '', cleaned_text, flags=re.IGNORECASE)
+                print(f"🧹 Stripped type line: {pattern}")
+    
+    # Remove mana cost if it appears at the start
+    mana_cost = card_data.get('manaCost', '')
+    if mana_cost and cleaned_text.startswith(mana_cost):
+        cleaned_text = cleaned_text[len(mana_cost):].strip()
+        print(f"🧹 Stripped mana cost: {mana_cost}")
+    
+    # Remove power/toughness if it appears
+    power = card_data.get('power')
+    toughness = card_data.get('toughness')
+    if power and toughness:
+        pt_pattern = f"{power}/{toughness}"
+        if pt_pattern in cleaned_text:
+            cleaned_text = cleaned_text.replace(pt_pattern, '').strip()
+            print(f"🧹 Stripped P/T: {pt_pattern}")
+    
+    # Clean up any leading punctuation or whitespace
+    cleaned_text = cleaned_text.lstrip('.,;: \n\t')
+    
+    return cleaned_text
+
+def validate_rules_text(rules_text, card_data):
     """
     Validate that rules text doesn't contain type line elements
     Returns True if valid, False if contaminated
@@ -2413,7 +2525,7 @@ def createCardContent(prompt, card_data=None):
     print(f"   🎲 Card data keys: {list(card_data.keys()) if card_data else 'None'}")
     try:
         # Build enhanced prompt based on card properties
-        enhanced_prompt = f"Generate ONLY the rules text for a Magic: The Gathering card based on: {prompt}."
+        enhanced_prompt = f"Generate Magic card abilities: {prompt}\n\nOutput format: Only the rules text abilities, no explanations, no card name, no type line."
         
         if card_data:
             # Analyze mana cost for power level
@@ -2856,11 +2968,22 @@ def createCardContent(prompt, card_data=None):
                            "4) MAKE IT MEMORABLE: Every ability should feel distinctive and tied to the card's concept. VARIETY REQUIREMENT: Avoid overused effects like 'draw cards' and 'add mana' - instead prioritize diverse, creative effects that match the card's colors and type. Explore unique mechanics, interesting interactions, and varied effect types. "
                            "COHESION REQUIREMENT: All abilities on a single card must work together thematically and mechanically. Do NOT combine random unrelated abilities. Instead, create cards with unified themes such as: sacrifice synergies (sacrifice creatures → get benefits), +1/+1 counter themes (place counters → counter-based benefits), graveyard strategies (mill → graveyard value), tribal synergies (creature types matter), or mana ramp strategies (produce mana → expensive effects). Each ability should support or enhance the others. "
                            "Example of GOOD cohesion: 'When this enters, create two 1/1 tokens' + '{T}, Sacrifice a creature: Draw a card' (token generation supports sacrifice). Example of BAD cohesion: 'Flying' + '{T}: Add mana' + 'Whenever a creature dies, gain 2 life' + 'Discard a card: Deal 1 damage' (random unrelated abilities). "
-                           "CRITICAL OUTPUT FORMAT: Generate ONLY a single block of rules text - nothing else. Do NOT include: card names, mana costs (like {3}{U}{U}), type lines (like 'Instant' or 'Creature - Human'), power/toughness numbers, flavor text, card titles, set symbols, or any other card elements. Your response should contain ONLY the text that would appear inside the rules text box of the card. "
+                           "🚨🚨🚨 CRITICAL OUTPUT FORMAT - RULES TEXT ONLY 🚨🚨🚨: You MUST generate ONLY the rules text that goes INSIDE the text box. ABSOLUTELY DO NOT INCLUDE: \n"
+                           "❌ Card name (like 'Pogo, Pokemon Master')\n"
+                           "❌ Card type line (like 'Legendary Creature - Human Tamer')\n"
+                           "❌ Mana cost (like '{3}{U}{U}')\n"
+                           "❌ Power/Toughness (like '3/4')\n"
+                           "❌ Flavor text\n"
+                           "❌ Set symbols\n"
+                           "❌ Any descriptive text about the card\n"
+                           "✅ ONLY generate the abilities and rules text that would appear in the rules text box\n"
+                           "If the card title appears in the rules text, you may use it there (like 'Pogo's power is equal to...')\n"
+                           "Your ENTIRE response should be ONLY abilities like: 'Flying', 'Vigilance', 'When this enters the battlefield...', '{T}: Add {G}', etc.\n"
                            "MANDATORY QUOTE WRAPPING: Each distinct ability must be wrapped in double quotes to prevent parsing errors. This is CRITICAL for proper card rendering. Each complete ability (from start to end, including all sentences that belong together) should be enclosed in quotes. "
                            "IMPORTANT: Use {T} for tap symbol, never write 'Tap:'. Use standard Magic card formatting. NEVER include ability type labels like 'Triggered Ability:', 'Passive Ability:', 'Active Ability:', 'Keywords:', etc. Just write the abilities directly. "
                            "Example of CORRECT output: '\"Flying, trample\"' or '\"Flying, trample\" \"Whenever this creature attacks, gain 2 life\"' or '\"Flying, trample\" \"{T}: Add one mana of any color\" \"When this enters the battlefield, create a 1/1 token\"'. "
-                           "Example of INCORRECT output without quotes: 'Flying, trample\\nWhenever this creature attacks, gain 2 life' or output with labels: 'Keywords: Flying\\nTriggered Ability: When this enters, draw a card'. "
+                           "Example of INCORRECT output: 'Pogo, Pokemon Master - Legendary Creature - Human Tamer. Sacrifice another creature: You gain control...' (includes name and type)\n"
+                           "Example of INCORRECT output with labels: 'Keywords: Flying\\nTriggered Ability: When this enters, draw a card'. "
                            "Each ability must be in its own quoted section - this prevents multi-sentence abilities from being split incorrectly during parsing. Generate ONLY the quoted abilities as they would appear on an actual Magic card.")
         
         # Generate and validate rules text (retry if contaminated)
@@ -2876,6 +2999,10 @@ def createCardContent(prompt, card_data=None):
             # Clean up the response
             card_text = response['response'].strip()
             print(f"📜 Content model raw output: {repr(card_text)}")
+            
+            # Strip any non-rules text that might have been included
+            card_text = strip_non_rules_text(card_text, card_data)
+            print(f"🧹 After stripping non-rules text: {repr(card_text)}")
             
             # Validate the response doesn't contain type line elements
             if validate_rules_text(card_text, card_data):
@@ -2939,6 +3066,62 @@ def createCardContent(prompt, card_data=None):
         # Limit to 3-4 sentences by splitting on periods and taking first 4
         sentences = [s.strip() for s in card_text.split('.') if s.strip()]
         print(f"🔍 Found {len(sentences)} sentences: {sentences}")
+        
+        # Remove card name elements (sentences that are just the card name with no abilities)
+        filtered_sentences = []
+        card_name = card_data.get('name', '') if card_data else ''
+        
+        for i, sentence in enumerate(sentences):
+            print(f"   Processing sentence {i}: '{sentence}'")
+            
+            # Skip if this sentence is just the card name (with possible quotes and prefixes)
+            sentence_clean = sentence.strip().strip('\'"*').strip()
+            print(f"   Cleaned version: '{sentence_clean}'")
+            print(f"   Card name: '{card_name}'")
+            
+            if sentence_clean == card_name:
+                print(f"🗑️  Removed card name element: '{sentence}'")
+                continue
+            
+            # Also remove card name from the beginning of sentences if it appears there
+            if card_name and sentence_clean.startswith(card_name):
+                print(f"   Found card name at start of sentence!")
+                # Remove the card name from the beginning
+                remaining_text = sentence_clean[len(card_name):].strip()
+                print(f"   Remaining text after removing name: '{remaining_text}'")
+                # Skip if nothing meaningful remains after removing the name
+                if not remaining_text or remaining_text in ['"', "'", '"\n', "'\n"]:
+                    print(f"🗑️  Removed card name prefix: '{sentence}'")
+                    continue
+                # Keep the sentence but without the card name prefix
+                original_sentence = sentence
+                sentence = sentence.replace(f'"{card_name}"', '').replace(f"'{card_name}'", '').replace(card_name, '').strip()
+                if sentence.startswith('\n'):
+                    sentence = sentence[1:].strip()
+                print(f"🧹 Cleaned card name from sentence")
+                print(f"   Before: '{original_sentence}'")
+                print(f"   After: '{sentence}'")
+            
+            # Skip empty sentences or sentences that are just quotes/whitespace
+            sentence_meaningful = sentence.strip().strip('\'"').strip()
+            if not sentence_meaningful:
+                print(f"🗑️  Removed empty/quote-only sentence: '{sentence}'")
+                continue
+                
+            # Clean up leading quote fragments and newlines
+            sentence = sentence.strip()
+            if sentence.startswith("'\n") or sentence.startswith('"\n'):
+                sentence = sentence[2:]  # Remove quote + newline
+                print(f"🧹 Removed leading quote+newline")
+            elif sentence.startswith('\n'):
+                sentence = sentence[1:]  # Remove just newline
+                print(f"🧹 Removed leading newline")
+                
+            filtered_sentences.append(sentence)
+        
+        sentences = filtered_sentences
+        print(f"🔍 After filtering: {len(sentences)} sentences: {sentences}")
+        
         if len(sentences) > 4:
             print(f"⚠️  Truncating from {len(sentences)} to 4 sentences")
             card_text = '. '.join(sentences[:4]) + '.'

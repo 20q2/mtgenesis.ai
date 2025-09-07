@@ -143,7 +143,9 @@ class MagicCardRenderer:
             self.pt_font = ImageFont.truetype(self.beleren_bold_path, 24)
             
             # Available rules box height (from text_pos to roughly PT area)
-            self.available_text_height = 190  # Conservative estimate (640 - 440 - margin)
+            # Text starts at 440px, P/T at 643px, giving ~200px usable space
+            # Extended to 220px to allow larger font sizes and better text utilization
+            self.available_text_height = 220  # Extended from 190px for better text fitting
             
             print("Fonts loaded successfully with dynamic sizing capability")
         except Exception as e:
@@ -168,7 +170,8 @@ class MagicCardRenderer:
         Uses progressive font size reduction from 27px down to minimum readable size.
         """
         # Font size tiers (MTG standard 27px down to minimum readable)
-        font_sizes = [27, 24, 21, 18, 15, 12]  # Progressive reduction
+        # Added intermediate sizes for better readability: 19, 16, 14, 13
+        font_sizes = [27, 24, 21, 19, 18, 16, 15, 14, 12]  # Progressive reduction with more granular steps
         
         for font_size in font_sizes:
             if self._text_fits_in_bounds(text, max_width, max_height, font_size):
@@ -1438,7 +1441,7 @@ class MagicCardRenderer:
             is_creature = 'Creature' in card_type
             # Vehicles also need P/T boxes since they become creatures when crewed
             # Check both main type and subtype for Vehicle (e.g., "Artifact - Vehicle")
-            is_vehicle = 'Vehicle' in card_type or 'Vehicle' in subtype
+            is_vehicle = 'Vehicle' in card_type or ('Vehicle' in subtype if subtype else False)
             needs_pt_box = is_creature or is_vehicle
             
             print(f"Is legendary: {is_legendary}, Is creature: {is_creature}, Is vehicle: {is_vehicle}, Needs P/T: {needs_pt_box}")
