@@ -17,9 +17,6 @@ from text_processing import (
     choose_asterisk_pattern, generate_asterisk_stats, validate_asterisk_abilities
 )
 
-# Import rules text processing utilities
-from rules_text_processor import process_card_description_text
-
 # Import prompt generation utilities
 from prompt_generator import (
     estimate_tokens, truncate_prompt_smartly, generate_color_palette,
@@ -28,11 +25,11 @@ from prompt_generator import (
 
 # Import rules text processing utilities
 from rules_text_processor import (
-    limit_creature_active_abilities, remove_typeline_contamination,
-    ensure_periods_on_abilities, sanitize_planeswalker_abilities,
-    sanitize_spell_abilities, sanitize_land_abilities,
-    sanitize_permanent_abilities, apply_universal_complexity_limits,
-    validate_rules_text
+    process_card_description_text, limit_creature_active_abilities, 
+    remove_typeline_contamination, ensure_periods_on_abilities, 
+    sanitize_planeswalker_abilities, sanitize_spell_abilities, 
+    sanitize_land_abilities, sanitize_permanent_abilities, 
+    apply_universal_complexity_limits, validate_rules_text
 )
 
 # Import card content generation
@@ -466,10 +463,6 @@ def process_card_generation(prompt, width, height, original_card_data):
     except Exception as e:
         print(f"❌ Card generation failed: {e}")
         raise e
-
-# estimate_tokens function moved to prompt_generator module
-
-# truncate_prompt_smartly function moved to prompt_generator module
 
 # Initialize image generation pipeline
 image_pipeline = None
