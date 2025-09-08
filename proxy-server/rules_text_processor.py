@@ -596,7 +596,13 @@ def process_card_description_text(card_data, generated_card_text=None):
         processed_text = fix_markdown_bullet_points(processed_text)
         print(f"🔍 Step 1.5 - After bullet fix: {repr(processed_text)}")
         
-        # Step 2.4: Ensure periods on abilities
+        # Step 2.4: Remove typeline contamination (card names, types appearing in rules text)
+        lines = processed_text.split('\n')
+        cleaned_lines = remove_typeline_contamination(lines, updated_card_data, "rules text")
+        processed_text = '\n'.join(cleaned_lines)
+        print(f"🔍 Step 2.5 - After typeline cleanup: {repr(processed_text)}")
+        
+        # Step 2.5: Ensure periods on abilities
         processed_text = ensure_periods_on_abilities(processed_text)
         print(f"🔍 Step 3 - After period fix: {repr(processed_text)}")
         
