@@ -642,10 +642,6 @@ def process_card_description_text(card_data, generated_card_text=None):
         processed_text = processed_text.replace('~', updated_card_data.get("name", "~"))  # Replace any remaining ~
         print(f"🔍 Step 1 - After cleanup: {repr(processed_text)}")
         
-        # Step 2.1.5: Convert to legal MTG text format using context model
-        processed_text = convert_to_legal_mtg_text(processed_text, updated_card_data)
-        print(f"🔍 Step 1.75 - After legal MTG conversion: {repr(processed_text)}")
-        
         # Step 2.2: Clean individual ability lines of quotes and special characters
         lines = processed_text.split('\n')
         cleaned_lines = []
