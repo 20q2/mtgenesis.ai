@@ -32,7 +32,7 @@ def createCardContent(prompt, card_data=None):
     print(f"   🎲 Card data keys: {list(card_data.keys()) if card_data else 'None'}")
     try:
         # Build enhanced prompt based on card properties
-        enhanced_prompt = f"Generate the rules text for a Magic: the gathering card. \nOutput format: Only the rules text abilities, no explanations, no card name, no type line."
+        enhanced_prompt = f"Generate the rules text for a Magic: the gathering card. \nOutput format: Only the rules text abilities, no explanations, no card name, no type line. \nSINGLETON FORMAT: This card is for singleton formats (EDH/Commander) where only one copy exists in the deck. NEVER create abilities that reference 'another copy of this card', 'other copies', or 'search for a card with the same name'. Instead use abilities that search for cards 'with different names' or reference 'other cards'."
         
         if card_data:
             # Analyze mana cost for power level
