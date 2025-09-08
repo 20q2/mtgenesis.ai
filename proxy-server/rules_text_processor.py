@@ -6,6 +6,67 @@ to ensure they follow MTG conventions and don't contain type line contamination.
 """
 
 import re
+import ollama
+
+
+def convert_to_legal_mtg_text(rules_text, card_data=None):
+    """
+    Pass rules text through context model to convert it to proper legal MTG card text format.
+    
+    Args:
+        rules_text: The raw rules text to be converted
+        card_data: Optional card data for context
+        
+    Returns:
+        Legally formatted MTG rules text
+    """
+    if not rules_text or not rules_text.strip():
+        return rules_text
+    
+    # Build conversion prompt
+    card_type = card_data.get('type', '').lower() if card_data else 'card'
+    card_name = card_data.get('name', '[cardname]') if card_data else '[cardname]'
+    
+    conversion_prompt = f"""Convert the following text into proper legal Magic: The Gathering card text format.
+
+REQUIREMENTS:
+- Use official MTG templating and wording
+- Follow proper rules text conventions
+- Fix any grammar, punctuation, or formatting issues
+- Ensure abilities use correct Magic terminology
+- Output ONLY the corrected rules text, no explanations
+- Do not add card name, type line, or any other card elements
+- This is for a {card_type} card
+
+TEXT TO CONVERT:
+{rules_text}
+
+LEGAL MTG RULES TEXT:"""
+
+    try:
+        print(f"🔧 Converting rules text to legal MTG format...")
+        response = ollama.chat(
+            model='llama3.1:70b',
+            messages=[{
+                'role': 'user', 
+                'content': conversion_prompt
+            }]
+        )
+        
+        converted_text = response['message']['content'].strip()
+        print(f"   Original: {repr(rules_text[:100])}...")
+        print(f"   Converted: {repr(converted_text[:100])}...")
+        
+        # Basic validation - ensure we got actual rules text back
+        if len(converted_text) < 10 or 'LEGAL MTG RULES TEXT:' in converted_text:
+            print(f"⚠️  Conversion failed, using original text")
+            return rules_text
+            
+        return converted_text
+        
+    except Exception as e:
+        print(f"❌ Legal MTG conversion failed: {e}")
+        return rules_text
 
 
 def limit_creature_active_abilities(card_text):
@@ -580,6 +641,10 @@ def process_card_description_text(card_data, generated_card_text=None):
         processed_text = processed_text.replace(' ~ ', f' {updated_card_data.get("name", "~")} ')  # Replace ~ with card name
         processed_text = processed_text.replace('~', updated_card_data.get("name", "~"))  # Replace any remaining ~
         print(f"🔍 Step 1 - After cleanup: {repr(processed_text)}")
+        
+        # Step 2.1.5: Convert to legal MTG text format using context model
+        processed_text = convert_to_legal_mtg_text(processed_text, updated_card_data)
+        print(f"🔍 Step 1.75 - After legal MTG conversion: {repr(processed_text)}")
         
         # Step 2.2: Clean individual ability lines of quotes and special characters
         lines = processed_text.split('\n')
