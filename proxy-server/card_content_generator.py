@@ -550,7 +550,9 @@ def createCardContent(prompt, card_data=None):
         # Remove card name elements (sentences that are just the card name with no abilities)
         filtered_sentences = []
         card_name = card_data.get('name', '') if card_data else ''
+        card_subtype = card_data.get('subtype', '') if card_data else ''
         print(f"   Card name: '{card_name}'")
+        print(f"   Card subtype: '{card_subtype}'")
         
         for i, sentence in enumerate(sentences):
             print(f"   Processing sentence {i}: '{sentence}'")
@@ -563,6 +565,28 @@ def createCardContent(prompt, card_data=None):
             if sentence_clean == card_name:
                 print(f"🗑️  Removed card name element: '{sentence}'")
                 continue
+                
+            # Skip if this sentence is just the card subtype (or contains only subtype words)
+            if card_subtype:
+                # Handle multiple subtypes separated by spaces
+                subtypes = card_subtype.lower().split()
+                sentence_lower = sentence_clean.lower()
+                
+                # Check if sentence matches full subtype
+                if sentence_lower == card_subtype.lower():
+                    print(f"🗑️  Removed card subtype element (exact): '{sentence}'")
+                    continue
+                    
+                # Check if sentence is just one of the subtype words
+                if sentence_lower in subtypes:
+                    print(f"🗑️  Removed card subtype word: '{sentence}'")
+                    continue
+                    
+                # Check if sentence contains only subtype words (like "Snow elf" -> "snow" + "elf")
+                sentence_words = sentence_lower.split()
+                if sentence_words and all(word in subtypes for word in sentence_words):
+                    print(f"🗑️  Removed card subtype combination: '{sentence}'")
+                    continue
             
             # Also remove card name from the beginning of sentences if it appears there
             if card_name and sentence_clean.startswith(card_name):
