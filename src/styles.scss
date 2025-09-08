@@ -283,3 +283,21 @@ input, textarea, select, button {
     box-shadow: 0 2px 10px rgba(5, 150, 105, 0.3);
   }
 }
+
+/* Timeout toast styles */
+.mat-mdc-snack-bar-container .timeout-toast {
+  background: linear-gradient(145deg, #ff9500, #ff8c00);
+  color: white;
+  font-weight: 600;
+  box-shadow: 0 4px 20px rgba(255, 149, 0, 0.4);
+  
+  .mat-mdc-snack-bar-action {
+    color: white;
+    font-weight: bold;
+  }
+}
+
+.timeout-toast {
+  --mdc-snackbar-container-color: #ff9500;
+  --mat-snack-bar-button-color: white;
+}

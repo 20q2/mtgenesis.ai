@@ -4,6 +4,6 @@ export interface ApiConfig {
 
 export const apiConfig: ApiConfig = {
   // Lambda proxy URL for card generation (proxies to ngrok)
-  cardGenerationUrl: 'https://0eccb5a667ac.ngrok-free.app'
+  cardGenerationUrl: 'https://f559f10091f9.ngrok-free.app'
 };
 

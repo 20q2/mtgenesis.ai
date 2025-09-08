@@ -1570,14 +1570,10 @@ class MagicCardRenderer:
                 else:
                     # Fallback to original position
                     draw.text(self.pt_pos, pt_text, fill='black', font=self.pt_font, anchor='rb')
-            pt_text_time = time.time() - pt_text_start
-            print(f"   ⚔️ P/T text: {pt_text_time:.3f}s")
             
             # Step 11: Add rounded corners to the final card image
             corners_start = time.time()
             card_image_rounded = self.add_rounded_corners(card_image, radius=18)
-            corners_time = time.time() - corners_start
-            print(f"   🔲 Rounded corners: {corners_time:.3f}s")
             
             # Step 12: Convert to base64
             conversion_start = time.time()
@@ -1585,8 +1581,6 @@ class MagicCardRenderer:
             card_image_rounded.save(buffer, format='PNG', quality=95)
             img_data = buffer.getvalue()
             img_base64 = base64.b64encode(img_data).decode('utf-8')
-            conversion_time = time.time() - conversion_start
-            print(f"   💾 Base64 conversion: {conversion_time:.3f}s")
             
             # Final timing summary
             total_render_time = time.time() - render_start

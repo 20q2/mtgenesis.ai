@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Observable, throwError, of } from 'rxjs';
-import { catchError, retry, map, tap, switchMap, timeout } from 'rxjs/operators';
+import { catchError, map, tap, switchMap, timeout } from 'rxjs/operators';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { environment } from '../../environments/environment';
 import { HealthService } from './health.service';
 import { 
@@ -20,22 +21,6 @@ import { Card } from '../models/card.model';
   providedIn: 'root'
 })
 export class CardService {
-
-  /**
-   * API URL from environment configuration
-   */
-  private readonly apiUrl = environment.apiUrl;
-  
-  /**
-   * Number of retry attempts for API calls
-   */
-  private readonly retryCount = environment.retryAttempts;
-  
-  /**
-   * Delay between retry attempts in milliseconds
-   */
-  private readonly retryDelay = environment.retryDelay;
-
   /**
    * Default HTTP headers for Lambda proxy
    */
@@ -46,8 +31,11 @@ export class CardService {
 
   constructor(
     private http: HttpClient,
-    private healthService: HealthService
+    private healthService: HealthService,
+    private snackBar: MatSnackBar
   ) { }
+
+  // Note: Automatic retries disabled to prevent duplicate card generations
 
   /**
    * Get the appropriate timeout value based on whether this is a cold start or warm run
@@ -116,7 +104,6 @@ export class CardService {
     return this.http.post<CardGenerationResponse>(url, request, { headers: this.defaultHeaders })
       .pipe(
         timeout(this.getDynamicTimeout()),
-        retry({ count: this.retryCount, delay: this.retryDelay }),
         map((response: any) => {
           const updatedCard: Card = { ...card };
           
@@ -182,7 +169,6 @@ export class CardService {
     return this.http.post<CardGenerationResponse>(url, request, { headers: this.defaultHeaders })
       .pipe(
         timeout(this.getDynamicTimeout()),
-        retry({ count: this.retryCount, delay: this.retryDelay }),
         map((response: CardGenerationResponse) => {
           const updatedCardData: Partial<Card> = {};
           
@@ -238,7 +224,6 @@ export class CardService {
     return this.http.post<CardGenerationResponse>(url, request, { headers: this.defaultHeaders })
       .pipe(
         timeout(this.getDynamicTimeout()),
-        retry({ count: this.retryCount, delay: this.retryDelay }),
         map((response: any) => {
           const updatedCardData: Partial<Card> = {};
           
@@ -283,6 +268,22 @@ export class CardService {
     return (error: HttpErrorResponse): Observable<never> => {
       // Log error to console
       console.error(`${operation} failed:`, error);
+
+      // Check for timeout errors from the RxJS timeout operator
+      if ((error as any).name === 'TimeoutError' || error.message?.includes('Timeout')) {
+        console.log('⏰ Timeout detected - showing queue toast');
+        this.snackBar.open(
+          'The queue is large and generation is taking longer than expected. Please try again in a minute.',
+          'Dismiss',
+          {
+            duration: 8000, // Show for 8 seconds
+            verticalPosition: 'bottom',
+            horizontalPosition: 'center',
+            panelClass: ['timeout-toast']
+          }
+        );
+        return throwError(() => new Error('Request timed out. The queue is large - please try again in a minute.'));
+      }
 
       let errorMessage = 'An unknown error occurred';
       
