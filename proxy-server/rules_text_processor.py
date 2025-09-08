@@ -46,7 +46,7 @@ LEGAL MTG RULES TEXT:"""
     try:
         print(f"🔧 Converting rules text to legal MTG format...")
         response = ollama.chat(
-            model='llama3.1:70b',
+            model='mistral:latest',
             messages=[{
                 'role': 'user', 
                 'content': conversion_prompt
