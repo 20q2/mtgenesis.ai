@@ -9,7 +9,8 @@ card rules text, including ability classification, text sanitization, and power 
 from .ability_parser import (
     parse_abilities,
     classify_ability,
-    reorder_abilities_properly
+    reorder_abilities_properly,
+    reorder_abilities_properly_array
 )
 
 from .text_sanitizer import (
@@ -35,6 +36,7 @@ __all__ = [
     'parse_abilities',
     'classify_ability', 
     'reorder_abilities_properly',
+    'reorder_abilities_properly_array',
     
     # Text sanitization
     'strip_non_rules_text',

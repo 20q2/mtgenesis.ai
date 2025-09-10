@@ -2,7 +2,7 @@
 from config import (
     USE_CUDA, IMAGE_MODEL, ENABLE_IMAGE_GENERATION,
     COLD_START_TIMEOUT, WARM_RUN_TIMEOUT, MAX_REQUEST_AGE, 
-    CLEANUP_INTERVAL, DELAYED_CLEANUP, MAX_CONCURRENT_REQUESTS,
+    CLEANUP_INTERVAL, DELAYED_CLEANUP, MAX_CONCURRENT_REQUESTS, DEFAULT_IMAGE_SIZE,
     FLYING_RESTRICTED_TYPES as flying_restricted_types,
     FLYING_ENCOURAGED_TYPES as flying_encouraged_types,
     _models_loaded, first_job_completed
@@ -10,7 +10,7 @@ from config import (
 
 # Import text processing modules
 from text_processing import (
-    parse_abilities, classify_ability, reorder_abilities_properly,
+    parse_abilities, classify_ability, reorder_abilities_properly, reorder_abilities_properly_array,
     strip_non_rules_text, fix_markdown_bullet_points, clean_ability_text,
     clean_ability_arrays, format_ability_newlines, smart_split_by_periods,
     clean_ability_quotes, generate_creature_stats, should_generate_asterisk_pt,
@@ -123,10 +123,11 @@ class RequestQueue:
                         print(f"🧹 Cleaning up timed-out request {request_id} from active_requests")
                         # Return timeout result and clean up immediately
                         del self.active_requests[request_id]
+                        timeout_minutes = MAX_REQUEST_AGE // 60
                         return {
                             'status': 'completed',
                             'result': None,
-                            'error': 'Request timed out after 10 minutes'
+                            'error': f'Request timed out after {timeout_minutes} minutes'
                         }
                 
                 if req['completed']:
@@ -866,8 +867,8 @@ def create_card():
             return add_ngrok_headers(response), 400
         
         # Optional parameters - default to Magic card art box aspect ratio
-        width = data.get('width', 408)
-        height = data.get('height', 336)
+        width = DEFAULT_IMAGE_SIZE[0]
+        height = DEFAULT_IMAGE_SIZE[1]
         
         # Extract card data for enhanced prompting
         original_card_data = data.get('cardData', {})
@@ -908,7 +909,8 @@ def create_card():
             
             elif time.time() - start_wait > max_wait_time:
                 print(f"⏰ Request timed out after {max_wait_time} seconds")
-                response = jsonify({'error': 'Request timed out - took longer than 10 minutes'})
+                timeout_minutes = max_wait_time // 60
+                response = jsonify({'error': f'Request timed out - took longer than {timeout_minutes} minutes'})
                 return add_ngrok_headers(response), 504
             
             else:

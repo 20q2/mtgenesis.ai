@@ -9,7 +9,7 @@ colors, rarities, and special mechanics.
 import re
 import ollama
 from text_processing import (
-    strip_non_rules_text, format_ability_newlines, reorder_abilities_properly
+    strip_non_rules_text, format_ability_newlines, reorder_abilities_properly, reorder_abilities_properly_array
 )
 from rules_text_processor import (
     validate_rules_text, limit_creature_active_abilities, sanitize_planeswalker_abilities,
@@ -32,7 +32,7 @@ def createCardContent(prompt, card_data=None):
     print(f"   🎲 Card data keys: {list(card_data.keys()) if card_data else 'None'}")
     try:
         # Build enhanced prompt based on card properties
-        enhanced_prompt = f"Generate the rules text for a Magic: the gathering card. \nOutput format: Only the rules text abilities, no explanations, no card name, no type line. \nSINGLETON FORMAT: This card is for singleton formats (EDH/Commander) where only one copy exists in the deck. NEVER create abilities that reference 'another copy of this card', 'other copies', or 'search for a card with the same name'. Instead use abilities that search for cards 'with different names' or reference 'other cards'."
+        enhanced_prompt = f"Generate the rules text for a Magic: the gathering card. \nOutput format: Only the rules text abilities, no explanations, no card name, no type line. \nSINGLETON FORMAT: This card is for singleton formats (EDH/Commander) where only one copy exists in the deck. NEVER create abilities that reference 'another copy of this card', 'other copies', or 'search for a card with the same name'. \nCRITICAL TEMPLATING: NEVER use vague references like 'different name', 'another name', or 'other name'. Always specify what it's different from. CORRECT: 'with a different name than this creature', 'with a name other than [Card Name]', 'that doesn't share a name with this creature'. INCORRECT: 'different name', 'card with different name'."
         
         if card_data:
             # Analyze mana cost for power level
@@ -80,23 +80,6 @@ def createCardContent(prompt, card_data=None):
                 
                 enhanced_prompt += asterisk_guidance
             
-            # Check for regenerate keyword - CRITICAL VALIDATION
-            # Regenerate requires specific formatting and rules
-            has_regenerate = False
-            
-            # Check in existing description
-            if card_data.get('description'):
-                description_text = str(card_data.get('description', '')).lower()
-                if 'regenerate' in description_text:
-                    has_regenerate = True
-            
-            # Check in the original prompt
-            if 'regenerate' in prompt.lower():
-                has_regenerate = True
-                
-            if has_regenerate:
-                regenerate_guidance = " MANDATORY REGENERATE RULE: This card uses regenerate abilities. You MUST use the correct format. Regenerate abilities must be written as '{cost}: Regenerate this creature' or 'Regenerate this creature' (if no cost). Examples: '{1}{G}: Regenerate this creature', '{B}: Regenerate this creature', 'Regenerate this creature'. NEVER write incorrect formats like 'can regenerate', 'has regenerate', or 'regenerates'. Regenerate means: The next time this creature would be destroyed this turn, it isn't. Instead, tap it, remove all damage from it, and remove it from combat. This is the official Magic templating and must be followed exactly."
-                enhanced_prompt += regenerate_guidance
             
             supertype = (card_data.get('supertype') or '').lower()
             is_legendary = 'legendary' in supertype
@@ -222,6 +205,21 @@ def createCardContent(prompt, card_data=None):
             if 'instant' in card_type:
                 type_specific_guidance = " INSTANT DESIGN: Generate effects that provide immediate answers, reactions, or advantages. Focus on: counterspells, removal spells, combat tricks, pump spells, bounce effects, damage spells, protection, or temporary buffs. Instants should have immediate impact and be reactive in nature. COHESION FOR INSTANTS: Since instants typically have single focused effects, avoid multiple unrelated abilities. If you include multiple effects, they should be closely related (e.g., 'Deal 3 damage, then scry 1' or 'Counter target spell, draw a card'). Common patterns: 'Counter target spell', 'Destroy target creature', 'Target creature gets +X/+X until end of turn', 'Deal X damage to any target', 'Return target permanent to its owner's hand', 'Target creature gains protection from [color] until end of turn'. Keep effects simple and focused - instants are about timing and immediate utility, not complex interactions."
                 
+                # Color-specific instant guidance
+                instant_color_guidance = ""
+                if 'W' in colors:
+                    instant_color_guidance += " WHITE INSTANTS: Protection spells ('Target creature gains protection from red'), combat tricks ('+2/+2 and first strike until end of turn'), lifegain ('Gain 5 life'), exile-based removal ('Exile target attacking creature'), damage prevention ('Prevent all damage that would be dealt this turn'), or creature buffs with vigilance/first strike themes."
+                if 'U' in colors:
+                    instant_color_guidance += " BLUE INSTANTS: Counterspells ('Counter target spell'), bounce effects ('Return target permanent to owner's hand'), card selection ('Look at top 4 cards, put one in hand'), temporary creature theft ('Gain control of target creature until end of turn'), tap effects ('Tap all creatures target player controls'), or spell copying ('Copy target instant or sorcery spell')."
+                if 'B' in colors:
+                    instant_color_guidance += " BLACK INSTANTS: Creature destruction ('Destroy target non-black creature'), life drain ('Target player loses 3 life, you gain 3 life'), discard effects ('Target player discards two cards'), temporary reanimation ('Return target creature from graveyard to battlefield, sacrifice it at end of turn'), or debuff spells ('Target creature gets -3/-3 until end of turn')."
+                if 'R' in colors:
+                    instant_color_guidance += " RED INSTANTS: Direct damage ('Deal 4 damage to any target'), combat tricks focusing on power/first strike ('Target creature gets +3/+0 and first strike'), artifact destruction ('Destroy target artifact'), temporary creature theft ('Gain control of target creature until end of turn, untap it, it gains haste'), or chaos effects ('Flip a coin, if heads deal 5 damage to target')."
+                if 'G' in colors:
+                    instant_color_guidance += " GREEN INSTANTS: Giant Growth effects ('Target creature gets +4/+4 until end of turn'), fight spells ('Target creature fights another target creature'), artifact/enchantment destruction ('Destroy target artifact or enchantment'), creature tutoring ('Search library for basic land or creature'), or temporary mana boosts ('Add three mana of any one color')."
+                
+                type_specific_guidance += instant_color_guidance
+                
                 # Instant-specific rarity scaling
                 if rarity == 'common':
                     type_specific_guidance += " Common instant: Simple, focused effect with minimal complexity. Examples: basic counterspell, simple buff, or small damage spell."
@@ -233,6 +231,21 @@ def createCardContent(prompt, card_data=None):
             # SORCERY PIPELINE  
             elif 'sorcery' in card_type:
                 type_specific_guidance = " SORCERY DESIGN: Generate proactive effects that provide significant impact on your turn. Focus on: tutoring, mass effects, creature tokens, permanent solutions, board development, reanimation, or transformation effects. Sorceries should be powerful but require planning since they're sorcery speed. COHESION FOR SORCERIES: Sorceries can have multiple effects, but they must support a unified strategy. Good themes: token creation + token buffs, reanimation + graveyard filling, ramp + expensive effects, or mass removal + card advantage. Avoid combining unrelated effects like 'Create tokens + Counter next spell + Gain life'. Common patterns: 'Search your library for...', 'Destroy all creatures', 'Create X creature tokens', 'Return target card from graveyard to hand', 'Transform target creature', 'Put a creature from your graveyard onto the battlefield'. Sorceries can be more complex than instants since timing isn't critical."
+                
+                # Color-specific sorcery guidance
+                sorcery_color_guidance = ""
+                if 'W' in colors:
+                    sorcery_color_guidance += " WHITE SORCERIES: Mass removal ('Destroy all creatures with power 4 or greater'), token creation ('Create three 1/1 Soldier tokens'), lifegain strategies ('Gain life equal to number of creatures you control'), equipment/aura tutoring ('Search library for Equipment or Aura'), board wipes with restrictions ('Destroy all non-white creatures'), or creature reanimation ('Return target creature with mana value 3 or less from graveyard')."
+                if 'U' in colors:
+                    sorcery_color_guidance += " BLUE SORCERIES: Card draw ('Draw three cards'), mass bounce ('Return all nonland permanents to owners' hands'), spell copying ('Copy target instant or sorcery, you may choose new targets'), library manipulation ('Look at top 7 cards, put any number into graveyard'), creature transformation ('Turn target creature into 1/1 until end of turn'), or time manipulation ('Take an extra turn after this one')."
+                if 'B' in colors:
+                    sorcery_color_guidance += " BLACK SORCERIES: Mass creature destruction ('Destroy all creatures'), reanimation ('Return target creature from any graveyard to battlefield under your control'), discard effects ('Each player discards their hand'), life drain ('Each opponent loses life equal to number of creatures in your graveyard'), tutor effects ('Search library for any card'), or graveyard manipulation ('Put target creature from graveyard on top of library')."
+                if 'R' in colors:
+                    sorcery_color_guidance += " RED SORCERIES: Mass damage ('Deal 3 damage to each creature and player'), artifact destruction ('Destroy all artifacts'), temporary creature theft ('Gain control of all creatures until end of turn'), land destruction ('Destroy target land'), goblin/token creation ('Create X 1/1 Goblin tokens'), or chaos effects ('Each player discards their hand, then draws seven cards')."
+                if 'G' in colors:
+                    sorcery_color_guidance += " GREEN SORCERIES: Ramp spells ('Search library for up to two basic lands, put them onto battlefield'), creature tutoring ('Search library for creature with mana value X or less'), mass pump ('Creatures you control get +3/+3 until end of turn'), artifact/enchantment destruction ('Destroy all artifacts and enchantments'), token creation ('Create X 3/3 Beast tokens'), or land-based effects ('Put X +1/+1 counters on each creature you control, where X is number of lands you control')."
+                
+                type_specific_guidance += sorcery_color_guidance
                 
                 # Sorcery-specific rarity scaling
                 if rarity == 'common':
@@ -258,10 +271,40 @@ def createCardContent(prompt, card_data=None):
                     type_specific_guidance += " FOOD TOKEN: MANDATORY - All Food tokens MUST have the ability '{2}, {T}, Sacrifice this artifact: You gain 2 life.' This is the defining characteristic of Food tokens as specified by the user. You may add one additional minor ability, but this exact sacrifice ability is required."
                 else:
                     type_specific_guidance += " Generic artifact: Utility effects, activated abilities, or static benefits available to all colors."
+                
+                # Color-specific artifact guidance (for colored artifacts)
+                if colors:  # Only add if this is a colored artifact
+                    artifact_color_guidance = ""
+                    if 'W' in colors:
+                        artifact_color_guidance += " WHITE ARTIFACTS: Equipment that grants protection or lifelink, artifacts that create tokens, lifegain-based effects, or artifacts that buff creatures with vigilance/first strike."
+                    if 'U' in colors:
+                        artifact_color_guidance += " BLUE ARTIFACTS: Card draw engines, artifacts that manipulate libraries, artifact-based counterspells, or artifacts that grant flying/unblockable."
+                    if 'B' in colors:
+                        artifact_color_guidance += " BLACK ARTIFACTS: Sacrifice outlets, artifacts that drain life, graveyard-based effects, or artifacts that create zombie tokens."
+                    if 'R' in colors:
+                        artifact_color_guidance += " RED ARTIFACTS: Damage-dealing artifacts, artifacts that grant haste, artifact destruction, or artifacts that create goblin tokens."
+                    if 'G' in colors:
+                        artifact_color_guidance += " GREEN ARTIFACTS: Mana-producing artifacts, artifacts that buff creatures, artifact/enchantment destruction, or artifacts that interact with lands."
+                    type_specific_guidance += artifact_color_guidance
             
             # ENCHANTMENT PIPELINE
             elif 'enchantment' in card_type:
                 type_specific_guidance = " ENCHANTMENT DESIGN: Generate ongoing effects that modify game rules or provide continuous benefits. Enchantments represent magical effects that persist. Focus on: static effects ('Creatures you control have...'), triggered abilities ('Whenever/When...'), or activated abilities that represent magical powers. COHESION FOR ENCHANTMENTS: All abilities should support a unified magical theme. Good themes: creature buffs + creature synergies, graveyard effects + death triggers, mana enhancement + expensive activated abilities, or tribal effects + creature type matters. Avoid random combinations like 'Creature buffs + Land destruction + Card draw + Life gain'. Common patterns: 'Creatures you control get +1/+1', 'Whenever a creature enters the battlefield, ...', '{T}: Target creature gains flying until end of turn', 'At the beginning of your upkeep, ...' Enchantments should feel magical and provide long-term value."
+                
+                # Color-specific enchantment guidance
+                enchantment_color_guidance = ""
+                if 'W' in colors:
+                    enchantment_color_guidance += " WHITE ENCHANTMENTS: Creature anthems ('Creatures you control get +1/+1'), protection effects ('Creatures you control have protection from black'), lifegain engines ('Whenever you gain life, create a 1/1 token'), tax effects ('Spells cost {1} more to cast'), exile-based effects ('Whenever a creature dies, exile it'), or equipment/aura synergies ('Equipped creatures have vigilance')."
+                if 'U' in colors:
+                    enchantment_color_guidance += " BLUE ENCHANTMENTS: Card draw engines ('At beginning of upkeep, draw a card'), spell cost reduction ('Instant and sorcery spells cost {1} less'), library manipulation ('At beginning of upkeep, scry 2'), counterspell effects ('Counter the first spell each turn'), creature evasion ('Creatures you control can't be blocked'), or artifact synergies ('Artifacts you control have hexproof')."
+                if 'B' in colors:
+                    enchantment_color_guidance += " BLACK ENCHANTMENTS: Death triggers ('Whenever a creature dies, each opponent loses 1 life'), graveyard engines ('At beginning of upkeep, put target creature from graveyard into your hand'), sacrifice outlets ('{1}, Sacrifice a creature: Draw a card'), life drain effects ('At beginning of each end step, each opponent loses life equal to number of creatures that died'), or reanimation effects ('Creatures in your graveyard have unearth')."
+                if 'R' in colors:
+                    enchantment_color_guidance += " RED ENCHANTMENTS: Damage engines ('Whenever you cast an instant or sorcery, deal 1 damage to any target'), creature buffs with aggression ('Creatures you control have haste'), artifact destruction ('At beginning of upkeep, destroy target artifact'), chaos effects ('At beginning of upkeep, flip a coin, if heads each player draws a card'), or token creation ('At beginning of combat, create a 1/1 Goblin token with haste')."
+                if 'G' in colors:
+                    enchantment_color_guidance += " GREEN ENCHANTMENTS: Mana production ('At beginning of upkeep, add {G}'), creature size buffs ('Creatures you control get +1/+1 for each Forest you control'), land-based effects ('Whenever a land enters, create a 1/1 Saproling token'), artifact/enchantment punishment ('Destroy target artifact or enchantment at beginning of upkeep'), ramp effects ('Lands you control tap for an additional mana'), or +1/+1 counter engines ('At beginning of combat, put a +1/+1 counter on target creature')."
+                
+                type_specific_guidance += enchantment_color_guidance
                 
                 # Enchantment-specific types
                 if 'aura' in (card_data.get('subtype') or '').lower():
@@ -544,7 +587,7 @@ def createCardContent(prompt, card_data=None):
         card_text = format_ability_newlines(card_text)
         
         # Limit to 3-4 sentences by splitting on periods and taking first 4
-        sentences = [s.strip() for s in card_text.split('.') if s.strip()]
+        sentences = [s.strip() for s in re.split(r'[.\n]', card_text) if s.strip()]
         print(f"🔍 Found {len(sentences)} sentences: {sentences}")
         
         # Remove card name elements (sentences that are just the card name with no abilities)
@@ -561,51 +604,107 @@ def createCardContent(prompt, card_data=None):
             sentence_clean = sentence.strip().strip('\'"*').strip()
             print(f"   Cleaned version: '{sentence_clean}'")
             
+            # Handle pattern like: 'slimefoot, the stowaway' - Fungus Warlock
+            # Check if sentence has quoted card name followed by dash and subtype
+            if sentence_clean.startswith("'") and " - " in sentence_clean:
+                quote_end = sentence_clean.find("'", 1)  # Find closing quote
+                if quote_end > 0:
+                    quoted_name = sentence_clean[1:quote_end]  # Extract name from quotes
+                    if quoted_name.lower() == card_name.lower():
+                        print(f"🗑️  Removed quoted card name with subtype: '{sentence}'")
+                        continue
             
             if sentence_clean == card_name:
                 print(f"🗑️  Removed card name element: '{sentence}'")
                 continue
-                
+            
+            pattern = rf'{re.escape(card_name)}[\'"]? enchantment'
+            if re.match(pattern, sentence_clean, re.IGNORECASE):
+                print(f"🗑️  Removed card name + enchantment pattern: '{sentence}'")
+                continue
+
+            
+            # if sentence starts with card name followed by a -
+            if sentence_clean.startswith(f"{card_name} -"):
+                print(f"🗑️  Removed card name element with prefix: '{sentence}'")
+                continue
+
+            # if the start of the sentence is just our card name followed by punctuation, strip that out
+            if sentence_clean.startswith(f"{card_name}.") or sentence_clean.startswith(f"{card_name},"):
+                sentence_clean = sentence_clean[len(card_name)+1:].strip()
+
+            # Remove card type/subtype elements with surrounding punctuation
+            # Strip SAFE punctuation only (preserve : and {} for Magic syntax)
+            sentence_core = sentence_clean.strip('.,!?;"\'-*()[] \t\n').strip()
+            print(f"   Core text after safe punctuation removal: '{sentence_core}'")
+            
+            # Check against card type (main type like "Creature", "Instant", etc.)
+            card_main_type = card_data.get('type', '') if card_data else ''
+            if card_main_type and sentence_core.lower() == card_main_type.lower():
+                print(f"🗑️  Removed card type element with punctuation: '{sentence}' (core: '{sentence_core}')")
+                continue
+            
+            # Check against supertype (like "Legendary")
+            card_super_type = card_data.get('supertype', '') if card_data else ''
+            if card_super_type and sentence_core.lower() == card_super_type.lower():
+                print(f"🗑️  Removed card supertype element with punctuation: '{sentence}' (core: '{sentence_core}')")
+                continue
+            
+            # Check for type line patterns: "Word(s) - Word(s)" (like "Snow Elf - Elemental")
+            # This catches when the model incorrectly outputs type lines as rules text
+            type_line_pattern = r'^[A-Za-z\s]+ - [A-Za-z\s]{1,20}$'
+            if re.match(type_line_pattern, sentence_core):
+                # Additional validation: should be short (1-2 words on each side of hyphen)
+                parts = sentence_core.split(' - ')
+                if len(parts) == 2:
+                    left_part = parts[0].strip()
+                    right_part = parts[1].strip()
+                    left_word_count = len(left_part.split())
+                    right_word_count = len(right_part.split())
+                    
+                    # Type lines typically have 1-3 words on each side
+                    if left_word_count <= 3 and right_word_count <= 2:
+                        print(f"🗑️  Removed type line pattern: '{sentence}' (core: '{sentence_core}')")
+                        continue
+            
             # Skip if this sentence is just the card subtype (or contains only subtype words)
             if card_subtype:
                 # Handle multiple subtypes separated by spaces
                 subtypes = card_subtype.lower().split()
                 sentence_lower = sentence_clean.lower()
+                sentence_core_lower = sentence_core.lower()
                 
-                # Check if sentence matches full subtype
+                # Check if core text matches full subtype
+                if sentence_core_lower == card_subtype.lower():
+                    print(f"🗑️  Removed card subtype element with punctuation: '{sentence}' (core: '{sentence_core}')")
+                    continue
+                
+                # Check if sentence matches full subtype (existing logic)
                 if sentence_lower == card_subtype.lower():
                     print(f"🗑️  Removed card subtype element (exact): '{sentence}'")
                     continue
                     
-                # Check if sentence is just one of the subtype words
+                # Check if core text is just one of the subtype words
+                if sentence_core_lower in subtypes:
+                    print(f"🗑️  Removed card subtype word with punctuation: '{sentence}' (core: '{sentence_core}')")
+                    continue
+                    
+                # Check if sentence is just one of the subtype words (existing logic)
                 if sentence_lower in subtypes:
                     print(f"🗑️  Removed card subtype word: '{sentence}'")
                     continue
                     
-                # Check if sentence contains only subtype words (like "Snow elf" -> "snow" + "elf")
+                # Check if core text contains only subtype words
+                sentence_core_words = sentence_core_lower.split()
+                if sentence_core_words and all(word in subtypes for word in sentence_core_words):
+                    print(f"🗑️  Removed card subtype combination with punctuation: '{sentence}' (core: '{sentence_core}')")
+                    continue
+                    
+                # Check if sentence contains only subtype words (existing logic)
                 sentence_words = sentence_lower.split()
                 if sentence_words and all(word in subtypes for word in sentence_words):
                     print(f"🗑️  Removed card subtype combination: '{sentence}'")
                     continue
-            
-            # Also remove card name from the beginning of sentences if it appears there
-            if card_name and sentence_clean.startswith(card_name):
-                print(f"   Found card name at start of sentence!")
-                # Remove the card name from the beginning
-                remaining_text = sentence_clean[len(card_name):].strip()
-                print(f"   Remaining text after removing name: '{remaining_text}'")
-                # Skip if nothing meaningful remains after removing the name
-                if not remaining_text or remaining_text in ['"', "'", '"\n', "'\n"]:
-                    print(f"🗑️  Removed card name prefix: '{sentence}'")
-                    continue
-                # Keep the sentence but without the card name prefix
-                original_sentence = sentence
-                sentence = sentence.replace(f'"{card_name}"', '').replace(f"'{card_name}'", '').replace(card_name, '').strip()
-                if sentence.startswith('\n'):
-                    sentence = sentence[1:].strip()
-                print(f"🧹 Cleaned card name from sentence")
-                print(f"   Before: '{original_sentence}'")
-                print(f"   After: '{sentence}'")
             
             # Skip empty sentences or sentences that are just quotes/whitespace
             sentence_meaningful = sentence.strip().strip('\'"').strip()
@@ -625,17 +724,31 @@ def createCardContent(prompt, card_data=None):
             filtered_sentences.append(sentence)
         
         sentences = filtered_sentences
-        print(f"🔍 After filtering: {len(sentences)} sentences: {sentences}")
+        print(f"📦 After filtering: {len(sentences)} sentences: {sentences}")
         
+        ## Sanitize front and end of each element
+        for i in range(len(sentences)):
+            sentences[i] = sentences[i].strip('\'"')
+
+        # Create abilities array from cleaned sentences
         if len(sentences) > 4:
             print(f"⚠️  Truncating from {len(sentences)} to 4 sentences")
-            card_text = '. '.join(sentences[:4]) + '.'
-        
+            abilities_array = sentences[:4]
+        else:
+            abilities_array = sentences
+
         # UNIFIED SANITATION PIPELINE - Applied to ALL card types
         if card_data:
-            card_type = card_data.get('type', '').lower()
+            # Step 1: Universal ability reordering (work with abilities array)
+            print(f"🔍 Before reordering: {abilities_array}")
+            abilities_array = reorder_abilities_properly_array(abilities_array, card_data)
+            print(f"🔍 After reordering: {abilities_array}")
             
-            # Step 1: Type-specific ability limits
+            # Convert abilities array to final text only at the very end
+            card_text = '\n'.join(abilities_array)
+            
+            # Step 2: Type-specific ability limits (now work with final text)
+            card_type = card_data.get('type', '').lower()
             if 'creature' in card_type:
                 card_text = limit_creature_active_abilities(card_text)
             elif 'planeswalker' in card_type:
@@ -651,13 +764,11 @@ def createCardContent(prompt, card_data=None):
                 # Artifacts/enchantments get general permanent sanitation
                 card_text = sanitize_permanent_abilities(card_text)
             
-            # Step 2: Universal ability reordering (ALL card types benefit from proper ordering)
-            print(f"🔍 Before reordering: {repr(card_text)}")
-            card_text = reorder_abilities_properly(card_text, card_data)
-            print(f"🔍 After reordering: {repr(card_text)}")
-            
             # Step 3: Universal complexity limits (prevent overpowered cards)
             card_text = apply_universal_complexity_limits(card_text, card_data)
+        else:
+            # No card data - just convert abilities array to final text
+            card_text = '\n'.join(abilities_array)
         
         # Final validation after all processing (check for post-processing issues)
         if not validate_rules_text(card_text, card_data):
@@ -668,7 +779,6 @@ def createCardContent(prompt, card_data=None):
         
         print(f"🧠 createCardContent returning:")
         print(f"   📝 Result: {repr(card_text)}")
-        print(f"   📏 Length: {len(card_text) if card_text else 0}")
         return card_text
         
     except Exception as e:

@@ -36,7 +36,10 @@ CONTENT_MODEL = "mistral:7b"  # Ollama model for text generation
 # Image generation parameters
 DEFAULT_IMAGE_STEPS = 1  # For SDXL-Turbo
 DEFAULT_GUIDANCE_SCALE = 0.0  # For SDXL-Turbo
-DEFAULT_IMAGE_SIZE = (408, 336)  # Magic card art dimensions
+# DEFAULT_IMAGE_SIZE = (408, 336)  # Magic card art dimensions
+
+#Reduced for speed
+DEFAULT_IMAGE_SIZE = (304, 248)
 
 # Text generation parameters
 MAX_PROMPT_TOKENS = 75  # Token limit for prompts

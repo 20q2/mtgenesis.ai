@@ -57,6 +57,11 @@ LEGAL MTG RULES TEXT:"""
         print(f"   Original: {repr(rules_text[:100])}...")
         print(f"   Converted: {repr(converted_text[:100])}...")
         
+        # Clean up tap costs followed by colons
+        # Replace variants like "Tap:", "tap:", "tap':", "tap":" with "{T}:"
+        tap_cost_pattern = r'(?:Tap|tap|tap\'|tap"):' 
+        converted_text = re.sub(tap_cost_pattern, '{T}:', converted_text)
+        
         # Basic validation - ensure we got actual rules text back
         if len(converted_text) < 10 or 'LEGAL MTG RULES TEXT:' in converted_text:
             print(f"⚠️  Conversion failed, using original text")
@@ -346,6 +351,64 @@ def apply_universal_complexity_limits(card_text, card_data):
     return card_text
 
 
+def _is_valid_rules_terminology(type_phrase, rules_text):
+    """
+    Check if a type line phrase appears in a valid Magic rules text context.
+    Works for any creature type: "Snow Creature", "Legendary Artifact", etc.
+    
+    Args:
+        type_phrase: The type phrase to check (e.g., "snow creature", "legendary creature", "artifact creature")
+        rules_text: The full rules text in lowercase
+    
+    Returns:
+        bool: True if this is valid rules terminology, False if it's contamination
+    """
+    # Valid patterns where type combinations are legitimate in rules text
+    valid_patterns = [
+        # Targeting patterns
+        rf'\btarget\s+{re.escape(type_phrase)}\b',  # "target snow creature", "target legendary artifact"
+        rf'\btarget\s+\w+\s+{re.escape(type_phrase)}\b',  # "target nonlegendary creature"
+        rf'\bchoose\s+a\s+{re.escape(type_phrase)}\b',  # "choose a snow creature"
+        rf'\bchoose\s+target\s+{re.escape(type_phrase)}\b',  # "choose target artifact creature"
+        
+        # Reference patterns  
+        rf'\ball\s+{re.escape(type_phrase)}s?\b',  # "all artifact creatures", "all legendary permanents"
+        rf'\beach\s+{re.escape(type_phrase)}\b',  # "each snow creature", "each legendary creature"
+        rf'\bother\s+{re.escape(type_phrase)}s?\b',  # "other legendary creatures"
+        rf'\ba\s+{re.escape(type_phrase)}\b',  # "a snow creature", "a legendary permanent"
+        rf'\banother\s+{re.escape(type_phrase)}\b',  # "another artifact creature"
+        
+        # Conditional patterns
+        rf'\bwhenever\s+a\s+{re.escape(type_phrase)}\b',  # "whenever a legendary creature"
+        rf'\bwhenever\s+.*{re.escape(type_phrase)}\b',  # "whenever ... enters", "whenever ... dies"
+        rf'\bwhen\s+.*{re.escape(type_phrase)}\b',  # "when ... enters the battlefield"
+        rf'\bif\s+.*{re.escape(type_phrase)}\b',  # "if ... would die"
+        
+        # Exclusion patterns (non-X)
+        rf'\bnon-{re.escape(type_phrase)}\b',  # "non-snow creature", "non-artifact creature"
+        rf'\bnon\w*-{re.escape(type_phrase)}\b',  # Handle various non- prefixes
+        
+        # Possession/control patterns
+        rf'\byou\s+control\s+.*{re.escape(type_phrase)}\b',  # "you control ... legendary permanent"
+        rf'\bunder\s+your\s+control\s+.*{re.escape(type_phrase)}\b',
+        
+        # Creation patterns
+        rf'\bcreate\s+.*{re.escape(type_phrase)}\b',  # "create ... artifact creature token"
+        rf'\bput\s+.*{re.escape(type_phrase)}\b',  # "put ... legendary creature"
+        
+        # Search/library patterns
+        rf'\bsearch\s+.*{re.escape(type_phrase)}\b',  # "search ... legendary creature"
+        rf'\bfrom\s+your\s+\w+.*{re.escape(type_phrase)}\b',  # "from your library ... creature"
+    ]
+    
+    # Check if any valid pattern matches
+    for pattern in valid_patterns:
+        if re.search(pattern, rules_text, re.IGNORECASE):
+            return True
+    
+    return False
+
+
 def validate_rules_text(rules_text, card_data):
     """
     Validate that rules text doesn't contain type line elements
@@ -395,6 +458,11 @@ def validate_rules_text(rules_text, card_data):
     rules_text_lower = rules_text.lower()
     for type_check in type_checks:
         if type_check.lower() in rules_text_lower:
+            # Check if this is a valid Magic rules text usage before flagging as contamination
+            if _is_valid_rules_terminology(type_check.lower(), rules_text_lower):
+                print(f"✅ Valid rules terminology found: '{type_check}' (not contamination)")
+                continue  # This is valid, skip to next check
+            
             print(f"⚠️  Rules text contaminated with type line element: '{type_check}'")
             return False
     

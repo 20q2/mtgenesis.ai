@@ -531,8 +531,14 @@ class MagicCardRenderer:
         elif not colors or colors == ['C']:
             return 'A'  # Regular colorless
         elif len(colors) == 1:
+            # Check if this is an enchantment creature - add Nyx suffix
+            if 'enchantment' in card_type.lower() and 'creature' in card_type.lower():
+                return colors[0] + 'Nyx'
             return colors[0]
         else:
+            # Check if this is an enchantment creature - add Nyx suffix
+            if 'enchantment' in card_type.lower() and 'creature' in card_type.lower():
+                return 'MNyx'
             return 'M'  # Multicolor
     
     def get_color_specific_mask(self, mana_colors: List[str]) -> str:
