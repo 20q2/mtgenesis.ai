@@ -187,6 +187,53 @@ export class AppComponent implements OnInit {
       });
   }
 
+
+  regenerateCardText(card: Card): void {
+    if (!this.modelsReady) {
+      this.error = 'Models are still loading. Please wait...';
+      return;
+    }
+    
+    if (!this.currentCard.imageUrl) {
+      this.error = 'No artwork available to regenerate text with.';
+      return;
+    }
+    
+    // Reset error and success states
+    this.textError = null;
+    this.successMessage = null;
+    
+    // Set loading state
+    this.isGeneratingText = true;
+    
+    // Regenerate text with existing image
+    this.cardService.regenerateCardText(card, this.currentCard.imageUrl)
+      .pipe(
+        catchError(error => {
+          this.textError = `Failed to regenerate card text: ${error.message}`;
+          console.error('Card text regeneration error:', error);
+          return of(null);
+        }),
+        finalize(() => {
+          this.isGeneratingText = false;
+          // Reset the form's loading state and update timing
+          if (this.cardFormComponent) {
+            this.cardFormComponent.setGenerating(false);
+          }
+        })
+      )
+      .subscribe((updatedCard: Partial<Card> | null) => {
+        if (!updatedCard) {
+          // Handle error case
+          return;
+        }
+        
+        // Update the current card with regenerated text, keeping existing complete card image
+        this.currentCard = { ...this.currentCard, ...updatedCard };
+        this.successMessage = 'Card text regenerated successfully!';
+      });
+  }
+
   generateCardArt(card: Card): void {
     // Reset error and success states
     this.artError = null;

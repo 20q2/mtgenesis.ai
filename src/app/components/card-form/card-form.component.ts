@@ -35,6 +35,7 @@ export class CardFormComponent implements OnInit {
   generationStartTime: number | null = null;
   
   @Input() modelsReady: boolean = false;
+  @Input() hasCompleteCard: boolean = false;
   @Output() cardChange = new EventEmitter<Card>();
   @Output() generateCard = new EventEmitter<Card>();
   @Output() regenerateText = new EventEmitter<Card>();
@@ -183,13 +184,16 @@ export class CardFormComponent implements OnInit {
       return; // Prevent action while generating
     }
     
+    this.isGenerating = true;
+    this.generationStartTime = Date.now(); // Track when regeneration started
     this.regenerateText.emit(this.cardForm.value as Card);
   }
 
+
   // Helper to check if regenerate button should be shown
   shouldShowRegenerateButton(): boolean {
-    return false;
-    return this.hasGeneratedCard && this.cardForm.pristine && !this.isGenerating;
+    // Show regenerate button only when we have a complete card image displayed
+    return this.hasCompleteCard && !this.isGenerating;
   }
 
   isFieldInvalid(field: string): boolean {

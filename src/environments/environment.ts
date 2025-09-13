@@ -14,6 +14,6 @@ export const environment = {
   // Cold start timeout (first job) - 3 minutes
   coldStartTimeoutMs: 180000,
   // Warm run timeout (subsequent jobs) - 30 seconds  
-  warmRunTimeoutMs: 30000
+  warmRunTimeoutMs: 180000
 };
 

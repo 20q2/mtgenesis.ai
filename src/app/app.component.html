@@ -130,8 +130,10 @@
   <div class="card-form-section">
     <app-card-form 
       [modelsReady]="modelsReady"
+      [hasCompleteCard]="!!currentCard.cardImageUrl"
       (cardChange)="updateCard($event)" 
-      (generateCard)="generateCard($event)"></app-card-form>
+      (generateCard)="generateCard($event)"
+      (regenerateText)="regenerateCardText($event)"></app-card-form>
   </div>
 </main>
 

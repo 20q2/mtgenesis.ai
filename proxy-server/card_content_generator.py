@@ -8,8 +8,10 @@ colors, rarities, and special mechanics.
 
 import re
 import ollama
+import time
 from text_processing import (
-    strip_non_rules_text, format_ability_newlines, reorder_abilities_properly, reorder_abilities_properly_array
+    strip_non_rules_text, format_ability_newlines, reorder_abilities_properly, reorder_abilities_properly_array,
+    smart_split_by_periods
 )
 from rules_text_processor import (
     validate_rules_text, limit_creature_active_abilities, sanitize_planeswalker_abilities,
@@ -22,525 +24,433 @@ from config import (
 )
 
 
+def build_prompt(card_data: dict) -> str:
+    """
+    Build a modular prompt for card content generation.
+    Only includes relevant sections based on card properties.
+    """
+    card_type = card_data.get('type', '').lower()
+    colors = card_data.get('colors', [])
+    rarity = card_data.get('rarity', 'common').lower()
+    cmc = card_data.get('cmc', 0)
+    subtype = card_data.get('subtype', '')
+    card_name = card_data.get('name', '')
+    
+    # Build prompt sections
+    sections = []
+    
+    # Core task
+    sections.append(_get_core_task())
+    
+    # Card type guidance
+    sections.append(_get_type_guidance(card_type, subtype, rarity))
+    
+    # Color guidance
+    if colors:
+        sections.append(_get_color_guidance(colors, card_type))
+    
+    # Rarity guidance
+    sections.append(_get_rarity_guidance(rarity, card_type, cmc))
+    
+    # Name inspiration
+    if card_name:
+        sections.append(_get_name_inspiration(card_name))
+    
+    # Special restrictions (flying, etc.)
+    if 'creature' in card_type and subtype:
+        sections.append(_get_creature_restrictions(subtype))
+    
+    # Output format rules
+    sections.append(_get_output_rules())
+    
+    # Few-shot examples
+    sections.append(_get_examples(card_type))
+    
+    return ' '.join(sections)
+
+def _get_core_task() -> str:
+    """Core task description."""
+    return ("Generate Magic: The Gathering rules text for a card. "
+            "Focus on creating unique, cohesive abilities that work together thematically. "
+            "CRITCAL: Ensure that the generated rules text only includes abilities and effects for this card, and does not include the card title, typeline, mana cost, power/toughness, or flavor text."
+            "CRITAL: Do not start your output with anything like \"here are some potential abilities\". Simply output the rules text on their own.")
+
+def _get_type_guidance(card_type: str, subtype: str, rarity: str) -> str:
+    """Get type-specific guidance."""
+    if 'creature' in card_type:
+        return _get_creature_guidance(subtype, rarity)
+    elif 'artifact' in card_type:
+        return _get_artifact_guidance(subtype)
+    elif 'enchantment' in card_type:
+        return _get_enchantment_guidance(subtype)
+    elif 'land' in card_type:
+        return _get_land_guidance(subtype)
+    elif 'planeswalker' in card_type:
+        return _get_planeswalker_guidance(rarity)
+    elif 'instant' in card_type or 'sorcery' in card_type:
+        return "Generate spell effects that happen when cast. Keep effects concise and focused."
+    else:
+        return "Generate appropriate abilities for this card type."
+
+def _get_creature_guidance(subtype: str, rarity: str) -> str:
+    """Creature-specific guidance."""
+    guidance = "CREATURE: Generate abilities that enhance combat or provide utility. "
+    
+    # Rarity limits
+    if rarity == 'mythic':
+        guidance += "Mythic: Maximum 3-4 abilities. "
+    elif rarity == 'rare':
+        guidance += "Rare: Maximum 3 abilities. "
+    elif rarity == 'uncommon':
+        guidance += "Uncommon: Maximum 2 abilities. "
+    else:
+        guidance += "Common: Maximum 1 ability. "
+    
+    # Subtype-specific advice with detailed flavorful guidance
+    if subtype:
+        subtype_lower = subtype.lower()
+        
+        # Flying creatures
+        if 'dragon' in subtype_lower:
+            guidance += "DRAGON: Flying (almost always), damage-dealing abilities, treasure creation, breath weapon effects. Examples: 'Flying' + 'When this attacks, deal 2 damage to any target', '{R}: Deal 1 damage to any target', 'Whenever this deals combat damage, create a Treasure token'. "
+        elif 'angel' in subtype_lower:
+            guidance += "ANGEL: Flying OR vigilance (not both), lifegain, protection effects, helping other creatures. Examples: 'Flying' + 'Whenever you gain life, put a +1/+1 counter on target creature', 'Other creatures you control have lifelink', 'When this enters, you gain 3 life'. "
+        elif 'bird' in subtype_lower:
+            guidance += "BIRD: Flying (always), evasion, mobility, scouting effects. Examples: 'Flying', 'Flying' + 'When this enters, scry 1', 'Flying' + '{T}: Look at the top card of your library', 'Whenever this deals combat damage to a player, draw a card'. "
+        elif 'spirit' in subtype_lower:
+            guidance += "SPIRIT: Flying, ethereal abilities, graveyard interactions, phasing/flickering. Examples: 'Flying', 'Flying' + 'When this enters, return target creature to its owner's hand', 'Flying' + 'Whenever a creature dies, you may exile this card and return it to the battlefield', '{1}: This creature phases out'. "
+        elif 'phoenix' in subtype_lower:
+            guidance += "PHOENIX: Flying, recursion from graveyard, fire/damage themes. Examples: 'Flying', 'Flying' + 'When this dies, return it to your hand at the beginning of the next end step', 'Flying' + 'Whenever you cast an instant or sorcery spell, this deals 1 damage to any target'. "
+        
+        # Aggressive creatures  
+        elif 'goblin' in subtype_lower:
+            guidance += "GOBLIN: Haste, direct damage, chaotic effects, artifact interactions, swarm tactics. Examples: 'Haste', 'Haste' + 'When this enters, deal 1 damage to any target', '{T}, Sacrifice an artifact: Deal 2 damage to any target', 'Other Goblins you control get +1/+1'. "
+        elif 'orc' in subtype_lower:
+            guidance += "ORC: Aggressive combat abilities, tribal synergies, menace, raid effects. Examples: 'Menace', 'Trample', 'Whenever this attacks, other Orcs you control get +1/+0 until end of turn', '{1}: This creature gets +2/+0 until end of turn'. "
+        elif 'warrior' in subtype_lower:
+            guidance += "WARRIOR: First strike, combat bonuses, equipment synergies, battle tactics. Examples: 'First strike', 'Vigilance', 'Whenever this attacks, target creature can't block this turn', 'Equipped creatures you control have first strike'. "
+        elif 'berserker' in subtype_lower:
+            guidance += "BERSERKER: Aggressive abilities, rampage effects, damage-based triggers, reckless combat. Examples: 'Trample', 'Whenever this deals combat damage, it deals that much damage to you', '{R}: This creature gets +1/+0 and gains trample until end of turn'. "
+        
+        # Undead creatures
+        elif 'zombie' in subtype_lower:
+            guidance += "ZOMBIE: Deathtouch, graveyard recursion, sacrifice synergies, decay effects. Examples: 'Deathtouch', 'When this dies, create a 2/2 black Zombie creature token', 'Whenever a creature dies, put a +1/+1 counter on this creature', '{B}, Sacrifice a creature: This creature gets +2/+2 until end of turn'. "
+        elif 'skeleton' in subtype_lower:
+            guidance += "SKELETON: Recursion abilities, self-sacrifice effects, bone/death themes. Examples: '{1}{B}: Return this card from your graveyard to the battlefield tapped', 'When this dies, you may pay {2}. If you do, return it to your hand', '{B}, Sacrifice this creature: Target creature gets -1/-1 until end of turn'. "
+        elif 'vampire' in subtype_lower:
+            guidance += "VAMPIRE: Lifelink, flying, life drain, +1/+1 counter growth, blood themes. Examples: 'Lifelink', 'Flying' + 'Lifelink', 'Whenever this deals combat damage to a player, put a +1/+1 counter on it', 'When this enters, target opponent loses 2 life and you gain 2 life'. "
+        elif 'wraith' in subtype_lower or 'specter' in subtype_lower:
+            guidance += "WRAITH/SPECTER: Flying, discard effects, fear abilities, intangible themes. Examples: 'Flying', 'Flying' + 'Whenever this deals combat damage to a player, that player discards a card', 'This creature can't be blocked except by artifact creatures'. "
+        
+        # Large creatures
+        elif 'beast' in subtype_lower:
+            guidance += "BEAST: Trample, fighting abilities, +1/+1 counters, primal/nature effects. Examples: 'Trample', 'When this enters, fight target creature', 'Whenever this attacks, put a +1/+1 counter on it', '{G}: This creature gets +1/+1 until end of turn'. "
+        elif 'giant' in subtype_lower:
+            guidance += "GIANT: Large stats, reach, land-based abilities, massive effects. Examples: 'Reach', 'Trample', 'When this enters, destroy target land', 'Whenever a Mountain enters the battlefield under your control, this creature gets +1/+1 until end of turn'. "
+        elif 'troll' in subtype_lower:
+            guidance += "TROLL: Regeneration, +1/+1 counter growth, sacrifice for benefits, resilience. Examples: '{G}: Regenerate this creature', 'Whenever this creature is dealt damage, put a +1/+1 counter on it', 'Sacrifice a land: This creature gets +2/+2 until end of turn'. "
+        elif 'elephant' in subtype_lower:
+            guidance += "ELEPHANT: Trample, memory/graveyard effects, large presence, herd mentality. Examples: 'Trample', 'When this enters, return target card from your graveyard to your hand', 'Other Elephants you control get +1/+1', 'Whenever this attacks, create a 3/3 green Elephant creature token'. "
+        
+        # Magical creatures
+        elif 'wizard' in subtype_lower:
+            guidance += "WIZARD: Spell synergies, card draw, instant/sorcery effects, magical knowledge. Examples: 'When this enters, draw a card', 'Whenever you cast an instant or sorcery spell, scry 1', '{T}: Add one mana of any color. Spend this mana only to cast instant or sorcery spells', 'Instant and sorcery spells you cast cost {1} less to cast'. "
+        elif 'shaman' in subtype_lower:
+            guidance += "SHAMAN: Mana abilities, elemental effects, nature magic, tribal synergies. Examples: '{T}: Add one mana of any color', 'When this enters, search your library for a basic land card and put it onto the battlefield tapped', 'Whenever you cast a creature spell, this deals 1 damage to any target'. "
+        elif 'cleric' in subtype_lower:
+            guidance += "CLERIC: Lifegain, protection effects, enchantment synergies, divine magic. Examples: 'When this enters, you gain 3 life', 'Other creatures you control have lifelink', '{T}: Target creature gains protection from the color of your choice until end of turn', 'Whenever you gain life, scry 1'. "
+        elif 'druid' in subtype_lower:
+            guidance += "DRUID: Mana production, land abilities, creature tokens, nature harmony. Examples: '{T}: Add {G}', 'When this enters, create a 1/1 green Saproling creature token', '{T}: Search your library for a Forest card and put it onto the battlefield tapped', 'Creatures you control with power 1 or less get +1/+1'. "
+        
+        # Sneaky creatures
+        elif 'rogue' in subtype_lower or 'assassin' in subtype_lower:
+            guidance += "ROGUE/ASSASSIN: Deathtouch, unblockable, card advantage, removal effects. Examples: 'Deathtouch', 'This creature can't be blocked', 'When this deals combat damage to a player, draw a card', 'When this enters, destroy target creature with power 3 or less'. "
+        elif 'ninja' in subtype_lower:
+            guidance += "NINJA: Ninjutsu, evasion, saboteur effects, stealth abilities. Examples: 'This creature can't be blocked', 'Whenever this deals combat damage to a player, draw a card and discard a card', 'When this enters, return target creature to its owner's hand'. "
+        
+        # Defensive creatures
+        elif 'knight' in subtype_lower:
+            guidance += "KNIGHT: First strike, vigilance, protection effects, honor-based abilities. Examples: 'First strike', 'Vigilance', 'Protection from black', 'When this enters, destroy target artifact or enchantment', 'Other Knights you control get +1/+1'. "
+        elif 'soldier' in subtype_lower:
+            guidance += "SOLDIER: Vigilance, combat bonuses, token creation, military tactics. Examples: 'Vigilance', 'When this enters, create a 1/1 white Soldier creature token', 'Other Soldiers you control get +1/+1', 'Whenever this attacks, tap target creature'. "
+        elif 'wall' in subtype_lower:
+            guidance += "WALL: Defender, high toughness abilities, protective effects, utility functions. Examples: 'Defender', 'Defender' + '{T}: Add one mana of any color', 'Defender' + 'When this enters, draw a card', 'Creatures can't attack you unless their controller pays {1} for each creature they control that's attacking you'. "
+        
+        # Elemental creatures
+        elif 'elemental' in subtype_lower:
+            guidance += "ELEMENTAL: Abilities matching their element colors, basic land synergies, primal forces. Examples: For red - 'When this enters, deal 2 damage to any target'; for blue - 'When this enters, draw a card'; for green - 'Trample' + 'Whenever a Forest enters under your control, this gets +1/+1 until end of turn'. "
+        
+        # Demons and devils
+        elif 'demon' in subtype_lower:
+            guidance += "DEMON: Flying, menace, sacrifice effects, life drain, powerful with drawbacks. Examples: 'Flying' + 'Menace', 'Flying' + 'At the beginning of your upkeep, sacrifice a creature', 'When this enters, each opponent loses 3 life', 'Whenever a creature dies, you gain 1 life'. "
+        elif 'devil' in subtype_lower:
+            guidance += "DEVIL: Direct damage, sacrifice triggers, aggressive abilities, chaotic effects. Examples: 'When this dies, deal 1 damage to any target', 'Whenever you sacrifice a permanent, this deals 1 damage to any target', 'Haste', '{R}, Sacrifice this creature: Deal 2 damage to any target'. "
+        
+        # Small creatures
+        elif 'elf' in subtype_lower:
+            guidance += "ELF: Mana generation, creature synergies, forest effects, tribal bonuses. Examples: '{T}: Add {G}', 'Other Elves you control get +1/+1', 'When this enters, search your library for a Forest card and put it onto the battlefield tapped', 'Whenever you cast an Elf spell, create a 1/1 green Elf Warrior creature token'. "
+        elif 'human' in subtype_lower:
+            guidance += "HUMAN: Versatile abilities, equipment synergies, cooperation, adaptability. Examples: 'When this enters, create a Treasure token', 'Whenever you cast a noncreature spell, this gets +1/+1 until end of turn', 'Other Humans you control get +1/+1', '{T}: Target creature gains first strike until end of turn'. "
+        elif 'halfling' in subtype_lower or 'kithkin' in subtype_lower:
+            guidance += "HALFLING/KITHKIN: Small creature synergies, evasion, community effects, resourcefulness. Examples: 'This creature can't be blocked by creatures with power 3 or greater', 'Whenever a creature with power 2 or less enters the battlefield, draw a card', 'Other creatures you control with power 2 or less get +1/+1'. "
+        
+        # Artifact creatures
+        elif 'construct' in subtype_lower or 'golem' in subtype_lower:
+            guidance += "CONSTRUCT/GOLEM: Artifact synergies, utility abilities, colorless effects. Examples: 'When this enters, create a Treasure token', 'Artifacts you control have hexproof', '{T}: Add one mana of any color', 'Whenever you cast an artifact spell, this gets +1/+1 until end of turn'. "
+        elif 'thopter' in subtype_lower:
+            guidance += "THOPTER: Flying, artifact synergies, small flying utility. Examples: 'Flying', 'Flying' + 'When this enters, create a 1/1 colorless Thopter artifact creature token with flying', 'Whenever you cast an artifact spell, create a 1/1 colorless Thopter artifact creature token with flying'. "
+    
+    return guidance
+
+def _get_artifact_guidance(subtype: str) -> str:
+    """Artifact-specific guidance."""
+    guidance = "ARTIFACT: Generate utility effects or activated abilities. "
+    
+    if subtype:
+        subtype_lower = subtype.lower()
+        if 'equipment' in subtype_lower:
+            guidance += "EQUIPMENT: Must have 'Equip {cost}' ability. Focus on 'Equipped creature gets/has...' effects. "
+        elif 'vehicle' in subtype_lower:
+            guidance += "VEHICLE: Must have 'Crew X' ability. Focus on combat stats and abilities. "
+        elif 'food' in subtype_lower:
+            guidance += "FOOD: Must have '{2}, {T}, Sacrifice: You gain 2 life.' "
+    
+    return guidance
+
+def _get_enchantment_guidance(subtype: str) -> str:
+    """Enchantment-specific guidance."""
+    guidance = "ENCHANTMENT: Generate ongoing effects that modify the game. "
+    
+    if subtype:
+        subtype_lower = subtype.lower()
+        if 'aura' in subtype_lower:
+            guidance += "AURA: Must start with 'Enchant creature'. Focus on 'Enchanted creature gets/has...' effects. "
+        elif 'saga' in subtype_lower:
+            guidance += "SAGA: Must have chapter abilities (I, II, III) that tell a story. "
+    
+    return guidance
+
+def _get_land_guidance(subtype: str) -> str:
+    """Land-specific guidance."""
+    guidance = "LAND: Focus on mana abilities and utility effects. "
+    
+    if subtype:
+        subtype_lower = subtype.lower()
+        if 'forest' in subtype_lower:
+            guidance += "FOREST: Should produce green mana. Consider green-themed effects. "
+        elif 'island' in subtype_lower:
+            guidance += "ISLAND: Should produce blue mana. Consider blue-themed effects. "
+        elif 'mountain' in subtype_lower:
+            guidance += "MOUNTAIN: Should produce red mana. Consider red-themed effects. "
+        elif 'plains' in subtype_lower:
+            guidance += "PLAINS: Should produce white mana. Consider white-themed effects. "
+        elif 'swamp' in subtype_lower:
+            guidance += "SWAMP: Should produce black mana. Consider black-themed effects. "
+        elif 'gate' in subtype_lower:
+            guidance += "GATE: Typically dual mana but enters tapped. "
+        elif 'desert' in subtype_lower:
+            guidance += "DESERT: Colorless mana with desert-themed abilities. "
+    
+    return guidance
+
+def _get_planeswalker_guidance(rarity: str) -> str:
+    """Planeswalker-specific guidance."""
+    guidance = "PLANESWALKER: Generate 2-4 loyalty abilities. Format: '+X: effect', '-X: effect'. Include starting loyalty. "
+    
+    if rarity in ['rare', 'mythic']:
+        guidance += "Rare/Mythic: 3-4 abilities including ultimate. Starting loyalty 3-5. "
+    else:
+        guidance += "Uncommon: 2-3 abilities, simpler effects. Starting loyalty 2-4. "
+    
+    return guidance
+
+def _get_color_guidance(colors: list, card_type: str) -> str:
+    """Color-specific guidance."""
+    guidance = "COLOR THEMES: "
+    
+    if 'W' in colors:
+        guidance += "White: lifegain, protection, tokens, combat buffs. "
+    if 'U' in colors:
+        guidance += "Blue: card draw, counterspells, flying, library manipulation. "
+    if 'B' in colors:
+        guidance += "Black: destruction, life drain, graveyard, sacrifice. "
+    if 'R' in colors:
+        guidance += "Red: damage, haste, chaos, artifact destruction. "
+    if 'G' in colors:
+        guidance += "Green: big creatures, mana, +1/+1 counters, nature. "
+    
+    return guidance
+
+def _get_rarity_guidance(rarity: str, card_type: str, cmc: int) -> str:
+    """Rarity-based complexity guidance."""
+    if rarity == 'mythic':
+        return "MYTHIC: Complex, build-around effects. Can be game-changing. "
+    elif rarity == 'rare':
+        return "RARE: Unique mechanics, moderate complexity. "
+    elif rarity == 'uncommon':
+        return "UNCOMMON: Moderate effects, some complexity. "
+    else:
+        return "COMMON: Simple, straightforward effects. "
+
+def _get_name_inspiration(card_name: str) -> str:
+    """Extract thematic guidance from card name."""
+    guidance = f"CARD NAME: This card is named '{card_name}'. "
+    
+    # Provide specific guidance based on name content
+    name_lower = card_name.lower()
+    
+    # Action words that suggest abilities
+    if any(word in name_lower for word in ['strike', 'slash', 'smash', 'crush', 'destroy']):
+        guidance += "The name suggests aggressive/destructive abilities. "
+    elif any(word in name_lower for word in ['guard', 'protect', 'shield', 'wall', 'sentinel']):
+        guidance += "The name suggests defensive/protective abilities. "
+    elif any(word in name_lower for word in ['weaver', 'mage', 'seer', 'sage', 'oracle']):
+        guidance += "The name suggests magical/spellcaster abilities. "
+    elif any(word in name_lower for word in ['shadow', 'whisper', 'stealth', 'sneak', 'rogue']):
+        guidance += "The name suggests evasive/sneaky abilities. "
+    elif any(word in name_lower for word in ['flame', 'fire', 'burn', 'blaze', 'ember']):
+        guidance += "The name suggests fire/damage abilities. "
+    elif any(word in name_lower for word in ['storm', 'wind', 'gale', 'tempest']):
+        guidance += "The name suggests weather/air abilities. "
+    elif any(word in name_lower for word in ['life', 'heal', 'mercy', 'blessing', 'grace']):
+        guidance += "The name suggests lifegain/healing abilities. "
+    elif any(word in name_lower for word in ['death', 'doom', 'bane', 'reaper', 'grave']):
+        guidance += "The name suggests death/sacrifice abilities. "
+    elif any(word in name_lower for word in ['growth', 'bloom', 'flourish', 'verdant']):
+        guidance += "The name suggests +1/+1 counter/growth abilities. "
+    elif any(word in name_lower for word in ['treasure', 'hoard', 'riches', 'gold', 'coin']):
+        guidance += "The name suggests treasure/mana abilities. "
+    
+    # Size indicators
+    if any(word in name_lower for word in ['tiny', 'small', 'little', 'mini']):
+        guidance += "The name suggests small/evasive creature themes. "
+    elif any(word in name_lower for word in ['giant', 'massive', 'colossal', 'enormous', 'titan']):
+        guidance += "The name suggests large/impactful abilities. "
+    
+    # Leadership/cooperation themes
+    if any(word in name_lower for word in ['lord', 'master', 'chief', 'leader', 'commander']):
+        guidance += "The name suggests tribal/leadership abilities that help other creatures. "
+    elif any(word in name_lower for word in ['pack', 'swarm', 'horde', 'clan', 'tribe']):
+        guidance += "The name suggests tribal synergies or token generation. "
+    
+    guidance += f"Create abilities that thematically match '{card_name}' and feel unique to this specific character. "
+    
+    return guidance
+
+def _get_creature_restrictions(subtype: str) -> str:
+    """Flying and other creature restrictions."""
+    subtype_lower = subtype.lower()
+    
+    if any(restricted_type in subtype_lower for restricted_type in flying_restricted_types):
+        return f"FLYING RESTRICTION: {subtype} creatures rarely have flying. Use grounded abilities instead. "
+    elif any(flying_type in subtype_lower for flying_type in flying_encouraged_types):
+        return f"FLYING NATURAL: {subtype} creatures are natural fliers. "
+    
+    return ""
+
+def _get_output_rules() -> str:
+    """Output formatting rules."""
+    return ("OUTPUT FORMAT: Generate ONLY rules text. "
+            "Do NOT include card name, type line, mana cost, power/toughness, or flavor text. "
+            "Use {T} for tap symbol. "
+            "Wrap each ability in double quotes. "
+            "Example: '\"Flying, trample\" \"When this enters, gain 3 life\"' ")
+
+def _get_examples(card_type: str) -> str:
+    """Few-shot examples based on card type."""
+    if 'creature' in card_type:
+        return ("CORRECT EXAMPLES: "
+                "'\"Flying, vigilance\"' "
+                "'\"Deathtouch\" \"{T}: Deal 1 damage to any target\"' "
+                "'\"When this enters the battlefield, create two 1/1 token creatures\"' ")
+    elif 'artifact' in card_type:
+        return ("CORRECT EXAMPLES: "
+                "'\"{T}: Add one mana of any color\"' "
+                "'\"{2}, {T}: Draw a card\"' "
+                "'\"Equipped creature gets +2/+1. Equip {3}\"' ")
+    elif 'enchantment' in card_type:
+        return ("CORRECT EXAMPLES: "
+                "'\"Creatures you control get +1/+1\"' "
+                "'\"Whenever a creature enters the battlefield, you gain 1 life\"' "
+                "'\"Enchant creature. Enchanted creature has flying\"' ")
+    elif 'land' in card_type:
+        return ("CORRECT EXAMPLES: "
+                "'\"{T}: Add {G}\"' "
+                "'\"{T}: Add one mana of any color\"' "
+                "'\"{1}, {T}: Target creature gets +1/+0 until end of turn\"' ")
+    else:
+        return ("CORRECT EXAMPLES: "
+                "'\"Destroy target creature\"' "
+                "'\"Draw three cards\"' "
+                "'\"Deal 4 damage to any target\"' ")
+
 def createCardContent(prompt, card_data=None):
     """
     Generate card content using Ollama Python client with enhanced context
     Returns the response text from the LLM
     """
-    print(f"🧠 createCardContent called with:")
-    print(f"   📝 Prompt: {repr(prompt[:100])}...")
-    print(f"   🎲 Card data keys: {list(card_data.keys()) if card_data else 'None'}")
+    start_time = time.time()
+    print(f"[DEBUG] createCardContent called with:")
+    print(f"   Prompt: {repr(prompt[:100])}...")
+    print(f"   Card data keys: {list(card_data.keys()) if card_data else 'None'}")
+    print(f"[TIMING] Function start: 0.00s")
     try:
-        # Build enhanced prompt based on card properties
-        enhanced_prompt = f"Generate the rules text for a Magic: the gathering card. \nOutput format: Only the rules text abilities, no explanations, no card name, no type line. \nSINGLETON FORMAT: This card is for singleton formats (EDH/Commander) where only one copy exists in the deck. NEVER create abilities that reference 'another copy of this card', 'other copies', or 'search for a card with the same name'. \nCRITICAL TEMPLATING: NEVER use vague references like 'different name', 'another name', or 'other name'. Always specify what it's different from. CORRECT: 'with a different name than this creature', 'with a name other than [Card Name]', 'that doesn't share a name with this creature'. INCORRECT: 'different name', 'card with different name'."
-        
+        # Build enhanced prompt using modular system
         if card_data:
-            # Analyze mana cost for power level
-            cmc = card_data.get('cmc', 0)
-            colors = card_data.get('colors', [])
-            card_type = (card_data.get('type') or '').lower()
-            power = card_data.get('power')
-            toughness = card_data.get('toughness')
-            rarity = (card_data.get('rarity') or 'common').lower()
-            
-            # Check for asterisk (*) in power/toughness - CRITICAL VALIDATION
-            # Handle cases like "*/2", "3/*", "*/*", "*+1", "2+*", etc.
-            has_asterisk_power = power and '*' in str(power)
-            has_asterisk_toughness = toughness and '*' in str(toughness)
-            
-            if has_asterisk_power or has_asterisk_toughness:
-                asterisk_guidance = ""
-                
-                # Enhanced asterisk validation with color-appropriate suggestions
-                color_examples = {
-                    'G': "creatures you control, lands you control, or Forests you control",
-                    'U': "cards in your hand, artifacts you control, or Islands you control", 
-                    'B': "creature cards in your graveyard, cards in your graveyard, or Swamps you control",
-                    'W': "creatures you control, Plains you control, or enchantments you control",
-                    'R': "Mountains you control or cards in target opponent's hand"
-                }
-                
-                # Build color-specific examples
-                example_sources = []
-                for color in colors:
-                    if color in color_examples:
-                        example_sources.append(color_examples[color])
-                
-                if example_sources:
-                    examples_text = ", ".join(example_sources[:2])  # Use first 2 color examples
-                else:
-                    examples_text = "cards in your hand, creatures you control, or cards in your graveyard"
-                
-                if has_asterisk_power and has_asterisk_toughness:
-                    asterisk_guidance = f" CRITICAL ASTERISK RULE: This creature has power {power} and toughness {toughness} - BOTH are asterisks (*). You MUST start your rules text with a definition like '[Card Name]'s power and toughness are each equal to the number of [something you count].' For {colors} colors, appropriate things to count: {examples_text}. REQUIRED FORMAT: Start with the definition, then add any other abilities. Example: 'Patrick Star's power and toughness are each equal to the number of cards in your hand. [Other abilities...]' This asterisk definition is MANDATORY and must be the first line of rules text."
-                elif has_asterisk_power:
-                    asterisk_guidance = f" MANDATORY ASTERISK RULE: This creature has power {power}. You MUST include an ability that defines what the * equals. For {colors} colors, consider: {examples_text}. Examples: 'This creature's power is equal to the number of cards in your hand' or 'This creature's power is equal to the number of artifacts you control'. The * power MUST be defined in the rules text."
-                elif has_asterisk_toughness:
-                    asterisk_guidance = f" MANDATORY ASTERISK RULE: This creature has toughness {toughness}. You MUST include an ability that defines what the * equals. For {colors} colors, consider: {examples_text}. Examples: 'This creature's toughness is equal to the number of lands you control' or 'This creature's toughness is equal to your life total'. The * toughness MUST be defined in the rules text."
-                
-                enhanced_prompt += asterisk_guidance
-            
-            
-            supertype = (card_data.get('supertype') or '').lower()
-            is_legendary = 'legendary' in supertype
-            mana_cost = card_data.get('manaCost', '')
-            
-            # Check if card has X in mana cost - if so, must use X in rules text
-            has_x_cost = 'X' in mana_cost.upper() or '{X}' in mana_cost.upper()
-            x_guidance = ""
-            if has_x_cost:
-                x_guidance = f" CRITICAL X REQUIREMENT: This card has X in its mana cost ({mana_cost}), so the rules text MUST reference X meaningfully AND include an explanation of what X represents. REQUIRED FORMAT: The rules text must contain BOTH an X effect AND an explanation such as 'where X is the amount of mana spent to cast this spell' OR 'enters with X +1/+1 counters on it' OR 'where X is the number of [condition]'. Examples: 'Deal X damage to any target, where X is the amount of mana spent to cast this spell', 'Create X 1/1 token creatures, where X is the amount of mana spent to cast this spell', 'enters with X +1/+1 counters on it', 'X target creatures gain flying until end of turn, where X is the amount of mana spent to cast this spell'."
-            
-            # Power level guidance based on CMC and rarity
-            base_power = ""
-            if cmc <= 1:
-                base_power = "very simple and low-power"
-            elif cmc <= 3:
-                base_power = "moderate power"
-            elif cmc <= 5:
-                base_power = "strong"
-            else:
-                base_power = "very powerful and game-changing"
-            
-            # Rarity adjustments with ability guidance - BALANCED POWER LEVELS
-            # IMPORTANT: Keywords count as abilities and are valuable!
-            if rarity == 'common':
-                power_level = f"{base_power}, extremely simple with ONLY 1 total ability - either ONE keyword (Haste, Trample, Deathtouch, Reach, Menace, or Lifelink) OR one simple triggered ability, never both. Keywords are abilities and count toward the limit."
-            elif rarity == 'uncommon':
-                power_level = f"{base_power}, with modest complexity, maximum 2 total abilities - this can be 1-2 keywords, OR 1 keyword + 1 simple triggered ability, OR 2 simple triggered abilities, OR 1 activated ability. Keywords count as abilities."
-            elif rarity == 'rare':
-                power_level = f"{base_power}, with unique mechanics, maximum 3 total abilities - this can be 1-2 keywords + 1-2 other abilities, OR 3 non-keyword abilities. All keywords count toward the total ability limit."
-            elif rarity == 'mythic':
-                power_level = f"{base_power}, with splashy build-around effects, maximum 3-4 total abilities - this includes ALL keywords, triggered abilities, and activated abilities. Keywords are valuable and count toward limits."
-            else:
-                power_level = base_power
-            
-            # Enhanced color identity guidance with specific mechanics
-            color_guidance = ""
-            
-            if 'W' in colors:
-                color_guidance += " White mechanics: protection from colors, lifegain triggers, exile removal, prevent damage, tap creatures, +1/+1 counters on creatures, enchantment synergies, vigilance, first strike."
-            
-            if 'U' in colors:
-                color_guidance += " Blue mechanics: counter spells, return to hand, tap/untap permanents, scry, flying creatures, mill cards, copy spells, phase out, control magic, card selection, bounce effects, temporary steal effects."
-            
-            if 'B' in colors:
-                color_guidance += " Black mechanics: pay life for effects, destroy creatures, discard from hand, return from graveyard, sacrifice creatures for value, -1/-1 counters, drain life, deathtouch, menace."
-            
-            if 'R' in colors:
-                color_guidance += " Red mechanics: deal damage to creatures/players, haste, can't block, sacrifice for temporary effects, random discard, artifact destruction, first strike, trample, impulse draw."
-            
-            if 'G' in colors:
-                color_guidance += " Green mechanics: ramp (add mana), large creature stats, trample, fight other creatures, destroy artifacts/enchantments, +1/+1 counters, land tutoring, hexproof, reach."
-            
-            # Add specific multicolor synergies
-            if len(colors) > 1:
-                if 'W' in colors and 'U' in colors:
-                    color_guidance += " Azorius themes: control elements, tax effects, flying creatures, artifact synergies."
-                elif 'U' in colors and 'B' in colors:
-                    color_guidance += " Dimir themes: mill and graveyard, card selection, unblockable creatures, surveil."
-                elif 'B' in colors and 'R' in colors:
-                    color_guidance += " Rakdos themes: aggressive damage, sacrifice for value, spectacle costs."
-                elif 'R' in colors and 'G' in colors:
-                    color_guidance += " Gruul themes: aggressive large creatures, land destruction, riot mechanics."
-                elif 'G' in colors and 'W' in colors:
-                    color_guidance += " Selesnya themes: token generation, populate, lifegain matters."
-                elif 'W' in colors and 'B' in colors:
-                    color_guidance += " Orzhov themes: lifegain/lifedrain, sacrifice/recursion, exile effects."
-                elif 'U' in colors and 'R' in colors:
-                    color_guidance += " Izzet themes: instant/sorcery matters, spell copying, artifact synergies."
-                elif 'B' in colors and 'G' in colors:
-                    color_guidance += " Golgari themes: graveyard value, creature sacrifice, +1/+1 counters."
-                elif 'R' in colors and 'W' in colors:
-                    color_guidance += " Boros themes: aggressive creatures, combat tricks, equipment matters."
-                elif 'G' in colors and 'U' in colors:
-                    color_guidance += " Simic themes: +1/+1 counters, card draw, creature evolution."
-            
-            # Three-color combinations (Shards and Wedges)
-            elif len(colors) == 3:
-                sorted_colors = sorted(colors)
-                if sorted_colors == ['G', 'U', 'W']:  # Bant
-                    color_guidance += " Bant themes: exalted mechanics, control with creatures, artifact interaction, noble and honorable effects."
-                elif sorted_colors == ['B', 'U', 'W']:  # Esper
-                    color_guidance += " Esper themes: artifact creatures, control magic, evasive threats, combining technology with magic."
-                elif sorted_colors == ['B', 'R', 'U']:  # Grixis
-                    color_guidance += " Grixis themes: graveyard manipulation, spell copying, creature theft, necromantic power."
-                elif sorted_colors == ['G', 'R', 'W']:  # Naya
-                    color_guidance += " Naya themes: large creatures, power matters, creature tokens, primal and savage effects."
-                elif sorted_colors == ['B', 'G', 'R']:  # Jund
-                    color_guidance += " Jund themes: devour mechanics, large threats, resource conversion, predatory nature."
-                elif sorted_colors == ['R', 'U', 'W']:  # Jeskai
-                    color_guidance += " Jeskai themes: prowess and noncreature spells, tempo plays, martial arts and wisdom."
-                elif sorted_colors == ['B', 'G', 'W']:  # Abzan
-                    color_guidance += " Abzan themes: +1/+1 counters, toughness matters, endurance and resilience, outlast mechanics."
-                elif sorted_colors == ['G', 'R', 'U']:  # Temur
-                    color_guidance += " Temur themes: ferocious (power 4+), morph mechanics, savage shamanism and elemental power."
-                elif sorted_colors == ['B', 'R', 'W']:  # Mardu
-                    color_guidance += " Mardu themes: aggressive creatures, warrior tribal, raid mechanics, honor through combat."
-                elif sorted_colors == ['G', 'U', 'B']:  # Sultai
-                    color_guidance += " Sultai themes: delve and graveyard, self-mill strategies, ruthless ambition and ancient knowledge."
-            
-            # Four-color combinations
-            elif len(colors) == 4:
-                missing_color = set(['W', 'U', 'B', 'R', 'G']) - set(colors)
-                if 'W' in missing_color:  # UBRG (No White)
-                    color_guidance += " Chaos themes: unpredictable effects, transformation, breaking rules, anti-order mechanics."
-                elif 'U' in missing_color:  # WBRG (No Blue)
-                    color_guidance += " Aggression themes: direct damage, large creatures, immediate threats, anti-control strategies."
-                elif 'B' in missing_color:  # WURG (No Black)
-                    color_guidance += " Growth themes: ramp effects, creature enhancement, positive development, anti-death mechanics."
-                elif 'R' in missing_color:  # WUBG (No Red)
-                    color_guidance += " Control themes: card draw, removal, strategic play, methodical and calculated effects."
-                elif 'G' in missing_color:  # WUBR (No Green)
-                    color_guidance += " Artifice themes: artifact synergies, constructed beings, technology over nature, precise mechanics."
-            
-            # Five-color (WUBRG)
-            elif len(colors) == 5:
-                color_guidance += " WUBRG themes: domain effects, all colors matter, converge mechanics, chromatic unity, powerful legendary effects, mana-intensive abilities that showcase mastery over all five colors of magic."
-            
-            # TYPE-SPECIFIC CONTEXT PIPELINES
-            type_specific_guidance = ""
-            
-            # INSTANT PIPELINE
-            if 'instant' in card_type:
-                type_specific_guidance = " INSTANT DESIGN: Generate effects that provide immediate answers, reactions, or advantages. Focus on: counterspells, removal spells, combat tricks, pump spells, bounce effects, damage spells, protection, or temporary buffs. Instants should have immediate impact and be reactive in nature. COHESION FOR INSTANTS: Since instants typically have single focused effects, avoid multiple unrelated abilities. If you include multiple effects, they should be closely related (e.g., 'Deal 3 damage, then scry 1' or 'Counter target spell, draw a card'). Common patterns: 'Counter target spell', 'Destroy target creature', 'Target creature gets +X/+X until end of turn', 'Deal X damage to any target', 'Return target permanent to its owner's hand', 'Target creature gains protection from [color] until end of turn'. Keep effects simple and focused - instants are about timing and immediate utility, not complex interactions."
-                
-                # Color-specific instant guidance
-                instant_color_guidance = ""
-                if 'W' in colors:
-                    instant_color_guidance += " WHITE INSTANTS: Protection spells ('Target creature gains protection from red'), combat tricks ('+2/+2 and first strike until end of turn'), lifegain ('Gain 5 life'), exile-based removal ('Exile target attacking creature'), damage prevention ('Prevent all damage that would be dealt this turn'), or creature buffs with vigilance/first strike themes."
-                if 'U' in colors:
-                    instant_color_guidance += " BLUE INSTANTS: Counterspells ('Counter target spell'), bounce effects ('Return target permanent to owner's hand'), card selection ('Look at top 4 cards, put one in hand'), temporary creature theft ('Gain control of target creature until end of turn'), tap effects ('Tap all creatures target player controls'), or spell copying ('Copy target instant or sorcery spell')."
-                if 'B' in colors:
-                    instant_color_guidance += " BLACK INSTANTS: Creature destruction ('Destroy target non-black creature'), life drain ('Target player loses 3 life, you gain 3 life'), discard effects ('Target player discards two cards'), temporary reanimation ('Return target creature from graveyard to battlefield, sacrifice it at end of turn'), or debuff spells ('Target creature gets -3/-3 until end of turn')."
-                if 'R' in colors:
-                    instant_color_guidance += " RED INSTANTS: Direct damage ('Deal 4 damage to any target'), combat tricks focusing on power/first strike ('Target creature gets +3/+0 and first strike'), artifact destruction ('Destroy target artifact'), temporary creature theft ('Gain control of target creature until end of turn, untap it, it gains haste'), or chaos effects ('Flip a coin, if heads deal 5 damage to target')."
-                if 'G' in colors:
-                    instant_color_guidance += " GREEN INSTANTS: Giant Growth effects ('Target creature gets +4/+4 until end of turn'), fight spells ('Target creature fights another target creature'), artifact/enchantment destruction ('Destroy target artifact or enchantment'), creature tutoring ('Search library for basic land or creature'), or temporary mana boosts ('Add three mana of any one color')."
-                
-                type_specific_guidance += instant_color_guidance
-                
-                # Instant-specific rarity scaling
-                if rarity == 'common':
-                    type_specific_guidance += " Common instant: Simple, focused effect with minimal complexity. Examples: basic counterspell, simple buff, or small damage spell."
-                elif rarity == 'uncommon':
-                    type_specific_guidance += " Uncommon instant: Moderate complexity, potentially with choices or additional effects. Examples: counterspell with card draw, conditional removal, or larger effect."
-                elif rarity in ['rare', 'mythic']:
-                    type_specific_guidance += " Rare/Mythic instant: Powerful unique effects, potentially game-changing. Examples: powerful counterspells with additional effects, mass effects, or unique utility."
-            
-            # SORCERY PIPELINE  
-            elif 'sorcery' in card_type:
-                type_specific_guidance = " SORCERY DESIGN: Generate proactive effects that provide significant impact on your turn. Focus on: tutoring, mass effects, creature tokens, permanent solutions, board development, reanimation, or transformation effects. Sorceries should be powerful but require planning since they're sorcery speed. COHESION FOR SORCERIES: Sorceries can have multiple effects, but they must support a unified strategy. Good themes: token creation + token buffs, reanimation + graveyard filling, ramp + expensive effects, or mass removal + card advantage. Avoid combining unrelated effects like 'Create tokens + Counter next spell + Gain life'. Common patterns: 'Search your library for...', 'Destroy all creatures', 'Create X creature tokens', 'Return target card from graveyard to hand', 'Transform target creature', 'Put a creature from your graveyard onto the battlefield'. Sorceries can be more complex than instants since timing isn't critical."
-                
-                # Color-specific sorcery guidance
-                sorcery_color_guidance = ""
-                if 'W' in colors:
-                    sorcery_color_guidance += " WHITE SORCERIES: Mass removal ('Destroy all creatures with power 4 or greater'), token creation ('Create three 1/1 Soldier tokens'), lifegain strategies ('Gain life equal to number of creatures you control'), equipment/aura tutoring ('Search library for Equipment or Aura'), board wipes with restrictions ('Destroy all non-white creatures'), or creature reanimation ('Return target creature with mana value 3 or less from graveyard')."
-                if 'U' in colors:
-                    sorcery_color_guidance += " BLUE SORCERIES: Card draw ('Draw three cards'), mass bounce ('Return all nonland permanents to owners' hands'), spell copying ('Copy target instant or sorcery, you may choose new targets'), library manipulation ('Look at top 7 cards, put any number into graveyard'), creature transformation ('Turn target creature into 1/1 until end of turn'), or time manipulation ('Take an extra turn after this one')."
-                if 'B' in colors:
-                    sorcery_color_guidance += " BLACK SORCERIES: Mass creature destruction ('Destroy all creatures'), reanimation ('Return target creature from any graveyard to battlefield under your control'), discard effects ('Each player discards their hand'), life drain ('Each opponent loses life equal to number of creatures in your graveyard'), tutor effects ('Search library for any card'), or graveyard manipulation ('Put target creature from graveyard on top of library')."
-                if 'R' in colors:
-                    sorcery_color_guidance += " RED SORCERIES: Mass damage ('Deal 3 damage to each creature and player'), artifact destruction ('Destroy all artifacts'), temporary creature theft ('Gain control of all creatures until end of turn'), land destruction ('Destroy target land'), goblin/token creation ('Create X 1/1 Goblin tokens'), or chaos effects ('Each player discards their hand, then draws seven cards')."
-                if 'G' in colors:
-                    sorcery_color_guidance += " GREEN SORCERIES: Ramp spells ('Search library for up to two basic lands, put them onto battlefield'), creature tutoring ('Search library for creature with mana value X or less'), mass pump ('Creatures you control get +3/+3 until end of turn'), artifact/enchantment destruction ('Destroy all artifacts and enchantments'), token creation ('Create X 3/3 Beast tokens'), or land-based effects ('Put X +1/+1 counters on each creature you control, where X is number of lands you control')."
-                
-                type_specific_guidance += sorcery_color_guidance
-                
-                # Sorcery-specific rarity scaling
-                if rarity == 'common':
-                    type_specific_guidance += " Common sorcery: Straightforward effects like simple creature tokens, basic removal, or minor utility effects."
-                elif rarity == 'uncommon':
-                    type_specific_guidance += " Uncommon sorcery: Moderate complexity with choices or multiple effects. Can affect multiple targets or have additional benefits."
-                elif rarity in ['rare', 'mythic']:
-                    type_specific_guidance += " Rare/Mythic sorcery: Powerful unique effects that can significantly impact the game state. Mass effects, powerful tutoring, or unique mechanics."
-            
-            # ARTIFACT PIPELINE
-            elif 'artifact' in card_type:
-                type_specific_guidance = " ARTIFACT DESIGN: Generate effects that provide ongoing utility, activated abilities, or passive benefits. Artifacts are colorless and should feel mechanical/technological. Focus on: activated abilities with costs ({T}:, {1}:, etc.), static effects that modify the game, or utility functions. COHESION FOR ARTIFACTS: Artifacts should have a clear purpose or theme. Good themes: mana production + mana sinks, sacrifice artifacts + artifact recursion, +1/+1 counters + counter synergies, or card selection + card advantage. Avoid random combinations like 'Tap for mana + Flying creatures + Graveyard removal'. Common patterns: '{T}: Add one mana of any color', '{2}, {T}: Card selection effect', 'Creatures you control get +1/+1', '{1}, Sacrifice ~: Deal 2 damage to any target'. Artifacts often have multiple modes of use or ongoing value."
-                
-                # Artifact-specific types - check both subtype and full typeline
-                full_type = (card_data.get('typeLine') or '').lower()
-                subtype = (card_data.get('subtype') or '').lower()
-                
-                if 'equipment' in subtype or 'equipment' in full_type:
-                    type_specific_guidance += " EQUIPMENT: MANDATORY - All Equipment MUST have an 'Equip {cost}' ability (e.g., 'Equip {1}', 'Equip {2}', 'Equip {3}', etc.). Focus on 'Equipped creature gets/has...' effects that enhance creatures with stats, keywords, or abilities. The equip cost is essential and required for all Equipment. EXAMPLE FORMAT: 'Equipped creature gets +2/+1 and has flying. Equip {3}' or 'Equipped creature gets +1/+1. Whenever equipped creature deals combat damage to a player, draw a card. Equip {2}'. Notice the pattern: [Enhancement effect] + [Optional triggered/static ability] + [Equip cost]. The equip ability always comes LAST."
-                elif 'vehicle' in subtype or 'vehicle' in full_type:
-                    type_specific_guidance += " VEHICLE MANDATORY RULES: ALL Vehicles MUST have 'Crew X (Tap any number of creatures you control with total power X or greater: This Vehicle becomes an artifact creature until end of turn.)' ability. CRITICAL FORMAT: Crew is a STANDALONE ability - just 'Crew X', NEVER '{T}, Crew X' or any other cost additions. Examples: 'Crew 2', 'Crew 1', 'Crew 3' (standalone abilities). Common crew costs: Crew 1 (small vehicles), Crew 2 (medium vehicles), Crew 3 (large vehicles), Crew 4+ (huge vehicles). Vehicles start as non-creature artifacts and only become creatures when crewed. They should have strong creature stats (power/toughness) to justify the crew cost. Vehicle abilities should focus on: combat abilities (flying, trample, vigilance), triggered abilities when attacking, or static abilities while crewed. Balance: Higher crew cost = better stats/abilities. NEVER add additional costs to crew abilities - crew activates by tapping other creatures, not the vehicle itself."
-                elif 'food' in subtype or 'food' in full_type:
-                    type_specific_guidance += " FOOD TOKEN: MANDATORY - All Food tokens MUST have the ability '{2}, {T}, Sacrifice this artifact: You gain 2 life.' This is the defining characteristic of Food tokens as specified by the user. You may add one additional minor ability, but this exact sacrifice ability is required."
-                else:
-                    type_specific_guidance += " Generic artifact: Utility effects, activated abilities, or static benefits available to all colors."
-                
-                # Color-specific artifact guidance (for colored artifacts)
-                if colors:  # Only add if this is a colored artifact
-                    artifact_color_guidance = ""
-                    if 'W' in colors:
-                        artifact_color_guidance += " WHITE ARTIFACTS: Equipment that grants protection or lifelink, artifacts that create tokens, lifegain-based effects, or artifacts that buff creatures with vigilance/first strike."
-                    if 'U' in colors:
-                        artifact_color_guidance += " BLUE ARTIFACTS: Card draw engines, artifacts that manipulate libraries, artifact-based counterspells, or artifacts that grant flying/unblockable."
-                    if 'B' in colors:
-                        artifact_color_guidance += " BLACK ARTIFACTS: Sacrifice outlets, artifacts that drain life, graveyard-based effects, or artifacts that create zombie tokens."
-                    if 'R' in colors:
-                        artifact_color_guidance += " RED ARTIFACTS: Damage-dealing artifacts, artifacts that grant haste, artifact destruction, or artifacts that create goblin tokens."
-                    if 'G' in colors:
-                        artifact_color_guidance += " GREEN ARTIFACTS: Mana-producing artifacts, artifacts that buff creatures, artifact/enchantment destruction, or artifacts that interact with lands."
-                    type_specific_guidance += artifact_color_guidance
-            
-            # ENCHANTMENT PIPELINE
-            elif 'enchantment' in card_type:
-                type_specific_guidance = " ENCHANTMENT DESIGN: Generate ongoing effects that modify game rules or provide continuous benefits. Enchantments represent magical effects that persist. Focus on: static effects ('Creatures you control have...'), triggered abilities ('Whenever/When...'), or activated abilities that represent magical powers. COHESION FOR ENCHANTMENTS: All abilities should support a unified magical theme. Good themes: creature buffs + creature synergies, graveyard effects + death triggers, mana enhancement + expensive activated abilities, or tribal effects + creature type matters. Avoid random combinations like 'Creature buffs + Land destruction + Card draw + Life gain'. Common patterns: 'Creatures you control get +1/+1', 'Whenever a creature enters the battlefield, ...', '{T}: Target creature gains flying until end of turn', 'At the beginning of your upkeep, ...' Enchantments should feel magical and provide long-term value."
-                
-                # Color-specific enchantment guidance
-                enchantment_color_guidance = ""
-                if 'W' in colors:
-                    enchantment_color_guidance += " WHITE ENCHANTMENTS: Creature anthems ('Creatures you control get +1/+1'), protection effects ('Creatures you control have protection from black'), lifegain engines ('Whenever you gain life, create a 1/1 token'), tax effects ('Spells cost {1} more to cast'), exile-based effects ('Whenever a creature dies, exile it'), or equipment/aura synergies ('Equipped creatures have vigilance')."
-                if 'U' in colors:
-                    enchantment_color_guidance += " BLUE ENCHANTMENTS: Card draw engines ('At beginning of upkeep, draw a card'), spell cost reduction ('Instant and sorcery spells cost {1} less'), library manipulation ('At beginning of upkeep, scry 2'), counterspell effects ('Counter the first spell each turn'), creature evasion ('Creatures you control can't be blocked'), or artifact synergies ('Artifacts you control have hexproof')."
-                if 'B' in colors:
-                    enchantment_color_guidance += " BLACK ENCHANTMENTS: Death triggers ('Whenever a creature dies, each opponent loses 1 life'), graveyard engines ('At beginning of upkeep, put target creature from graveyard into your hand'), sacrifice outlets ('{1}, Sacrifice a creature: Draw a card'), life drain effects ('At beginning of each end step, each opponent loses life equal to number of creatures that died'), or reanimation effects ('Creatures in your graveyard have unearth')."
-                if 'R' in colors:
-                    enchantment_color_guidance += " RED ENCHANTMENTS: Damage engines ('Whenever you cast an instant or sorcery, deal 1 damage to any target'), creature buffs with aggression ('Creatures you control have haste'), artifact destruction ('At beginning of upkeep, destroy target artifact'), chaos effects ('At beginning of upkeep, flip a coin, if heads each player draws a card'), or token creation ('At beginning of combat, create a 1/1 Goblin token with haste')."
-                if 'G' in colors:
-                    enchantment_color_guidance += " GREEN ENCHANTMENTS: Mana production ('At beginning of upkeep, add {G}'), creature size buffs ('Creatures you control get +1/+1 for each Forest you control'), land-based effects ('Whenever a land enters, create a 1/1 Saproling token'), artifact/enchantment punishment ('Destroy target artifact or enchantment at beginning of upkeep'), ramp effects ('Lands you control tap for an additional mana'), or +1/+1 counter engines ('At beginning of combat, put a +1/+1 counter on target creature')."
-                
-                type_specific_guidance += enchantment_color_guidance
-                
-                # Enchantment-specific types
-                if 'aura' in (card_data.get('subtype') or '').lower():
-                    type_specific_guidance += " AURA ENCHANTMENT: MANDATORY - ALL Auras MUST have 'Enchant creature' as their first ability (unless specifically targeting something else like artifacts or lands, but 95% should enchant creatures). REQUIRED FORMAT: Start with 'Enchant creature' followed by effects on 'Enchanted creature gets/has/gains...' Examples: 'Enchant creature. Enchanted creature gets +2/+2', 'Enchant creature. Enchanted creature has flying and vigilance', 'Enchant creature. Enchanted creature gets +1/+1 for each artifact you control'. Auras provide ongoing benefits to the creature they're attached to. Focus on stat boosts, keyword abilities, or special powers for the enchanted creature. Common patterns: +X/+X boosts, keyword abilities (flying, trample, lifelink, etc.), protection abilities, tap/untap effects, or triggered abilities that benefit the enchanted creature."
-                elif 'saga' in (card_data.get('subtype') or '').lower():
-                    type_specific_guidance += " SAGA: Must have chapter abilities (I, II, III) that tell a story progression. Each chapter should be a triggered ability that activates in sequence."
-                else:
-                    type_specific_guidance += " Generic enchantment: Ongoing magical effects that modify the game state or provide continuous benefits."
-            
-            # LAND PIPELINE
-            elif 'land' in card_type:
-                type_specific_guidance = " LAND DESIGN: Generate mana-producing abilities and/or utility effects. Lands are the foundation of Magic's resource system. Focus on: mana generation ('{T}: Add {color}'), activated abilities with costs, or utility functions. Most lands should produce mana as their primary function. Common patterns: '{T}: Add {W}', '{T}: Add one mana of any color', '{1}, {T}: Draw a card', '{T}: Target creature gets +1/+0 until end of turn'. Utility lands should have higher activation costs to balance their additional effects."
-                
-                # Land-specific rarity scaling
-                if rarity == 'common':
-                    type_specific_guidance += " Common land: Simple mana production, possibly with basic utility. Examples: basic lands, simple dual lands, or lands with minor activated abilities."
-                elif rarity == 'uncommon':
-                    type_specific_guidance += " Uncommon land: Dual mana production or useful activated abilities. Balance mana fixing with utility effects."
-                elif rarity in ['rare', 'mythic']:
-                    type_specific_guidance += " Rare/Mythic land: Powerful utility effects or unique mana abilities. Can have complex activated abilities or game-changing effects."
-            
-            # PLANESWALKER PIPELINE
-            elif 'planeswalker' in card_type:
-                type_specific_guidance = " PLANESWALKER DESIGN: Generate loyalty abilities that represent a powerful ally. Planeswalkers have starting loyalty and 2-4 abilities with loyalty costs. Format as '+X: [effect]', '-X: [effect]', and optional ultimate '-X: [powerful effect]'. First ability should be positive or neutral loyalty, middle ability(ies) should cost loyalty for stronger effects, ultimate should be game-changing but expensive. Common patterns: '+1: Draw a card', '-2: Deal 3 damage to any target', '-7: You get an emblem with...'. Each ability should feel distinct and flavorful to the character."
-                
-                # Planeswalker complexity by rarity
-                if rarity in ['rare', 'mythic']:
-                    type_specific_guidance += " Rare/Mythic planeswalker: 3-4 abilities including a powerful ultimate. Starting loyalty 3-5. Abilities should synergize and tell a story."
-                else:
-                    type_specific_guidance += " Uncommon planeswalker: 2-3 abilities, simpler effects. Starting loyalty 2-4. Focus on utility rather than game-ending effects."
-            
-            # BATTLE PIPELINE
-            elif 'battle' in card_type:
-                type_specific_guidance = " BATTLE DESIGN: Generate effects that trigger when the battle enters or is defeated. Battles start with defense counters and have effects when they transform or are defeated. Focus on: enter-the-battlefield effects, static effects while on battlefield, and powerful 'when this battle is defeated' triggers. Common patterns: 'When ~ enters the battlefield, ...', 'Whenever ~ loses a defense counter, ...', 'When ~ is defeated, ...'. Battles should feel like epic conflicts with meaningful rewards for defeating them."
-            
-            # Enhanced creature-specific guidance with stats balancing
-            creature_guidance = ""
-            
-            # Flying restrictions for ALL creatures (not just legendary)
-            creature_flying_guidance = ""
-            if 'creature' in card_type:
-                subtype = card_data.get('subtype', '')
-                if subtype:
-                    subtype_lower = subtype.lower()
-                    
-                    # Use flying restrictions from config
-                    
-                    if any(restricted_type in subtype_lower for restricted_type in flying_restricted_types):
-                        creature_flying_guidance = f" FLYING RESTRICTION: {subtype} creatures should rarely have flying unless there's a compelling magical or mechanical reason. Prioritize grounded keywords like trample, vigilance, first strike, deathtouch, reach, menace, or lifelink instead of flying."
-                    elif any(flying_type in subtype_lower for flying_type in flying_encouraged_types):
-                        creature_flying_guidance = f" FLYING NATURAL: {subtype} creatures are natural fliers and flying is highly appropriate for this creature type."
-            
-            if 'creature' in card_type and power and toughness:
-                try:
-                    p = int(power) if power.isdigit() else 0
-                    t = int(toughness) if toughness.isdigit() else 0
-                    stat_total = p + t
-                    
-                    # More aggressive stat-based ability limiting
-                    if stat_total >= 10:  # Large creatures like 6/6, 5/5, etc.
-                        creature_guidance = " This creature has very large stats, so limit to AT MOST 0-2 simple abilities (prefer keywords like Trample, Vigilance). Avoid complex activated abilities."
-                    elif stat_total >= 7:  # Medium-large creatures like 4/4, 3/4, etc.
-                        creature_guidance = " This creature has large stats for its cost, so abilities should be minimal - prefer 0-2 keywords or one simple triggered ability. Avoid multiple activated abilities."
-                    elif stat_total >= 5:  # Average creatures
-                        if stat_total > cmc * 2.2:  # Above-rate stats
-                            creature_guidance = " This creature has above-average stats, so limit abilities to 0-2 simple ones (mostly keywords)."
-                        else:
-                            creature_guidance = " This creature has moderate stats, so it can have 2-3 balanced abilities."
-                    elif stat_total < cmc * 1.5:  # Below-rate stats
-                        creature_guidance = " This creature has low stats for its cost, so it should have multiple powerful abilities (2-4 depending on rarity) to compensate."
-                    else:
-                        creature_guidance = " This creature has balanced stats, so it can have moderate utility abilities."
-                        
-                    # Special case for defensive creatures (high toughness, low power)
-                    if t >= 5 or (t > p and t >= 3):
-                        creature_guidance += " This is a defensive creature - consider abilities like Defender, Wall synergies, or activated abilities that don't require attacking."
-                        
-                except:
-                    pass
-            
-            # Legendary creature limitation with name/subtype awareness
-            legendary_guidance = ""
-            if is_legendary and 'creature' in card_type:
-                card_name = card_data.get('name', '')
-                subtype = card_data.get('subtype', '')
-                
-                legendary_guidance = " LEGENDARY CONSTRAINT: This is a legendary creature - structure abilities as follows: "
-                
-                # Power level determines ability structure - FOLLOW SAME RARITY LIMITS AS NON-LEGENDARY
-                # Legendary status does not grant extra abilities, just unique flavor
-                if rarity == 'mythic':
-                    legendary_guidance += "Mythic legendary: Maximum 3-4 total abilities including keywords, triggered, and activated abilities. Make abilities feel unique and build-around worthy."
-                elif rarity == 'rare':
-                    legendary_guidance += "Rare legendary: Maximum 3 total abilities including keywords. Focus on unique mechanics that feel special."
-                elif rarity == 'uncommon':
-                    legendary_guidance += "Uncommon legendary: Maximum 2 total abilities including keywords. Simple but memorable effects."
-                else:  # common
-                    legendary_guidance += "Common legendary: Maximum 1 total ability - either ONE keyword OR one simple triggered ability. Being legendary doesn't grant extra complexity."
-                
-                # Add name and subtype flavor guidance
-                if card_name:
-                    legendary_guidance += f" IMPORTANT: This creature is named '{card_name}' - design abilities that reflect this specific character's identity, personality, and lore. Make the abilities feel unique to this individual."
-                
-                if subtype:
-                    # Add subtype-specific ability suggestions
-                    subtype_lower = subtype.lower()
-                    
-                    if 'dragon' in subtype_lower:
-                        legendary_guidance += " As a Dragon, consider abilities like flying, dealing damage, treasure generation, or breath weapon effects."
-                    elif 'angel' in subtype_lower:
-                        legendary_guidance += " As an Angel, consider abilities like flying OR vigilance (not both), lifegain, protection effects, flash, hexproof, or helping other creatures."
-                    elif 'demon' in subtype_lower:
-                        legendary_guidance += " As a Demon, consider abilities like flying, menace, sacrifice effects, life drain, or punishing opponents."
-                    elif 'beast' in subtype_lower:
-                        legendary_guidance += " As a Beast, consider abilities like trample, fighting other creatures, +1/+1 counters, or natural/primal effects."
-                    elif 'wizard' in subtype_lower or 'mage' in subtype_lower:
-                        legendary_guidance += " As a Wizard/Mage, consider abilities related to spells, card draw, instant/sorcery synergies, or magical effects."
-                    elif 'warrior' in subtype_lower or 'soldier' in subtype_lower:
-                        legendary_guidance += " As a Warrior/Soldier, consider abilities like first strike, vigilance, combat bonuses, or military tactics."
-                    elif 'rogue' in subtype_lower or 'assassin' in subtype_lower:
-                        legendary_guidance += " As a Rogue/Assassin, consider abilities like deathtouch, unblockable, card advantage through sneaky means, or removal effects."
-                    elif 'knight' in subtype_lower:
-                        legendary_guidance += " As a Knight, consider abilities like first strike, vigilance, protection effects, or honor-based abilities."
-                    elif 'spirit' in subtype_lower:
-                        legendary_guidance += " As a Spirit, consider abilities like flying, phasing, graveyard interactions, or ethereal effects."
-                    elif 'elemental' in subtype_lower:
-                        legendary_guidance += " As an Elemental, consider abilities related to basic lands, elemental forces, or effects that match your colors (fire=damage, water=card draw, etc.)."
-                    elif 'vampire' in subtype_lower:
-                        legendary_guidance += " As a Vampire, consider abilities like lifelink, flying, life drain effects, or graveyard recursion."
-                    elif 'zombie' in subtype_lower:
-                        legendary_guidance += " As a Zombie, consider abilities like deathtouch, graveyard recursion, sacrifice synergies, or undeath effects."
-                    elif 'elf' in subtype_lower:
-                        legendary_guidance += " As an Elf, consider abilities like mana generation, creature synergies, forest/nature effects, or tribal bonuses."
-                    elif 'goblin' in subtype_lower:
-                        legendary_guidance += " As a Goblin, consider abilities like haste, direct damage, artifact interactions, or chaotic/random effects."
-                    elif 'human' in subtype_lower:
-                        legendary_guidance += " As a Human, consider versatile abilities that could represent leadership, innovation, adaptability, or cooperation with other creatures."
-                    
-                    legendary_guidance += f" The subtype '{subtype}' should strongly influence the flavor and mechanics of the abilities."
-                
-                # Use flying restrictions from config
-                
-                if any(restricted_type in subtype_lower for restricted_type in flying_restricted_types):
-                    legendary_guidance += f" FLYING RESTRICTION: {subtype} creatures rarely have flying unless there's a specific magical reason (enchantment, spell effect, etc.). Consider grounded abilities like trample, first strike, vigilance, deathtouch, or reach instead."
-                elif any(flying_type in subtype_lower for flying_type in flying_encouraged_types):
-                    legendary_guidance += f" FLYING ENCOURAGED: {subtype} creatures naturally fly and should strongly consider having flying as an ability."
-            
-            # Add card name inspiration for creative abilities
-            name_inspiration = ""
-            card_name = (card_data.get('name') or '').strip()
-            if card_name and len(card_name) > 2:
-                name_inspiration += f" CARD NAME INSPIRATION: This card is named '{card_name}' - use this name as creative inspiration for unique abilities. Extract thematic concepts from the name: if it mentions elements (fire, ice, storm), create elemental effects; if it mentions creatures (dragon, angel, demon), incorporate those creature themes; if it mentions objects (sword, tome, crown), design abilities that reflect those items; if it mentions actions (strike, whisper, shatter), create abilities based on those verbs; if it mentions places (tower, grove, sanctum), include location-based effects. Make the abilities feel specifically tied to this card's identity, not generic effects."
-            
-            enhanced_prompt += f" The card costs {cmc} mana and should be {power_level}.{color_guidance}{type_specific_guidance}{creature_guidance}{creature_flying_guidance}{legendary_guidance}{name_inspiration}{x_guidance}"
-        
-        # Add CMC guidance that respects rarity limits (rarity limits take precedence)
-        if card_data and 'creature' in card_data.get('type', '').lower():
-            # CMC provides flavor guidance but CANNOT exceed rarity ability limits
-            if cmc <= 1:
-                enhanced_prompt += f" CMC GUIDANCE: 1 mana creatures prefer efficient, simple effects within your {rarity} rarity limit. Favor keywords like Haste, Deathtouch, Menace, Reach, or Lifelink. Avoid activated abilities on cheap creatures."
-            elif cmc == 2:
-                enhanced_prompt += f" CMC GUIDANCE: 2 mana creatures work well with keywords or simple triggers within your {rarity} rarity limit. Examples: single keywords or 'When this enters the battlefield' effects."
-            elif cmc == 3:
-                enhanced_prompt += f" CMC GUIDANCE: 3 mana creatures can support moderate complexity within your {rarity} rarity limit. Consider activated abilities like '{{T}}: Add mana' or utility effects."
-            elif cmc <= 5:
-                enhanced_prompt += f" CMC GUIDANCE: 4-5 mana creatures justify more abilities within your {rarity} rarity limit. Can support activated abilities and synergistic effects."
-            else:
-                enhanced_prompt += f" CMC GUIDANCE: High-cost creatures (6+ mana) should feel impactful within your {rarity} rarity limit. Focus on game-changing effects appropriate for the mana investment."
-            
-            enhanced_prompt += " REMEMBER: Activated abilities (costs like {T}:, {1}:) are the most complex. Keyword abilities (Haste, Trample, Deathtouch, Menace, Lifelink, Reach, etc.) and triggered abilities (When/Whenever) are simpler. Lower mana cost = fewer and simpler abilities. KEYWORD SELECTIVITY: Flying should only be given to creatures that logically can fly (dragons, angels, birds, spirits, etc.). Ground-based creatures like humans, elves, goblins, beasts, and warriors should use other keywords like trample, vigilance, first strike, deathtouch, reach, menace, or lifelink. VARIETY: Consider diverse keyword combinations beyond the overused 'Flying + Vigilance' pairing. CREATURE COHESION: All abilities must work together thematically. Good creature themes include: aggressive (Haste + Trample + attack benefits), defensive (Vigilance + blocking rewards), graveyard-focused (death triggers + graveyard recursion), token-maker (creates tokens + sacrifice outlets), tribal (creature type synergies), or utility (mana abilities + activated effects). AVOID mixing unrelated mechanics like 'Flying + Graveyard recursion + Mana production + Life gain' - pick 1-2 related themes. IMPORTANT: Multiple keywords should be comma-separated on one line (like 'Trample, menace'), not on separate lines."
-        
-        # Type-specific formatting instructions
-        if 'planeswalker' in card_type:
-            enhanced_prompt += " PLANESWALKER FORMATTING: Generate 2-4 loyalty abilities in the format '+X: [effect]', '0: [effect]', or '-X: [effect]'. List each ability on its own line. Include starting loyalty as the first line like 'Starting loyalty: 3'. Example format: 'Starting loyalty: 3\\n+1: Draw a card\\n-2: Deal 3 damage to any target\\n-7: You get an emblem with \"Creatures you control have flying\"'."
-        elif 'instant' in card_type or 'sorcery' in card_type:
-            enhanced_prompt += " INSTANT/SORCERY FORMATTING: Generate spell effects that happen when cast. Keep effects concise and focused. Example formats: 'Counter target spell', 'Destroy target creature', 'Draw three cards', 'Create two 1/1 creature tokens', 'Deal 4 damage to any target'. Use standard Magic spell language."
-        elif 'land' in card_type:
-            enhanced_prompt += " LAND FORMATTING: Focus on mana abilities and utility effects. Format activated abilities with proper costs. Example formats: '{T}: Add {W}', '{T}: Add one mana of any color', '{1}, {T}: Draw a card', '{T}: Target creature gets +1/+0 until end of turn'."
+            enhanced_prompt = build_prompt(card_data)
         else:
-            enhanced_prompt += " FORMATTING: Keywords should be comma-separated on ONE line (like 'Trample, menace'), while other abilities use separate lines. For activated abilities use format '{cost}: {effect}'. For triggered abilities use 'When/Whenever/At' format. Example: 'Trample, menace\\n{T}: Add one mana of any color\\n{2}: Target creature gains first strike until end of turn'."
+            # Fallback for when no card data is provided
+            enhanced_prompt = ("Generate Magic: The Gathering rules text for a card. "
+                             "Focus on unique, cohesive abilities. "
+                             "OUTPUT FORMAT: Generate ONLY rules text. "
+                             "Wrap each ability in double quotes. ")
         
-        enhanced_prompt += (" CREATIVITY AND UNIQUENESS REQUIREMENTS: 1) AVOID OVERUSED GENERIC ABILITIES: Never use these repetitive effects: 'Draw 3 cards', 'Draw a card', '{T}: Add one mana of any color', 'Tap: Create 1 mana', 'When this enters the battlefield, draw a card', 'Sacrifice this: Draw a card'. These are boring and overused. "
-                           "2) FOCUS ON THE CARD'S IDENTITY: Use the card's name, type, and power level as inspiration. If the card is named 'Sword of Fire', create fire-themed combat abilities. If it's called 'Ancient Tome', focus on knowledge/library effects, not generic card draw. If it's a 'Dragon Engine', combine draconic and mechanical themes. "
-                           "3) PRIORITIZE UNIQUE MECHANICS: Instead of generic effects, create interesting abilities like: temporary creature theft, conditional countering, combat phase manipulation, alternate win conditions, unique token creation, innovative triggered conditions, creative activated abilities that aren't just mana generation, spell copying with twists, unique protection effects, interesting sacrifice effects, creative pump effects, unique evasion beyond flying. "
-                           "4) MAKE IT MEMORABLE: Every ability should feel distinctive and tied to the card's concept. VARIETY REQUIREMENT: Avoid overused effects like 'draw cards' and 'add mana' - instead prioritize diverse, creative effects that match the card's colors and type. Explore unique mechanics, interesting interactions, and varied effect types. "
-                           "COHESION REQUIREMENT: All abilities on a single card must work together thematically and mechanically. Do NOT combine random unrelated abilities. Instead, create cards with unified themes such as: sacrifice synergies (sacrifice creatures → get benefits), +1/+1 counter themes (place counters → counter-based benefits), graveyard strategies (mill → graveyard value), tribal synergies (creature types matter), or mana ramp strategies (produce mana → expensive effects). Each ability should support or enhance the others. "
-                           "Example of GOOD cohesion: 'When this enters, create two 1/1 tokens' + '{T}, Sacrifice a creature: Draw a card' (token generation supports sacrifice). Example of BAD cohesion: 'Flying' + '{T}: Add mana' + 'Whenever a creature dies, gain 2 life' + 'Discard a card: Deal 1 damage' (random unrelated abilities). "
-                           "🚨🚨🚨 CRITICAL OUTPUT FORMAT - RULES TEXT ONLY 🚨🚨🚨: You MUST generate ONLY the rules text that goes INSIDE the text box. ABSOLUTELY DO NOT INCLUDE: \n"
-                           "❌ Card name (like 'Pogo, Pokemon Master')\n"
-                           "❌ Card type line (like 'Legendary Creature - Human Tamer')\n"
-                           "❌ Mana cost (like '{3}{U}{U}')\n"
-                           "❌ Power/Toughness (like '3/4')\n"
-                           "❌ Flavor text\n"
-                           "❌ Set symbols\n"
-                           "❌ Any descriptive text about the card\n"
-                           "✅ ONLY generate the abilities and rules text that would appear in the rules text box\n"
-                           "If the card title appears in the rules text, you may use it there (like 'Pogo's power is equal to...')\n"
-                           "Your ENTIRE response should be ONLY abilities like: 'Flying', 'Vigilance', 'When this enters the battlefield...', '{T}: Add {G}', etc.\n"
-                           "MANDATORY QUOTE WRAPPING: Each distinct ability must be wrapped in double quotes to prevent parsing errors. This is CRITICAL for proper card rendering. Each complete ability (from start to end, including all sentences that belong together) should be enclosed in quotes. "
-                           "IMPORTANT: Use {T} for tap symbol, never write 'Tap:'. Use standard Magic card formatting. NEVER include ability type labels like 'Triggered Ability:', 'Passive Ability:', 'Active Ability:', 'Keywords:', etc. Just write the abilities directly. "
-                           "Example of CORRECT output: '\"Flying, trample\"' or '\"Flying, trample\" \"Whenever this creature attacks, gain 2 life\"' or '\"Flying, trample\" \"{T}: Add one mana of any color\" \"When this enters the battlefield, create a 1/1 token\"'. "
-                           "Example of INCORRECT output: 'Pogo, Pokemon Master - Legendary Creature - Human Tamer. Sacrifice another creature: You gain control...' (includes name and type)\n"
-                           "Example of INCORRECT output with labels: 'Keywords: Flying\\nTriggered Ability: When this enters, draw a card'. "
-                           "Each ability must be in its own quoted section - this prevents multi-sentence abilities from being split incorrectly during parsing. Generate ONLY the quoted abilities as they would appear on an actual Magic card.")
+        prompt_time = time.time()
+        print(f"[TIMING] Prompt built: {prompt_time - start_time:.2f}s")
         
         # Generate and validate rules text (retry if contaminated)
         max_attempts = 3
         card_text = ""
         
         for attempt in range(max_attempts):
+            print(f"[TIMING] Starting ollama.generate attempt {attempt + 1}: {time.time() - start_time:.2f}s")
+            
+            ollama_start = time.time()
             response = ollama.generate(
                 model='mistral:latest',
                 prompt=enhanced_prompt
             )
+            ollama_end = time.time()
+            
+            print(f"[TIMING] Ollama response received: {ollama_end - start_time:.2f}s (generation took {ollama_end - ollama_start:.2f}s)")
             
             # Clean up the response
             card_text = response['response'].strip()
-            print(f"📜 Content model raw output: {repr(card_text)}")
+            print(f"[RAW] Content model raw output: {repr(card_text)}")
             
             # Strip any non-rules text that might have been included
+            strip_start = time.time()
             card_text = strip_non_rules_text(card_text, card_data)
-            print(f"🧹 After stripping non-rules text: {repr(card_text)}")
+            print(f"[CLEAN] After stripping non-rules text: {repr(card_text)}")
+            print(f"[TIMING] Text stripping completed: {time.time() - start_time:.2f}s (stripping took {time.time() - strip_start:.2f}s)")
             
             # Validate the response doesn't contain type line elements
+            validation_start = time.time()
             if validate_rules_text(card_text, card_data):
+                print(f"[TIMING] Validation passed: {time.time() - start_time:.2f}s (validation took {time.time() - validation_start:.2f}s)")
                 break
             else:
-                print(f"❌ Rules text validation failed on attempt {attempt + 1}, regenerating...")
+                print(f"[ERROR] Rules text validation failed on attempt {attempt + 1}, regenerating...")
+                print(f"[TIMING] Validation failed: {time.time() - start_time:.2f}s (validation took {time.time() - validation_start:.2f}s)")
                 if attempt < max_attempts - 1:
                     # Add additional constraint for retry
                     enhanced_prompt += f" CRITICAL: Do NOT include type line elements like '{card_data.get('type', '')}' or '{card_data.get('subtype', '')}' in the rules text. Generate ONLY the abilities text."
                 else:
-                    print(f"⚠️  Max validation attempts reached, using last generated text")
+                    print(f"[WARN] Max validation attempts reached, using last generated text")
                     break
         
         # Remove surrounding quotes if present
+        processing_start = time.time()
         if (card_text.startswith('"') and card_text.endswith('"')) or \
            (card_text.startswith("'") and card_text.endswith("'")):
             card_text = card_text[1:-1].strip()
@@ -552,187 +462,96 @@ def createCardContent(prompt, card_data=None):
         # Replace "Tap:" with "{T}:" for tap symbols
         card_text = card_text.replace('Tap:', '{T}:')
         
+        # Sanitize double braces to single braces for mana/tap symbols
+        card_text = re.sub(r'\{\{([^}]+)\}\}', r'{\1}', card_text)
+        
         # Remove any ability type labels that might have slipped through
         ability_label_patterns = [
             r'Triggered Ability:\s*',
+            r'Active Ability:\s*', 
             r'Passive Ability:\s*',
-            r'Active Ability:\s*',
-            r'Keyword Ability:\s*',
             r'Keywords:\s*',
-            r'Abilities:\s*',
-            r'Static Ability:\s*',
-            r'Activated Ability:\s*',
-            r'Ability:\s*'
+            r'Keyword Abilities:\s*',
+            r'Activated Ability:\s*'
         ]
         
         for pattern in ability_label_patterns:
-            card_text = re.sub(pattern, '', card_text, flags=re.IGNORECASE | re.MULTILINE)
+            card_text = re.sub(pattern, '', card_text, flags=re.IGNORECASE)
         
-        # Clean up any extra whitespace or newlines created by label removal
-        card_text = re.sub(r'\n\s*\n', '\n', card_text).strip()
+        # Remove named ability patterns like "Channel Life" - {T}: Add {G}
+        # Pattern 1: "Quoted Name" - ability or "Quoted Name": ability  
+        card_text = re.sub(r'"[^"]+"\s*[-:]\s*', '', card_text)
+        # Pattern 2: Unquoted Name - {ability} or Name: {ability} (more precise)
+        card_text = re.sub(r'^[A-Z][A-Za-z\s]+\s*[-:]\s*(?=\{)', '', card_text, flags=re.MULTILINE)
+        # Pattern 3: Handle cases where ability name appears at start of line
+        card_text = re.sub(r'\n[A-Z][A-Za-z\s]+\s*[-:]\s*(?=\{)', '\n{', card_text)
         
-        # Convert double newlines to single newlines
-        card_text = card_text.replace('\n\n', '\n')
+        # Condense verbose keyword descriptions to standard keywords
+        # Trample variations
+        card_text = re.sub(r'"?[Tt]rample over blockers"?', 'Trample', card_text)
+        card_text = re.sub(r'"?[Tt]rample through blockers"?', 'Trample', card_text)
+        card_text = re.sub(r'"?[Tt]rample past blockers"?', 'Trample', card_text)
+        card_text = re.sub(r'"?[Tt]rample damage over"?', 'Trample', card_text)
         
-        # Replace ~ symbol with actual card name (simple global replacement)
-        if card_data and card_data.get('name'):
-            card_name = (card_data.get('name') or '').strip()
-            if card_name:  # Only replace if we have a valid card name
-                card_text = card_text.replace('~', card_name)
+        # Flying variations
+        card_text = re.sub(r'"?[Ff]lying over creatures"?', 'Flying', card_text)
+        card_text = re.sub(r'"?[Ff]lying above blockers"?', 'Flying', card_text)
         
-        # Ensure each ability ends with a period
-        card_text = ensure_periods_on_abilities(card_text)
+        # First strike variations
+        card_text = re.sub(r'"?[Ff]irst strike in combat"?', 'First strike', card_text)
+        card_text = re.sub(r'"?[Ss]trikes first in combat"?', 'First strike', card_text)
         
-        # Add newlines before ability costs that come after periods (not in quotes)
-        card_text = format_ability_newlines(card_text)
+        # Deathtouch variations
+        card_text = re.sub(r'"?[Dd]eathtouch damage"?', 'Deathtouch', card_text)
+        card_text = re.sub(r'"?[Ll]ethal touch"?', 'Deathtouch', card_text)
         
-        # Limit to 3-4 sentences by splitting on periods and taking first 4
-        sentences = [s.strip() for s in re.split(r'[.\n]', card_text) if s.strip()]
-        print(f"🔍 Found {len(sentences)} sentences: {sentences}")
+        print(f"[FORMAT] After initial formatting: {repr(card_text)}")
+        print(f"[TIMING] Basic formatting completed: {time.time() - start_time:.2f}s (formatting took {time.time() - processing_start:.2f}s)")
         
-        # Remove card name elements (sentences that are just the card name with no abilities)
+        # Parse card text into abilities - prioritize newlines, fallback to periods
+        parse_start = time.time()
+        # First try splitting on newlines (most natural for Magic card abilities)
+        if '\n' in card_text:
+            sentences = [line.strip() for line in card_text.split('\n') if line.strip()]
+            print(f"[SPLIT] Newline split result: {sentences}")
+        else:
+            # Fallback to smart period splitting if no newlines
+            sentences = smart_split_by_periods(card_text)
+            print(f"[SPLIT] Period split result: {sentences}")
+        
+        print(f"[TIMING] Text parsing completed: {time.time() - start_time:.2f}s (parsing took {time.time() - parse_start:.2f}s)")
+        
+        # Filter out single numbers and other junk elements
         filtered_sentences = []
-        card_name = card_data.get('name', '') if card_data else ''
-        card_subtype = card_data.get('subtype', '') if card_data else ''
-        print(f"   Card name: '{card_name}'")
-        print(f"   Card subtype: '{card_subtype}'")
-        
-        for i, sentence in enumerate(sentences):
-            print(f"   Processing sentence {i}: '{sentence}'")
-            
-            # Skip if this sentence is just the card name (with possible quotes and prefixes)
-            sentence_clean = sentence.strip().strip('\'"*').strip()
-            print(f"   Cleaned version: '{sentence_clean}'")
-            
-            # Handle pattern like: 'slimefoot, the stowaway' - Fungus Warlock
-            # Check if sentence has quoted card name followed by dash and subtype
-            if sentence_clean.startswith("'") and " - " in sentence_clean:
-                quote_end = sentence_clean.find("'", 1)  # Find closing quote
-                if quote_end > 0:
-                    quoted_name = sentence_clean[1:quote_end]  # Extract name from quotes
-                    if quoted_name.lower() == card_name.lower():
-                        print(f"🗑️  Removed quoted card name with subtype: '{sentence}'")
-                        continue
-            
-            if sentence_clean == card_name:
-                print(f"🗑️  Removed card name element: '{sentence}'")
+        for sentence in sentences:
+            # Skip single numbers (like "1", "2", etc.)
+            if sentence.strip().isdigit():
+                print(f"[FILTER] Removing single number: '{sentence}'")
                 continue
-            
-            pattern = rf'{re.escape(card_name)}[\'"]? enchantment'
-            if re.match(pattern, sentence_clean, re.IGNORECASE):
-                print(f"🗑️  Removed card name + enchantment pattern: '{sentence}'")
+            # Skip numbered list markers (like "1.", "2)", etc.)
+            if re.match(r'^\d+[.)\]:]\s*$', sentence.strip()):
+                print(f"[FILTER] Removing numbered marker: '{sentence}'")
                 continue
-
-            
-            # if sentence starts with card name followed by a -
-            if sentence_clean.startswith(f"{card_name} -"):
-                print(f"🗑️  Removed card name element with prefix: '{sentence}'")
+            # Skip very short non-ability text (less than 3 chars unless it's a keyword)
+            if len(sentence.strip()) < 3 and not re.match(r'^[A-Za-z]+$', sentence.strip()):
+                print(f"[FILTER] Removing short junk: '{sentence}'")
                 continue
-
-            # if the start of the sentence is just our card name followed by punctuation, strip that out
-            if sentence_clean.startswith(f"{card_name}.") or sentence_clean.startswith(f"{card_name},"):
-                sentence_clean = sentence_clean[len(card_name)+1:].strip()
-
-            # Remove card type/subtype elements with surrounding punctuation
-            # Strip SAFE punctuation only (preserve : and {} for Magic syntax)
-            sentence_core = sentence_clean.strip('.,!?;"\'-*()[] \t\n').strip()
-            print(f"   Core text after safe punctuation removal: '{sentence_core}'")
+            # Keep the sentence, but strip surrounding quotes
+            cleaned_sentence = sentence.strip()
+            # Remove surrounding quotes if present (both single and double)
+            if (cleaned_sentence.startswith('"') and cleaned_sentence.endswith('"')) or \
+               (cleaned_sentence.startswith("'") and cleaned_sentence.endswith("'")):
+                cleaned_sentence = cleaned_sentence[1:-1].strip()
+                print(f"[FILTER] Stripped quotes from: '{sentence}' -> '{cleaned_sentence}'")
             
-            # Check against card type (main type like "Creature", "Instant", etc.)
-            card_main_type = card_data.get('type', '') if card_data else ''
-            if card_main_type and sentence_core.lower() == card_main_type.lower():
-                print(f"🗑️  Removed card type element with punctuation: '{sentence}' (core: '{sentence_core}')")
-                continue
-            
-            # Check against supertype (like "Legendary")
-            card_super_type = card_data.get('supertype', '') if card_data else ''
-            if card_super_type and sentence_core.lower() == card_super_type.lower():
-                print(f"🗑️  Removed card supertype element with punctuation: '{sentence}' (core: '{sentence_core}')")
-                continue
-            
-            # Check for type line patterns: "Word(s) - Word(s)" (like "Snow Elf - Elemental")
-            # This catches when the model incorrectly outputs type lines as rules text
-            type_line_pattern = r'^[A-Za-z\s]+ - [A-Za-z\s]{1,20}$'
-            if re.match(type_line_pattern, sentence_core):
-                # Additional validation: should be short (1-2 words on each side of hyphen)
-                parts = sentence_core.split(' - ')
-                if len(parts) == 2:
-                    left_part = parts[0].strip()
-                    right_part = parts[1].strip()
-                    left_word_count = len(left_part.split())
-                    right_word_count = len(right_part.split())
-                    
-                    # Type lines typically have 1-3 words on each side
-                    if left_word_count <= 3 and right_word_count <= 2:
-                        print(f"🗑️  Removed type line pattern: '{sentence}' (core: '{sentence_core}')")
-                        continue
-            
-            # Skip if this sentence is just the card subtype (or contains only subtype words)
-            if card_subtype:
-                # Handle multiple subtypes separated by spaces
-                subtypes = card_subtype.lower().split()
-                sentence_lower = sentence_clean.lower()
-                sentence_core_lower = sentence_core.lower()
-                
-                # Check if core text matches full subtype
-                if sentence_core_lower == card_subtype.lower():
-                    print(f"🗑️  Removed card subtype element with punctuation: '{sentence}' (core: '{sentence_core}')")
-                    continue
-                
-                # Check if sentence matches full subtype (existing logic)
-                if sentence_lower == card_subtype.lower():
-                    print(f"🗑️  Removed card subtype element (exact): '{sentence}'")
-                    continue
-                    
-                # Check if core text is just one of the subtype words
-                if sentence_core_lower in subtypes:
-                    print(f"🗑️  Removed card subtype word with punctuation: '{sentence}' (core: '{sentence_core}')")
-                    continue
-                    
-                # Check if sentence is just one of the subtype words (existing logic)
-                if sentence_lower in subtypes:
-                    print(f"🗑️  Removed card subtype word: '{sentence}'")
-                    continue
-                    
-                # Check if core text contains only subtype words
-                sentence_core_words = sentence_core_lower.split()
-                if sentence_core_words and all(word in subtypes for word in sentence_core_words):
-                    print(f"🗑️  Removed card subtype combination with punctuation: '{sentence}' (core: '{sentence_core}')")
-                    continue
-                    
-                # Check if sentence contains only subtype words (existing logic)
-                sentence_words = sentence_lower.split()
-                if sentence_words and all(word in subtypes for word in sentence_words):
-                    print(f"🗑️  Removed card subtype combination: '{sentence}'")
-                    continue
-            
-            # Skip empty sentences or sentences that are just quotes/whitespace
-            sentence_meaningful = sentence.strip().strip('\'"').strip()
-            if not sentence_meaningful:
-                print(f"🗑️  Removed empty/quote-only sentence: '{sentence}'")
-                continue
-                
-            # Clean up leading quote fragments and newlines
-            sentence = sentence.strip()
-            if sentence.startswith("'\n") or sentence.startswith('"\n'):
-                sentence = sentence[2:]  # Remove quote + newline
-                print(f"🧹 Removed leading quote+newline")
-            elif sentence.startswith('\n'):
-                sentence = sentence[1:]  # Remove just newline
-                print(f"🧹 Removed leading newline")
-                
-            filtered_sentences.append(sentence)
+            filtered_sentences.append(cleaned_sentence)
         
         sentences = filtered_sentences
-        print(f"📦 After filtering: {len(sentences)} sentences: {sentences}")
+        print(f"[FILTER] After filtering: {sentences}")
         
-        ## Sanitize front and end of each element
-        for i in range(len(sentences)):
-            sentences[i] = sentences[i].strip('\'"')
-
         # Create abilities array from cleaned sentences
         if len(sentences) > 4:
-            print(f"⚠️  Truncating from {len(sentences)} to 4 sentences")
+            print(f"[WARN] Truncating from {len(sentences)} to 4 sentences")
             abilities_array = sentences[:4]
         else:
             abilities_array = sentences
@@ -740,25 +559,25 @@ def createCardContent(prompt, card_data=None):
         # UNIFIED SANITATION PIPELINE - Applied to ALL card types
         if card_data:
             # Step 1: Universal ability reordering (work with abilities array)
-            print(f"🔍 Before reordering: {abilities_array}")
+            print(f"[BEFORE] Before reordering: {abilities_array}")
             abilities_array = reorder_abilities_properly_array(abilities_array, card_data)
-            print(f"🔍 After reordering: {abilities_array}")
+            print(f"[AFTER] After reordering: {abilities_array}")
             
-            # Convert abilities array to final text only at the very end
+            # Step 2: Type-specific sanitation (convert array back to text for legacy processors)
             card_text = '\n'.join(abilities_array)
+            card_type = (card_data.get('type') or '').lower()
             
-            # Step 2: Type-specific ability limits (now work with final text)
-            card_type = card_data.get('type', '').lower()
             if 'creature' in card_type:
+                # Creatures get more aggressive ability limiting
                 card_text = limit_creature_active_abilities(card_text)
             elif 'planeswalker' in card_type:
-                # Planeswalkers should have proper loyalty ability format
+                # Planeswalkers get loyalty ability formatting
                 card_text = sanitize_planeswalker_abilities(card_text)
             elif 'instant' in card_type or 'sorcery' in card_type:
-                # Spells should have single cohesive effects
+                # Spells get spell-specific sanitation
                 card_text = sanitize_spell_abilities(card_text)
             elif 'land' in card_type:
-                # Lands should focus on mana abilities
+                # Lands get land-specific sanitation
                 card_text = sanitize_land_abilities(card_text)
             elif 'artifact' in card_type or 'enchantment' in card_type:
                 # Artifacts/enchantments get general permanent sanitation
@@ -771,19 +590,23 @@ def createCardContent(prompt, card_data=None):
             card_text = '\n'.join(abilities_array)
         
         # Final validation after all processing (check for post-processing issues)
+        final_validation_start = time.time()
         if not validate_rules_text(card_text, card_data):
-            print(f"⚠️  Final validation failed after text processing - issues introduced during formatting")
-            print(f"⚠️  Processed text: {repr(card_text)}")
+            print(f"[WARN] Final validation failed after text processing - issues introduced during formatting")
+            print(f"[WARN] Processed text: {repr(card_text)}")
             # For now, return the text anyway, but log the issue
             # TODO: Could implement full regeneration loop here if needed
         
-        print(f"🧠 createCardContent returning:")
-        print(f"   📝 Result: {repr(card_text)}")
+        end_time = time.time()
+        total_time = end_time - start_time
+        print(f"[TIMING] Final validation completed: {total_time:.2f}s (validation took {end_time - final_validation_start:.2f}s)")
+        print(f"[TIMING] ===== TOTAL PROCESSING TIME: {total_time:.2f}s =====")
+        
+        print(f"[RETURN] createCardContent returning:")
+        print(f"   Result: {repr(card_text)}")
         return card_text
         
     except Exception as e:
-        print(f"❌ Error in createCardContent: {e}")
+        print(f"[ERROR] Error in createCardContent: {e}")
         print("Make sure Mistral model is installed: 'ollama pull mistral:latest'")
-        import traceback
-        traceback.print_exc()
-        return None
+        return prompt

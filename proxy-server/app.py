@@ -46,16 +46,28 @@ import re
 from PIL import Image, ImageDraw
 import tempfile
 import ollama
-from diffusers import AutoPipelineForText2Image
-print(f"🔍 Python executable: {sys.executable}")
-print(f"🔍 Python version: {sys.version}")
-print(f"🔍 Python path: {sys.path[:3]}...")  # Show first 3 paths
+# Try to import diffusers, but don't fail if it's not available
+try:
+    from diffusers import AutoPipelineForText2Image
+    DIFFUSERS_AVAILABLE = True
+    print("[SUCCESS] diffusers imported successfully")
+except ImportError as e:
+    print(f"[WARNING] diffusers import failed: {e}")
+    print("[INFO] Image generation will be disabled, but text-only generation will work")
+    AutoPipelineForText2Image = None
+    DIFFUSERS_AVAILABLE = False
+print(f"[DEBUG] Python executable: {sys.executable}")
+print(f"[DEBUG] Python version: {sys.version}")
+print(f"[DEBUG] Python path: {sys.path[:3]}...")  # Show first 3 paths
 try:
     import torch
-    print(f"✅ torch imported successfully: {torch.__version__}")
-except ImportError as e:
-    print(f"❌ torch import failed: {e}")
+    print(f"[SUCCESS] torch imported successfully: {torch.__version__}")
+    TORCH_AVAILABLE = True
+except (ImportError, OSError) as e:
+    print(f"[WARNING] torch import failed: {e}")
+    print("[INFO] Torch not available - image generation will be disabled")
     torch = None
+    TORCH_AVAILABLE = False
 import threading
 import concurrent.futures
 from card_renderer import card_renderer
@@ -78,7 +90,7 @@ class RequestQueue:
         self.cleanup_thread = threading.Thread(target=self._periodic_cleanup, daemon=True)
         self.cleanup_thread.start()
         
-        print(f"🚀 Request queue initialized with max {MAX_CONCURRENT_REQUESTS} concurrent requests")
+        print(f"[INIT] Request queue initialized with max {MAX_CONCURRENT_REQUESTS} concurrent requests")
     
     def add_request(self, request_id, process_func, *args, **kwargs):
         """Add a request to the queue"""
@@ -472,6 +484,11 @@ image_pipeline_loading = False
 def get_image_pipeline():
     """Lazy load the SDXL-Turbo pipeline for image generation"""
     global image_pipeline, image_pipeline_loading
+    
+    if not DIFFUSERS_AVAILABLE or not TORCH_AVAILABLE:
+        print("[ERROR] diffusers or torch not available - image generation disabled")
+        image_pipeline = False
+        return None
     
     if image_pipeline is not None:
         return image_pipeline
@@ -923,6 +940,193 @@ def create_card():
         response = jsonify({'error': f'Request processing failed: {str(e)}'})
         return add_ngrok_headers(response), 500
 
+# Regenerate text with existing image endpoint
+@app.route('/api/v1/regenerate_card_text', methods=['POST', 'OPTIONS'])
+def regenerate_card_text():
+    """
+    Regenerate card text using existing image data - reuses provided image and generates new text
+    """
+    # Handle OPTIONS request for CORS preflight
+    if request.method == 'OPTIONS':
+        print("Handling OPTIONS preflight request for regenerate text endpoint")
+        response = jsonify({'status': 'ok'})
+        return add_ngrok_headers(response)
+    
+    try:
+        # Get the request data
+        data = request.get_json()
+        
+        if not data:
+            print("ERROR: No JSON data provided")
+            response = jsonify({'error': 'No JSON data provided'})
+            return add_ngrok_headers(response), 400
+        
+        # Extract prompt from request
+        prompt = data.get('prompt', '')
+        if not prompt:
+            response = jsonify({'error': 'No prompt provided'})
+            return add_ngrok_headers(response), 400
+        
+        # Extract existing image data
+        existing_image_data = data.get('imageData', '')
+        if not existing_image_data:
+            response = jsonify({'error': 'No existing image data provided'})
+            return add_ngrok_headers(response), 400
+        
+        # Remove data URL prefix if present
+        if existing_image_data.startswith('data:image/'):
+            existing_image_data = existing_image_data.split(',')[1]
+        
+        # Extract card data for enhanced prompting
+        original_card_data = data.get('cardData', {})
+        
+        print(f"[REGENERATE] Text regeneration request: {prompt}")
+        print(f"[REGENERATE] Using existing image data: {len(existing_image_data)} characters")
+        
+        # Generate new content directly (no queue needed for text regeneration)
+        import time
+        start_time = time.time()
+        
+        try:
+            print(f"[REGENERATE] Starting text regeneration with existing image...")
+            generated_card_text = createCardContent(prompt, original_card_data)
+            content_generation_time = time.time() - start_time
+            print(f"[REGENERATE] Text regeneration completed in {content_generation_time:.2f} seconds")
+            
+            # Process the generated text
+            if generated_card_text:
+                updated_card_data = process_card_description_text(original_card_data, generated_card_text)
+                
+                # Generate complete card image using existing artwork
+                try:
+                    print("[REGENERATE] Rendering complete card with new text and existing artwork...")
+                    rendering_start = time.time()
+                    
+                    # Decode the existing image data
+                    import base64
+                    image_data_bytes = base64.b64decode(existing_image_data)
+                    
+                    # Generate complete card image using renderer with existing artwork
+                    card_image_data = card_renderer.generate_card_image(updated_card_data, existing_image_data)
+                    
+                    rendering_time = time.time() - rendering_start
+                    print(f"[REGENERATE] Card rendering completed in {rendering_time:.2f} seconds")
+                    
+                    # Return the response with new text and complete card image
+                    total_time = time.time() - start_time
+                    response_data = {
+                        'cardData': json.dumps(updated_card_data),
+                        'card_image': card_image_data,  # Complete card with new text
+                        'generationTime': total_time,
+                        'message': 'Text regenerated successfully with existing artwork'
+                    }
+                    
+                    print(f"[REGENERATE] Returning regeneration response: {len(str(response_data))} bytes")
+                    response = jsonify(response_data)
+                    return add_ngrok_headers(response)
+                    
+                except Exception as render_error:
+                    print(f"[ERROR] Card rendering failed: {render_error}")
+                    # Fall back to just returning the text data
+                    response_data = {
+                        'cardData': json.dumps(updated_card_data),
+                        'generationTime': content_generation_time,
+                        'message': 'Text regenerated successfully (card rendering failed)'
+                    }
+                    response = jsonify(response_data)
+                    return add_ngrok_headers(response)
+            else:
+                print("[ERROR] No content generated during regeneration")
+                response = jsonify({'error': 'Failed to regenerate content'})
+                return add_ngrok_headers(response), 500
+                
+        except Exception as e:
+            content_generation_time = time.time() - start_time
+            print(f"[ERROR] Text regeneration failed after {content_generation_time:.2f} seconds: {e}")
+            import traceback
+            traceback.print_exc()
+            response = jsonify({'error': f'Content regeneration failed: {str(e)}'})
+            return add_ngrok_headers(response), 500
+        
+    except Exception as e:
+        print(f"[ERROR] Error processing regenerate text request: {e}")
+        response = jsonify({'error': f'Request processing failed: {str(e)}'})
+        return add_ngrok_headers(response), 500
+
+# Text-only endpoint for faster generation (no image generation)
+@app.route('/api/v1/create_card_text_only', methods=['POST', 'OPTIONS'])
+def create_card_text_only():
+    """
+    Text-only endpoint that skips image generation for significantly faster response
+    """
+    # Handle OPTIONS request for CORS preflight
+    if request.method == 'OPTIONS':
+        print("Handling OPTIONS preflight request for text-only endpoint")
+        response = jsonify({'status': 'ok'})
+        return add_ngrok_headers(response)
+    
+    try:
+        # Get the request data
+        data = request.get_json()
+        
+        if not data:
+            print("ERROR: No JSON data provided")
+            response = jsonify({'error': 'No JSON data provided'})
+            return add_ngrok_headers(response), 400
+        
+        # Extract prompt from request
+        prompt = data.get('prompt', '')
+        if not prompt:
+            response = jsonify({'error': 'No prompt provided'})
+            return add_ngrok_headers(response), 400
+        
+        # Extract card data for enhanced prompting
+        original_card_data = data.get('cardData', {})
+        
+        print(f"📝 Text-only generation request: {prompt}")
+        
+        # Generate content directly (no queue needed for text-only)
+        import time
+        start_time = time.time()
+        
+        try:
+            print(f"🚀 Starting text-only content generation...")
+            generated_card_text = createCardContent(prompt, original_card_data)
+            content_generation_time = time.time() - start_time
+            print(f"✅ Text generation completed in {content_generation_time:.2f} seconds")
+            
+            # Process the generated text
+            if generated_card_text:
+                updated_card_data = process_card_description_text(original_card_data, generated_card_text)
+                
+                # Return only the text data (no image data)
+                response_data = {
+                    'cardData': json.dumps(updated_card_data),
+                    'generationTime': content_generation_time,
+                    'message': 'Text generated successfully'
+                }
+                
+                print(f"📤 Returning text-only response: {len(str(response_data))} bytes")
+                response = jsonify(response_data)
+                return add_ngrok_headers(response)
+            else:
+                print("❌ No content generated")
+                response = jsonify({'error': 'Failed to generate content'})
+                return add_ngrok_headers(response), 500
+                
+        except Exception as e:
+            content_generation_time = time.time() - start_time
+            print(f"❌ Text generation failed after {content_generation_time:.2f} seconds: {e}")
+            import traceback
+            traceback.print_exc()
+            response = jsonify({'error': f'Content generation failed: {str(e)}'})
+            return add_ngrok_headers(response), 500
+        
+    except Exception as e:
+        print(f"❌ Error processing text-only request: {e}")
+        response = jsonify({'error': f'Request processing failed: {str(e)}'})
+        return add_ngrok_headers(response), 500
+
 # Async endpoint for clients that want to poll
 @app.route('/api/v1/create_card_async', methods=['POST', 'OPTIONS'])
 def create_card_async():
@@ -1079,19 +1283,21 @@ def instant_response():
     return jsonify({'status': 'instant-success', 'timestamp': str(request.args)}), 200
 
 if __name__ == '__main__':
-    print("🚀 Starting Flask server with intelligent queuing...")
+    print("[STARTUP] Starting Flask server with intelligent queuing...")
     print("Available endpoints:")
     print("  POST /api/v1/create_card - Generate card (sync, frontend compatible)")
+    print("  POST /api/v1/create_card_text_only - Generate text only (fast)")
+    print("  POST /api/v1/regenerate_card_text - Regenerate text with existing image")
     print("  POST /api/v1/create_card_async - Queue card generation (async)")
     print("  GET  /api/v1/card_status/<request_id> - Check async request status")
     print("  GET  /api/v1/queue_status - Get overall queue status")
     print("  POST /api/v1/create_card_sync - Generate card (sync, legacy)")
     print("  GET  /health - Health check")
-    print("\n📋 Queue Configuration:")
+    print("\n[CONFIG] Queue Configuration:")
     print(f"  - Max concurrent requests: {request_queue.max_concurrent}")
     print("  - All endpoints use queue internally to prevent model overload")
     print("  - Frontend-compatible: /api/v1/create_card works synchronously")
-    print("\n💡 Usage:")
+    print("\n[USAGE] Usage:")
     print("Frontend: Use /api/v1/create_card (synchronous, queued internally)")
     print("Advanced: Use /api/v1/create_card_async + polling for true async behavior")
     print("\nExample request body:")

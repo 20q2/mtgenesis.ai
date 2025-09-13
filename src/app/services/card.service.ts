@@ -140,7 +140,124 @@ export class CardService {
   }
 
   /**
-   * Generate only card text content (no image)
+   * Generate only card text content using fast text-only endpoint
+   * @param card Card data for text generation
+   * @returns Observable with updated card text
+   */
+  generateCardTextOnly(card: Card): Observable<Partial<Card>> {
+    const url = `${environment.apiUrl}/api/v1/create_card_text_only`;
+    
+    const request: CardGenerationRequest = {
+      prompt: card.artPrompt || `Fantasy art of ${card.name}, ${card.type}`,
+      width: environment.defaultCardWidth,
+      height: environment.defaultCardHeight,
+      cardData: {
+        name: card.name,
+        manaCost: card.manaCost,
+        supertype: card.supertype,
+        colors: card.colors,
+        type: card.type,
+        subtype: card.subtype,
+        rarity: card.rarity,
+        cmc: card.cmc,
+        description: card.description,
+        power: card.power,
+        toughness: card.toughness
+      }
+    };
+
+    return this.http.post<any>(url, request, { headers: this.defaultHeaders })
+      .pipe(
+        timeout(30000), // Use shorter timeout for text-only (30 seconds)
+        map((response: any) => {
+          const updatedCardData: Partial<Card> = {};
+          
+          // Process only card data (text-only response)
+          if (response.cardData) {
+            try {
+              // Try to parse structured card data or use as description
+              const parsedData = JSON.parse(response.cardData);
+              if (parsedData.name) updatedCardData.name = parsedData.name;
+              if (parsedData.description) updatedCardData.description = parsedData.description;
+              if (parsedData.flavorText) updatedCardData.flavorText = parsedData.flavorText;
+              if (parsedData.manaCost) updatedCardData.manaCost = parsedData.manaCost;
+            } catch (e) {
+              // If not JSON, treat as description
+              updatedCardData.description = response.cardData;
+            }
+          }
+          
+          return updatedCardData;
+        }),
+        tap(cardData => console.log('Fast text-only generation successful:', cardData)),
+        catchError(this.handleError<Partial<Card>>('generateCardTextOnly'))
+      );
+  }
+
+  /**
+   * Regenerate card text using existing image data
+   * @param card Card data for text generation
+   * @param imageData Base64 image data to reuse
+   * @returns Observable with updated card text
+   */
+  regenerateCardText(card: Card, imageData: string): Observable<Partial<Card>> {
+    const url = `${environment.apiUrl}/api/v1/regenerate_card_text`;
+    
+    const request = {
+      prompt: card.artPrompt || `Fantasy art of ${card.name}, ${card.type}`,
+      width: environment.defaultCardWidth,
+      height: environment.defaultCardHeight,
+      imageData: imageData, // Include the existing image data
+      cardData: {
+        name: card.name,
+        manaCost: card.manaCost,
+        supertype: card.supertype,
+        colors: card.colors,
+        type: card.type,
+        subtype: card.subtype,
+        rarity: card.rarity,
+        cmc: card.cmc,
+        description: card.description,
+        power: card.power,
+        toughness: card.toughness
+      }
+    };
+
+    return this.http.post<any>(url, request, { headers: this.defaultHeaders })
+      .pipe(
+        timeout(30000), // Use shorter timeout for text regeneration (30 seconds)
+        map((response: any) => {
+          const updatedCardData: Partial<Card> = {};
+          
+          // Process only card data (ignore any image updates)
+          if (response.cardData) {
+            try {
+              // Try to parse structured card data or use as description
+              const parsedData = JSON.parse(response.cardData);
+              if (parsedData.name) updatedCardData.name = parsedData.name;
+              if (parsedData.description) updatedCardData.description = parsedData.description;
+              if (parsedData.flavorText) updatedCardData.flavorText = parsedData.flavorText;
+              if (parsedData.manaCost) updatedCardData.manaCost = parsedData.manaCost;
+            } catch (e) {
+              // If not JSON, treat as description
+              updatedCardData.description = response.cardData;
+            }
+          }
+          
+          // Process complete card image if returned (with new text overlaid)
+          if (response.card_image) {
+            updatedCardData.cardImageUrl = `data:image/png;base64,${response.card_image}`;
+          }
+          
+          return updatedCardData;
+        }),
+        tap(cardData => console.log('Card text regeneration successful:', cardData)),
+        catchError(this.handleError<Partial<Card>>('regenerateCardText'))
+      );
+  }
+
+  /**
+   * Generate only card text content (no image) - Legacy method using full endpoint
    * @param card Card data for text generation
    * @returns Observable with updated card text
    */

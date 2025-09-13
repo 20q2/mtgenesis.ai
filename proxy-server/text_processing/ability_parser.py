@@ -109,15 +109,16 @@ def _is_single_keyword_like(text):
     if len(words) > 2:
         return False
     
-    # Exclude common ability words that aren't keywords
-    ability_exclusions = [
+    # Words that are definitely NOT keywords (prevents false positive keyword detection)
+    non_keyword_words = [
         'enters', 'dies', 'attacks', 'blocks', 'deals', 'takes', 'becomes',
         'target', 'choose', 'search', 'draw', 'discard', 'exile', 'return',
-        'destroy', 'sacrifice', 'create', 'put', 'gain', 'lose', 'add', 'remove'
+        'destroy', 'sacrifice', 'create', 'put', 'gain', 'lose', 'add', 'remove',
+        'singleton'  # Format term, not a keyword
     ]
     
     for word in words:
-        if word.lower() in ability_exclusions:
+        if word.lower() in non_keyword_words:
             return False
     
     # Must not contain ability syntax
@@ -176,6 +177,70 @@ def parse_abilities(card_text):
             abilities = smart_split_by_periods(card_text)
             return abilities
 
+
+def _is_valid_static_ability(clean_ability):
+    """
+    Determine if an ability is a valid static/passive ability.
+    Much more precise than defaulting all unrecognized text to passive.
+    """
+    
+    # Common static ability patterns for Magic cards
+    static_patterns = [
+        # Power/toughness modifications
+        r'\b(creatures?|other creatures?)\s+(you\s+control\s+)?(get|have)\s+[+\-]\d+/[+\-]\d+',
+        r'\bthis\s+(creature\s+)?(gets?|has?)\s+[+\-]\d+/[+\-]\d+',
+        
+        # Ability grants to creatures
+        r'\b(creatures?|other creatures?)\s+(you\s+control\s+)?have\s+\w+',
+        r'\b(creatures?|other creatures?)\s+(you\s+control\s+)?gain\s+\w+',
+        
+        # Type/subtype changes
+        r'\ball\s+\w+\s+are\s+\w+',
+        r'\b\w+\s+you\s+control\s+are\s+\w+\s+in\s+addition',
+        
+        # Cost reductions/modifications
+        r'\b\w+\s+spells?\s+(cost|costs)\s+\{\d+\}\s+(less|more)',
+        r'\bspells?\s+you\s+cast\s+cost\s+\{\d+\}\s+(less|more)',
+        
+        # Protection/immunity
+        r'\bthis\s+(creature\s+)?has\s+protection\s+from\s+\w+',
+        r'\bthis\s+(creature\s+)?can\'?t\s+be\s+\w+',
+        r'\b\w+\s+can\'?t\s+(attack|block|be\s+blocked)',
+        
+        # Permanent states
+        r'\bthis\s+(creature\s+)?enters\s+the\s+battlefield\s+tapped',
+        r'\bthis\s+(creature\s+)?doesn\'?t\s+untap',
+        
+        # Anthem effects
+        r'\b(creatures?|other creatures?)\s+(you\s+control\s+)?get\s+[+\-]\d+/[+\-]\d+',
+        
+        # Mana abilities (simple ones)
+        r'\blands?\s+you\s+control\s+tap\s+for\s+an\s+additional',
+        
+        # Simple conditional modifiers
+        r'\bas\s+long\s+as\s+.*,\s*this\s+(creature\s+)?(gets?|has?)',
+        r'\bif\s+.*,\s*this\s+(creature\s+)?(gets?|has?)',
+        
+        # Card type modifications  
+        r'\b\w+\s+cards?\s+in\s+your\s+graveyard\s+(have|are)',
+        
+        # Simple replacement effects
+        r'\bif\s+.*\s+would\s+.*,\s+.*\s+instead',
+    ]
+    
+    # Check if it matches any valid static ability pattern
+    for pattern in static_patterns:
+        if re.search(pattern, clean_ability, re.IGNORECASE):
+            return True
+    
+    # Additional check: Simple keyword grants (creatures have X, creatures gain Y)
+    keyword_grant_pattern = r'\b(creatures?|other creatures?)\s+(you\s+control\s+)?(have|gain)\s+[a-z\s]+$'
+    if re.search(keyword_grant_pattern, clean_ability, re.IGNORECASE):
+        # Make sure it's not too long or complex
+        if len(clean_ability) < 60 and 'when' not in clean_ability and 'whenever' not in clean_ability:
+            return True
+    
+    return False
 
 def classify_ability(ability, keywords, ability_index=0):
     """
@@ -243,8 +308,13 @@ def classify_ability(ability, keywords, ability_index=0):
         if re.search(pattern, clean_ability):
             return 'active'
     
-    # Default to passive
-    return 'passive'
+    # Check for valid static abilities (much more precise than defaulting to passive)
+    if _is_valid_static_ability(clean_ability):
+        return 'passive'
+    
+    # If it doesn't match any clear pattern, classify as junk
+    print(f"   🗑️ Unrecognized ability pattern, treating as junk: '{clean_ability}'")
+    return 'junk'
 
 
 def filter_rules_text_artifacts(abilities_list):
@@ -376,6 +446,9 @@ def reorder_abilities_properly_array(abilities_array, card_data=None):
             triggered_abilities.append(ability)
         elif ability_type == 'active':
             active_abilities.append(ability)
+        elif ability_type == 'junk':
+            # Skip junk abilities - don't add them to any category
+            print(f"   🗑️ Discarding junk ability: '{ability}'")
     
     # Apply filtering and cleaning (reusing existing logic)
     # Extract passive abilities for filtering (preserving order info)
@@ -533,6 +606,9 @@ def reorder_abilities_properly(card_text, card_data=None):
             triggered_abilities.append(ability)
         elif ability_type == 'active':
             active_abilities.append(ability)
+        elif ability_type == 'junk':
+            # Skip junk abilities - don't add them to any category
+            print(f"   🗑️ Discarding junk ability: '{ability}'")
     
     # Clean up typeline contamination from passive and triggered abilities
     # Note: This function is still in app.py and needs to be extracted
