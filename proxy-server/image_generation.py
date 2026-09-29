@@ -6,7 +6,15 @@ torch/diffusers are imported lazily so placeholder mode and tests never load the
 """
 from __future__ import annotations
 
+import base64
+import io
 import re
+import threading
+import time
+
+from PIL import Image
+
+import config
 
 # ===== PROMPT CONSTRUCTION =====
 
@@ -221,6 +229,94 @@ def build_art_prompt(prompt: str, card_data: dict | None) -> tuple[str, str]:
     return positive, NEGATIVE_PROMPT
 
 
+# ===== PIPELINE =====
+
+_pipeline = None
+_load_lock = threading.Lock()
+# The pipeline's scheduler holds per-run state, so only one inference runs at a time
+# (the legacy routes can call createCardImage from several threads).
+_inference_lock = threading.Lock()
+
+
+def _get_pipeline():
+    """Lazily load the SDXL Lightning pipeline once. Raises if loading fails, so the
+    next call retries instead of caching the failure."""
+    global _pipeline
+    if _pipeline is not None:
+        return _pipeline
+    with _load_lock:
+        if _pipeline is not None:
+            return _pipeline
+
+        import torch
+        from diffusers import AutoencoderKL, DPMSolverMultistepScheduler, StableDiffusionXLPipeline
+
+        use_cuda = config.USE_CUDA and torch.cuda.is_available()
+        device = "cuda" if use_cuda else "cpu"
+        dtype = torch.float16 if use_cuda else torch.float32
+        print(f"🔄 Loading image model {config.IMAGE_MODEL_ID} on {device} ({dtype})... "
+              f"(the first run downloads it)")
+        start = time.perf_counter()
+
+        extra = {}
+        if config.IMAGE_VAE_ID:
+            extra["vae"] = AutoencoderKL.from_pretrained(config.IMAGE_VAE_ID, torch_dtype=dtype)
+
+        pipe = None
+        if use_cuda:
+            try:
+                pipe = StableDiffusionXLPipeline.from_pretrained(
+                    config.IMAGE_MODEL_ID, torch_dtype=dtype, variant="fp16", **extra)
+            except (OSError, ValueError) as e:
+                print(f"⚠️ No fp16 variant for {config.IMAGE_MODEL_ID} ({e}); loading default weights as fp16")
+        if pipe is None:
+            pipe = StableDiffusionXLPipeline.from_pretrained(config.IMAGE_MODEL_ID, torch_dtype=dtype, **extra)
+
+        pipe.scheduler = DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", use_karras_sigmas=True)
+        if use_cuda and config.IMAGE_CPU_OFFLOAD:
+            # Must replace .to("cuda"); see config.IMAGE_CPU_OFFLOAD for why.
+            pipe.enable_model_cpu_offload()
+        else:
+            pipe.to(device)
+        pipe.enable_vae_slicing()
+        pipe.set_progress_bar_config(disable=True)
+
+        _pipeline = pipe
+        print(f"✅ Image model loaded on {device} in {time.perf_counter() - start:.1f}s")
+        return _pipeline
+
+
+def _png_base64(image: Image.Image) -> str:
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
 def generate_art(prompt: str, card_data: dict | None) -> str:
-    """Raw base64 PNG (no data: prefix) at config.ART_BOX_SIZE."""
-    raise NotImplementedError
+    """Raw base64 PNG (no data: prefix) at config.ART_BOX_SIZE.
+
+    Placeholder mode returns a solid gray image without importing torch. Any model
+    failure raises, so callers can mark the card failed.
+    """
+    if config.MODEL_SIZE == "placeholder":
+        return _png_base64(Image.new("RGB", tuple(config.ART_BOX_SIZE), color=(50, 50, 50)))
+
+    positive, negative = build_art_prompt(prompt, card_data)
+    pipe = _get_pipeline()
+    width, height = config.IMAGE_GEN_SIZE
+    print(f"🎨 Generating art ({estimate_tokens(positive)} tokens): {positive}")
+
+    with _inference_lock:
+        start = time.perf_counter()
+        image = pipe(
+            prompt=positive,
+            negative_prompt=negative,
+            num_inference_steps=config.IMAGE_STEPS,
+            guidance_scale=config.IMAGE_GUIDANCE,
+            width=width,
+            height=height,
+        ).images[0]
+        print(f"⚡ Art inference took {time.perf_counter() - start:.2f}s")
+
+    return _png_base64(image.convert("RGB").resize(tuple(config.ART_BOX_SIZE), Image.LANCZOS))
