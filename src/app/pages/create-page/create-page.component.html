@@ -1,20 +1,20 @@
-<!-- Health Check Banner - Only show when checking or there's an error, with delay -->
+<!-- Server banner: shown while the first queue check is pending or while the server is offline -->
 <div *ngIf="showHealthBanner && (isCheckingHealth || (healthError && !modelsReady))" class="health-banner">
   <div class="banner-content">
     <!-- Loading state -->
     <div *ngIf="isCheckingHealth" class="banner-loading">
       <mat-spinner diameter="20"></mat-spinner>
       <div class="banner-text">
-        <span class="banner-title">Initializing MTGenesis.AI</span>
-        <span class="banner-subtitle">Loading AI models... This may take a few minutes.</span>
+        <span class="banner-title">Connecting to MTGenesis.AI</span>
+        <span class="banner-subtitle">Checking the generation server...</span>
       </div>
     </div>
-    
+
     <!-- Error state -->
     <div *ngIf="healthError && !isCheckingHealth && !modelsReady" class="banner-error">
       <span class="material-icons">warning</span>
       <div class="banner-text">
-        <span class="banner-title">Models Not Available</span>
+        <span class="banner-title">Server Offline</span>
         <span class="banner-subtitle">{{ healthError }}</span>
       </div>
     </div>
@@ -33,15 +33,13 @@
       </div>
       <button class="close-button" (click)="clearSuccessMessage()">×</button>
     </div>
-    
+
     <!-- Error messages -->
-    <div *ngIf="error || textError || artError" class="status-message error">
+    <div *ngIf="error" class="status-message error">
       <div class="message-content">
         <span class="material-icons">error</span>
         <div>
-          <p *ngIf="error">{{ error }}</p>
-          <p *ngIf="textError">{{ textError }}</p>
-          <p *ngIf="artError">{{ artError }}</p>
+          <p>{{ error }}</p>
         </div>
       </div>
       <button class="close-button" (click)="clearError()">×</button>
@@ -50,78 +48,76 @@
 
   <div class="card-preview-section">
     <!-- Loading overlay for the card preview -->
-    <div *ngIf="isGenerating || isGeneratingArt || isGeneratingText" class="loading-overlay">
-      <div class="generation-progress" *ngIf="isGenerating">
+    <div *ngIf="isGenerating" class="loading-overlay">
+      <div class="generation-progress">
         <div class="progress-content">
           <div class="progress-icon">
             <span class="material-icons">auto_awesome</span>
           </div>
-          
-          <div class="progress-text" *ngIf="!showExtendedMessage" [class.fade-in]="messageVisible" [class.fade-out]="!messageVisible">
+
+          <div class="progress-text" [class.fade-in]="messageVisible" [class.fade-out]="!messageVisible">
             <h3>{{ currentMessage.title }}</h3>
           </div>
-          
-          <div class="progress-text" *ngIf="showExtendedMessage">
-            <h3>Almost Ready!</h3>
-            <p>The model is taking longer than expected. Please wait...</p>
-          </div>
-          
-          <div class="progress-bar-container">
-            <div class="progress-bar">
-              <div class="progress-fill" [style.width.%]="generationProgress"></div>
+
+          <!-- Queue position and ETA replace the old fake progress bar -->
+          <div class="job-status" *ngIf="jobView as job">
+            <div class="job-line">{{ jobStatusLine(job) }}</div>
+            <div class="job-checklist" *ngIf="job.status === 'generating' || job.status === 'rendering'">
+              <span [class.ready]="job.textReady">
+                <span class="material-icons">{{ job.textReady ? 'check_circle' : 'radio_button_unchecked' }}</span>
+                Rules text
+              </span>
+              <span [class.ready]="job.artReady">
+                <span class="material-icons">{{ job.artReady ? 'check_circle' : 'radio_button_unchecked' }}</span>
+                Artwork
+              </span>
             </div>
-            <div class="progress-percentage">{{ Math.round(generationProgress) }}%</div>
           </div>
-          
+          <div class="job-status" *ngIf="!jobView">
+            <div class="job-line">Sending to the server…</div>
+          </div>
+
           <div class="progress-time">
-            <small *ngIf="showExtendedMessage">Please be patient, generation is still in progress</small>
+            <small>You can leave this page &mdash; finished cards are saved to your Gallery.</small>
           </div>
         </div>
       </div>
-      
-      <!-- Keep simple spinners for text/art only generation -->
-      <div *ngIf="!isGenerating && (isGeneratingText || isGeneratingArt)" class="simple-loading">
-        <div class="loading-spinner"></div>
-        <p *ngIf="isGeneratingText">Generating card text...</p>
-        <p *ngIf="isGeneratingArt">Generating card art...</p>
-      </div>
     </div>
-    
+
     <!-- Blueprint-style preview: only show when complete card is not available -->
     <app-card-preview [card]="currentCard" *ngIf="!currentCard.cardImageUrl"></app-card-preview>
-    
+
     <!-- Complete card image displayed automatically underneath preview -->
-    <div class="complete-card-display" 
+    <div class="complete-card-display"
          *ngIf="currentCard.cardImageUrl || cardExiting"
          [class.card-exit-animation]="cardExiting">
-      <img [src]="currentCard.cardImageUrl" alt="Complete Magic Card" class="complete-card-image">
+      <img [src]="currentCard.cardImageUrl | media | async" alt="Complete Magic Card" class="complete-card-image">
     </div>
-    
+
     <!-- Download buttons -->
     <div class="download-section">
-      <button 
-        (click)="downloadCardImage()" 
+      <button
+        (click)="downloadCardImage()"
         [disabled]="!currentCard.imageUrl"
         class="download-button">
         <span class="material-icons">download</span>
         Download Artwork
       </button>
-      <button 
+      <button
         *ngIf="currentCard.cardImageUrl"
-        (click)="downloadCompleteCard()" 
+        (click)="downloadCompleteCard()"
         class="download-button complete-card-download">
         <span class="material-icons">download</span>
         Download Complete Card
       </button>
     </div>
-    
+
   </div>
-  
+
   <div class="card-form-section">
-    <app-card-form 
+    <app-card-form
       [modelsReady]="modelsReady"
-      (cardChange)="updateCard($event)" 
+      (cardChange)="updateCard($event)"
       (generateCard)="generateCard($event)"></app-card-form>
   </div>
 </main>
-

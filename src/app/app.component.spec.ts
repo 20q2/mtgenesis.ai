@@ -42,6 +42,10 @@ describe('AppComponent (shell)', () => {
     expect(el.querySelector('.username')!.textContent).toContain('Alice');
   });
 
+  it('shows the queue badge in the nav', () => {
+    expect(fixture.nativeElement.querySelector('.nav-bar app-queue-badge')).not.toBeNull();
+  });
+
   it('hides the nav when logged out', () => {
     user$.next(null);
     fixture.detectChanges();

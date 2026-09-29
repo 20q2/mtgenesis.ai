@@ -24,6 +24,8 @@ import { GalleryPageComponent } from './pages/gallery-page/gallery-page.componen
 import { VotePageComponent } from './pages/vote-page/vote-page.component';
 import { EventHistoryPageComponent } from './pages/event-history-page/event-history-page.component';
 import { AdminPageComponent } from './pages/admin-page/admin-page.component';
+import { QueueBadgeComponent } from './components/queue-badge/queue-badge.component';
+import { MediaPipe } from './pipes/media.pipe';
 
 @NgModule({
   declarations: [
@@ -36,7 +38,9 @@ import { AdminPageComponent } from './pages/admin-page/admin-page.component';
     GalleryPageComponent,
     VotePageComponent,
     EventHistoryPageComponent,
-    AdminPageComponent
+    AdminPageComponent,
+    QueueBadgeComponent,
+    MediaPipe
   ],
   imports: [
     BrowserModule,
