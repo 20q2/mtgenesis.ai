@@ -350,3 +350,223 @@ def test_background_workers_finish_card(storage, rec, tmp_path):
         assert storage.get_card(card_id)["status"] == "done"
     finally:
         q.stop()
+
+
+def test_background_workers_many_cards_with_failure(storage, tmp_path):
+    def text_fn(prompt, card_params):
+        time.sleep(0.005)
+        if prompt == "card 3":
+            raise ConnectionError("ollama down")
+        return "Flying"
+
+    def art_fn(prompt, card_params):
+        time.sleep(0.01)
+        return ART_B64
+
+    rec = Recorder()
+    q = GenerationQueue(storage, tmp_path, text_fn, art_fn, rec.render_fn)
+    try:
+        ids = [storage.add_card(prompt=f"card {i}") for i in range(8)]
+        for card_id in ids:
+            q.enqueue(card_id)
+        deadline = time.monotonic() + 10
+        while q.status()["busy"] and time.monotonic() < deadline:
+            time.sleep(0.02)
+        statuses = [storage.get_card(i)["status"] for i in ids]
+        assert statuses == ["done"] * 3 + ["failed"] + ["done"] * 4
+        assert len(rec.render_calls) == 7
+        status = q.status()
+        assert (status["busy"], status["cardsAhead"], status["generatingNow"]) == (False, 0, 0)
+    finally:
+        q.stop()
+
+
+# ----- B3: positions, ETA, status, recovery -----
+
+def fake_clock():
+    """A list-backed clock: read with clock(), move time with t[0] += seconds."""
+    t = [0.0]
+    return t, (lambda: t[0])
+
+
+def timed_art(t, durations):
+    """art_fn that advances the fake clock by the next duration on each call."""
+    durations = iter(durations)
+
+    def art_fn(prompt, card_params):
+        t[0] += next(durations)
+        return ART_B64
+
+    return art_fn
+
+
+def test_positions_and_eta_default(storage, rec, tmp_path):
+    t, clock = fake_clock()
+    q = make_queue(storage, tmp_path, rec, clock=clock)
+    ids = [storage.add_card() for _ in range(3)]
+    for card_id in ids:
+        q.enqueue(card_id)
+
+    assert [q.position(i) for i in ids] == [(1, 10), (2, 20), (3, 30)]
+    status = q.status()
+    assert status["cardsAhead"] == 3
+    assert status["busy"] is True
+    assert status["generatingNow"] == 0
+    assert status["avgImageSeconds"] == 10
+    assert status["etaSeconds"] == 40
+
+
+def test_eta_uses_rolling_average(storage, tmp_path):
+    t, clock = fake_clock()
+    seen = {}
+    ids = {}
+
+    def art_fn(prompt, card_params):
+        if prompt == "x":
+            t[0] += 1
+            seen["x"] = q.position(ids["x"])
+            seen["next"] = q.position(ids["next"])
+            seen["status"] = q.status()
+            t[0] += 4
+        else:
+            t[0] += {"first": 4, "second": 6}[prompt]
+        return ART_B64
+
+    rec = Recorder()
+    q = GenerationQueue(storage, tmp_path, rec.text_fn, art_fn, rec.render_fn,
+                        clock=clock, start_workers=False)
+    for name in ("first", "second", "x", "next"):
+        ids[name] = storage.add_card(prompt=name)
+        q.enqueue(ids[name])
+
+    q.process_next_image()
+    q.process_next_image()
+    assert q.status()["avgImageSeconds"] == 5
+    assert q.position(ids["x"]) == (1, 5)
+
+    q.process_next_image()  # paints x, sampling positions 1s in
+    assert seen["x"] == (0, 4)
+    assert seen["next"] == (1, 4 + 5)
+    assert seen["status"]["cardsAhead"] == 1
+    assert seen["status"]["etaSeconds"] == 4 + 5 * 2
+
+
+def test_remaining_never_negative(storage, tmp_path):
+    t, clock = fake_clock()
+    seen = {}
+    ids = {}
+
+    def art_fn(prompt, card_params):
+        t[0] += 25  # far longer than the 10s default
+        seen["slow"] = q.position(ids["slow"])
+        seen["next"] = q.position(ids["next"])
+        return ART_B64
+
+    rec = Recorder()
+    q = GenerationQueue(storage, tmp_path, rec.text_fn, art_fn, rec.render_fn,
+                        clock=clock, start_workers=False)
+    for name in ("slow", "next"):
+        ids[name] = storage.add_card(prompt=name)
+        q.enqueue(ids[name])
+    q.process_next_image()
+    assert seen["slow"] == (0, 0)
+    assert seen["next"] == (1, 10)
+
+
+def test_average_window_10(storage, tmp_path):
+    t, clock = fake_clock()
+    rec = Recorder()
+    q = GenerationQueue(storage, tmp_path, rec.text_fn, timed_art(t, range(1, 13)),
+                        rec.render_fn, clock=clock, start_workers=False)
+    for _ in range(12):
+        q.enqueue(storage.add_card())
+    for _ in range(12):
+        q.process_next_image()
+    # durations 1..12; only the last 10 (3..12) count
+    assert q.status()["avgImageSeconds"] == pytest.approx(7.5)
+
+
+def test_failed_image_not_counted_in_average(storage, tmp_path):
+    t, clock = fake_clock()
+
+    def art_fn(prompt, card_params):
+        t[0] += 100
+        raise RuntimeError("CUDA out of memory")
+
+    rec = Recorder()
+    q = GenerationQueue(storage, tmp_path, rec.text_fn, art_fn, rec.render_fn,
+                        clock=clock, start_workers=False)
+    q.enqueue(storage.add_card())
+    q.process_next_image()
+    status = q.status()
+    assert status["avgImageSeconds"] == 10
+    assert status["busy"] is False
+
+
+def test_position_none_after_art(storage, rec, tmp_path):
+    q = make_queue(storage, tmp_path, rec)
+    card_id = storage.add_card()
+    q.enqueue(card_id)
+    q.process_next_image()
+    assert storage.get_card(card_id)["text_ready"] == 0
+    assert q.position(card_id) == (None, None)
+    q.process_next_text()
+    assert q.position(card_id) == (None, None)
+    assert q.position(str(uuid.uuid4())) == (None, None)
+
+
+def test_position_none_after_failure(storage, rec, tmp_path):
+    def boom(prompt, card_params):
+        raise ConnectionError("ollama down")
+
+    q = GenerationQueue(storage, tmp_path, boom, rec.art_fn, rec.render_fn, start_workers=False)
+    card_id = storage.add_card()
+    q.enqueue(card_id)
+    q.process_next_text()
+    assert q.position(card_id) == (None, None)
+    assert q.status()["busy"] is False
+
+
+def test_idle_status(storage, rec, tmp_path):
+    q = make_queue(storage, tmp_path, rec)
+    status = q.status()
+    assert status == {"busy": False, "cardsAhead": 0, "generatingNow": 0,
+                      "avgImageSeconds": 10, "etaSeconds": 10}
+
+
+def test_status_splits_waiting_and_generating(storage, rec, tmp_path):
+    t, clock = fake_clock()
+    q = GenerationQueue(storage, tmp_path, rec.text_fn, timed_art(t, [12, 12]), rec.render_fn,
+                        clock=clock, start_workers=False)
+    first, second = storage.add_card(), storage.add_card()
+    q.enqueue(first)
+    q.enqueue(second)
+    q.process_next_image()  # first: art done, text pending
+    status = q.status()
+    assert status["busy"] is True
+    assert status["cardsAhead"] == 1
+    assert status["generatingNow"] == 1
+    assert status["etaSeconds"] == 24  # nothing painting; 12s avg x new card at position 2
+
+    q.process_next_text()  # first done
+    status = q.status()
+    assert status["cardsAhead"] == 1
+    assert status["generatingNow"] == 0
+
+
+def test_recover_on_startup(storage, rec, tmp_path):
+    ids = {status: storage.add_card(status=status)
+           for status in ("queued", "generating", "rendering", "done", "failed")}
+    storage.cards[ids["done"]]["finished_at"] = "2026-09-28T01:00:00+00:00"
+    done_before = storage.get_card(ids["done"])
+    failed_before = storage.get_card(ids["failed"])
+
+    q = make_queue(storage, tmp_path, rec)
+    q.recover_on_startup()
+
+    for status in ("queued", "generating", "rendering"):
+        row = storage.get_card(ids[status])
+        assert row["status"] == "failed"
+        assert row["error"] == "Server restarted - please reroll"
+    assert storage.get_card(ids["done"]) == done_before
+    assert storage.get_card(ids["failed"]) == failed_before

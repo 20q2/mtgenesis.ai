@@ -16,6 +16,10 @@ Whichever worker picks it up first moves it to 'generating'; each worker sets
 text_ready / art_ready when its half finishes. The worker that finishes second
 moves the card to 'rendering', calls render_fn and marks it 'done'. Any failure
 marks the card 'failed' with a readable error and drops it from both lists.
+
+status() splits the in-flight cards in two, without overlap: cardsAhead is the
+image wait list (cards whose art has not started), generatingNow is every other
+in-flight card (art painting, art done and waiting on text, or rendering).
 """
 from __future__ import annotations
 
@@ -41,7 +45,9 @@ RenderFn = Callable[[dict, "str | None", "str | None", "str | None"], "tuple[dic
 Production: app.finalize_card. force_name is the set's commander_name for set cards, else None."""
 
 IDLE_SLEEP_SECONDS = 0.2
+AVERAGE_WINDOW = 10
 MAX_ERROR_DETAIL = 200
+RESTART_ERROR = "Server restarted - please reroll"
 
 
 def _now_iso() -> str:
@@ -58,6 +64,10 @@ def _decode_b64_png(data: str) -> bytes:
 def _error_detail(exc: BaseException) -> str:
     detail = str(exc).strip() or type(exc).__name__
     return detail[:MAX_ERROR_DETAIL]
+
+
+def _seconds(value: float) -> float:
+    return round(value, 1)
 
 
 class GenerationQueue:
@@ -79,8 +89,12 @@ class GenerationQueue:
         self._lock = threading.Lock()
         self._text_waiting: deque[str] = deque()
         self._image_waiting: deque[str] = deque()
-        # card_id -> {"text", "art", "text_done", "art_done"} for cards still in flight
+        # card_id -> {"text", "art", "text_done", "art_done"} until both halves finish
         self._partials: dict[str, dict] = {}
+        self._rendering: set[str] = set()
+        self._painting: str | None = None
+        self._paint_started = 0.0
+        self._durations: deque[float] = deque(maxlen=AVERAGE_WINDOW)
 
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -96,7 +110,7 @@ class GenerationQueue:
 
     def enqueue(self, card_id: str) -> None:
         with self._lock:
-            if card_id in self._partials:
+            if card_id in self._partials or card_id in self._rendering:
                 return
             self._partials[card_id] = {"text": None, "art": None,
                                        "text_done": False, "art_done": False}
@@ -113,6 +127,7 @@ class GenerationQueue:
         try:
             text = self.text_fn(card["prompt"], dict(card["card_params"]))
             if text is None:
+                # app.createCardContent swallows Ollama errors and returns None
                 raise RuntimeError("no rules text was returned (is Ollama running?)")
         except Exception as exc:
             traceback.print_exc()
@@ -123,7 +138,7 @@ class GenerationQueue:
 
     def process_next_image(self) -> bool:
         """Run art generation for the next waiting card. False if nothing was waiting."""
-        card_id, card = self._take(self._image_waiting)
+        card_id, card = self._take(self._image_waiting, painting=True)
         if card_id is None:
             return False
         if card is None:
@@ -132,9 +147,11 @@ class GenerationQueue:
             art_b64 = self.art_fn(card["prompt"], dict(card["card_params"]))
             if not art_b64:
                 raise RuntimeError("no image was returned")
+            self._finish_painting(record_duration=True)
             art_path = self.art_dir / f"{card_id}.png"
             art_path.write_bytes(_decode_b64_png(art_b64))
         except Exception as exc:
+            self._finish_painting(record_duration=False)
             traceback.print_exc()
             self._fail(card_id, f"Artwork generation failed: {_error_detail(exc)}")
             return True
@@ -143,15 +160,45 @@ class GenerationQueue:
 
     def position(self, card_id: str) -> tuple[int | None, float | None]:
         """(queuePosition, etaSeconds) per the module docstring."""
-        raise NotImplementedError
+        with self._lock:
+            avg = self._average()
+            remaining = self._remaining(avg)
+            if card_id == self._painting:
+                return 0, _seconds(remaining)
+            try:
+                queue_position = self._image_waiting.index(card_id) + 1
+            except ValueError:
+                return None, None
+            return queue_position, _seconds(remaining + avg * queue_position)
 
     def status(self) -> dict:
         """{"busy": bool, "cardsAhead": int, "generatingNow": int, "avgImageSeconds": float, "etaSeconds": float}"""
-        raise NotImplementedError
+        with self._lock:
+            avg = self._average()
+            remaining = self._remaining(avg)
+            cards_ahead = len(self._image_waiting)
+            in_flight = len(self._partials) + len(self._rendering)
+            return {
+                "busy": in_flight > 0,
+                "cardsAhead": cards_ahead,
+                "generatingNow": in_flight - cards_ahead,
+                "avgImageSeconds": _seconds(avg),
+                "etaSeconds": _seconds(remaining + avg * (cards_ahead + 1)),
+            }
 
     def recover_on_startup(self) -> None:
         """Mark queued/generating/rendering cards failed with "Server restarted - please reroll"."""
-        raise NotImplementedError
+        with self._lock:
+            live = set(self._partials) | self._rendering
+        recovered = 0
+        for card_id in self.storage.unfinished_card_ids():
+            if card_id in live:
+                continue
+            self.storage.update_card(card_id, status="failed", error=RESTART_ERROR,
+                                     finished_at=_now_iso())
+            recovered += 1
+        if recovered:
+            print(f"♻️ Marked {recovered} interrupted card(s) failed: {RESTART_ERROR}")
 
     def stop(self) -> None:
         self._stop.set()
@@ -172,27 +219,51 @@ class GenerationQueue:
             if not worked:
                 self._stop.wait(IDLE_SLEEP_SECONDS)
 
-    def _take(self, waiting: deque) -> tuple[str | None, dict | None]:
+    def _average(self) -> float:
+        """Mean of the last AVERAGE_WINDOW image durations (caller holds the lock)."""
+        if not self._durations:
+            return self.default_image_seconds
+        return sum(self._durations) / len(self._durations)
+
+    def _remaining(self, avg: float) -> float:
+        """Estimated seconds left on the image being painted (caller holds the lock)."""
+        if self._painting is None:
+            return 0.0
+        return max(avg - (self.clock() - self._paint_started), 0.0)
+
+    def _take(self, waiting: deque, painting: bool = False) -> tuple[str | None, dict | None]:
         """Pop the next card id from a wait list and mark the card 'generating'.
-        Returns (None, None) if the list is empty, (card_id, None) if the card row is gone."""
+        Returns (None, None) if the list is empty, (card_id, None) if the card is gone."""
         with self._lock:
             if not waiting:
                 return None, None
             card_id = waiting.popleft()
+            if painting:
+                self._painting = card_id
+                self._paint_started = self.clock()
         card = self.storage.get_card(card_id)
-        if card is None:
-            with self._lock:
-                self._drop(card_id)
-            return card_id, None
         with self._lock:
-            if card_id not in self._partials:
+            if card is None:
+                self._drop(card_id)
+            if card is None or card_id not in self._partials:
+                if painting:
+                    self._painting = None
                 return card_id, None
             self.storage.update_card(card_id, status="generating")
         return card_id, card
 
+    def _finish_painting(self, record_duration: bool) -> None:
+        with self._lock:
+            if self._painting is None:
+                return
+            if record_duration:
+                self._durations.append(self.clock() - self._paint_started)
+            self._painting = None
+
     def _drop(self, card_id: str) -> None:
         """Forget a card (caller holds the lock)."""
         self._partials.pop(card_id, None)
+        self._rendering.discard(card_id)
         for waiting in (self._text_waiting, self._image_waiting):
             try:
                 waiting.remove(card_id)
@@ -218,6 +289,7 @@ class GenerationQueue:
             self.storage.update_card(card_id, **{f"{half}_ready": 1}, **fields)
             if both_done:
                 self._partials.pop(card_id)
+                self._rendering.add(card_id)
                 self.storage.update_card(card_id, status="rendering")
         if both_done:
             self._render(card_id, partial["text"], partial["art"])
@@ -226,6 +298,8 @@ class GenerationQueue:
         try:
             card = self.storage.get_card(card_id)
             if card is None:
+                with self._lock:
+                    self._rendering.discard(card_id)
                 return
             card_params = dict(card["card_params"])
             force_name = None
@@ -243,5 +317,7 @@ class GenerationQueue:
             traceback.print_exc()
             self._fail(card_id, f"Card rendering failed: {_error_detail(exc)}")
             return
-        self.storage.update_card(card_id, status="done", card=final_card,
-                                 card_path=str(card_path), finished_at=_now_iso())
+        with self._lock:
+            self.storage.update_card(card_id, status="done", card=final_card,
+                                     card_path=str(card_path), finished_at=_now_iso())
+            self._rendering.discard(card_id)
