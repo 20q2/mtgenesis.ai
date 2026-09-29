@@ -9,10 +9,11 @@ from pathlib import Path
 USE_CUDA = True
 
 # ===== MODEL SELECTION =====
-# "heavy"       - IMAGE_MODEL_ID below (SDXL fine-tune; needs a good GPU)
-# "medium"      - runwayml/stable-diffusion-v1-5 (balanced quality/performance)
-# "light"       - CompVis/stable-diffusion-v1-4 (lighter, works better on CPU)
-# "placeholder" - disable image generation entirely (for testing/debugging)
+# "placeholder" - disable image generation entirely: solid gray art, torch is never loaded
+#                 (for testing/debugging)
+# anything else - IMAGE_MODEL_ID below (SDXL fine-tune; needs a good GPU). "heavy" is the
+#                 normal value; "medium" and "light" are legacy names that now behave
+#                 exactly like "heavy" (the old SD 1.5 / SD 1.4 options were removed).
 MODEL_SIZE = "heavy"
 
 # ===== IMAGE GENERATION =====
