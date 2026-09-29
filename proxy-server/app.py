@@ -31,12 +31,6 @@ import image_generation
 print(f"🔍 Python executable: {sys.executable}")
 print(f"🔍 Python version: {sys.version}")
 print(f"🔍 Python path: {sys.path[:3]}...")  # Show first 3 paths
-try:
-    import torch
-    print(f"✅ torch imported successfully: {torch.__version__}")
-except ImportError as e:
-    print(f"❌ torch import failed: {e}")
-    torch = None
 import threading
 import concurrent.futures
 from card_renderer import card_renderer
