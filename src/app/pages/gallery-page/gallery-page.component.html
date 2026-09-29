@@ -1,0 +1,45 @@
+<div class="page gallery-page">
+  <section class="panel">
+    <h2 class="page-title">Gallery</h2>
+    <p class="muted">Every card you've generated, newest first &mdash; rerolled versions included.</p>
+  </section>
+
+  <div *ngIf="error" class="alert alert-error" role="alert">
+    <span class="material-icons">error</span>
+    <span>{{ error }}</span>
+  </div>
+
+  <p *ngIf="cards === null && !error" class="muted loading">Loading your cards…</p>
+
+  <section *ngIf="cards && !cards.length" class="panel empty-state">
+    <p>No cards yet.</p>
+    <p class="muted">
+      <a routerLink="/create" class="night-link">Create a card</a> or
+      <a routerLink="/set" class="night-link">build a commander set</a>.
+    </p>
+  </section>
+
+  <div class="grid" *ngIf="cards?.length">
+    <div *ngFor="let view of cards; trackBy: trackCard" class="tile panel" [attr.data-card-id]="view.id">
+      <app-card-slot [view]="view" [showReroll]="false"></app-card-slot>
+
+      <div class="tile-info">
+        <strong class="tile-name">{{ view.card?.name || 'Untitled card' }}</strong>
+        <div class="tags">
+          <span class="badge badge-muted">{{ label(view) }}</span>
+          <span class="badge badge-muted" *ngIf="view.replaced">Rerolled</span>
+        </div>
+        <span class="muted">{{ view.createdAt | date:'short' }}</span>
+      </div>
+
+      <div class="tile-actions" *ngIf="view.status === 'done'">
+        <button type="button" class="btn btn-gold download" (click)="download(view)">
+          <span class="material-icons">download</span> Card
+        </button>
+        <button type="button" class="btn btn-ghost download-art" *ngIf="view.artImageUrl" (click)="downloadArt(view)">
+          <span class="material-icons">image</span> Art
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

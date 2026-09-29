@@ -1,28 +1,13 @@
 import os
-# Disable xformers to avoid version conflicts - MUST be set before importing diffusers
-os.environ['XFORMERS_DISABLED'] = '1'
-os.environ['DISABLE_XFORMERS'] = '1'
+import sys
+# Logs use emoji; Windows defaults to cp1252 when output is redirected, which crashes print()
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-# ===== PERFORMANCE TOGGLE =====
-# Set to False to force CPU-only mode (slower but won't destroy your GPU)
-# Set to True to use CUDA if available (faster but may lag your system)
-USE_CUDA = True  # <-- Change this to True when you want GPU mode
-
-# ===== MODEL SELECTION =====
-# Choose model based on your hardware capabilities:
-# "heavy" - stabilityai/sdxl-turbo (best quality, needs good GPU/lots of RAM)
-# "medium" - runwayml/stable-diffusion-v1-5 (balanced quality/performance)
-# "light" - CompVis/stable-diffusion-v1-4 (lighter, works better on CPU)
-# "placeholder" - disable image generation entirely (for testing/debugging)
-MODEL_SIZE = "heavy"  # <-- CUDA enabled! Using SDXL-Turbo for best quality
-
-# ===== TIMEOUT CONFIGURATION =====
-# Global timeout settings for all operations (in seconds)
-COLD_START_TIMEOUT = 180    # 3 minutes for first-time model loading
-WARM_RUN_TIMEOUT = 180      # 3 minutes for subsequent generations
-MAX_REQUEST_AGE = 300       # 5 minutes max age before cleanup (was 600)
-CLEANUP_INTERVAL = 60       # Check for old requests every 60 seconds
-DELAYED_CLEANUP = 30        # Wait 30 seconds before cleaning completed requests
+# ===== CONFIGURATION =====
+# All toggles (USE_CUDA, MODEL_SIZE, image model settings, ADMIN_PIN, DATA_DIR,
+# timeouts) live in config.py.
+from config import *
 
 # Track model loading state for cold vs warm timeout detection
 _models_loaded = {
@@ -42,16 +27,16 @@ import re
 from PIL import Image, ImageDraw
 import tempfile
 import ollama
-from diffusers import AutoPipelineForText2Image
+import image_generation
+
+# The ollama module-level client has no timeout: a stalled Ollama (hung model load,
+# driver hiccup) would block the single AI Night text worker forever. With a timeout
+# the generate call raises, createCardContent returns None and the card fails.
+OLLAMA_TIMEOUT_SECONDS = 120
+ollama_client = ollama.Client(timeout=OLLAMA_TIMEOUT_SECONDS)
 print(f"🔍 Python executable: {sys.executable}")
 print(f"🔍 Python version: {sys.version}")
 print(f"🔍 Python path: {sys.path[:3]}...")  # Show first 3 paths
-try:
-    import torch
-    print(f"✅ torch imported successfully: {torch.__version__}")
-except ImportError as e:
-    print(f"❌ torch import failed: {e}")
-    torch = None
 import threading
 import concurrent.futures
 from card_renderer import card_renderer
@@ -235,6 +220,146 @@ request_queue = RequestQueue(max_concurrent=2)  # Allow max 2 concurrent card ge
 # Global state tracking for first job completion (for dynamic loading times)
 first_job_completed = False
 
+def finalize_card(card_params, generated_text, art_b64, force_name=None):
+    """
+    Post-process generated rules text and render the complete card.
+
+    Shared by the legacy process_card_generation route and the AI Night
+    GenerationQueue, which uses it as its RenderFn.
+
+    Steps:
+    - parse the LLM text (JSON with name/description/flavorText, or plain rules text)
+    - apply force_name, so a set's commander name overrides any name the LLM chose
+    - replace ~ with the card name, fix bullet points and periods
+    - generate missing creature P/T and Vehicle crew cost
+    - render with card_renderer.generate_card_image
+
+    Returns (final card dict, rendered card as raw base64 PNG or None).
+    card_params is not mutated. Rendering errors propagate to the caller.
+    """
+    import time
+
+    # Step 1: Text processing and parsing
+    text_processing_start = time.time()
+    print("  📝 Step 1: Processing text data...")
+    updated_card_data = card_params.copy()
+    print(f"🔍 Original card data keys: {list(card_params.keys())}")
+    print(f"🔍 Original description: {repr(card_params.get('description', 'NO DESCRIPTION'))}")
+    if generated_text:
+        try:
+            # Try to parse structured card data
+            parsed_text = json.loads(generated_text)
+            if isinstance(parsed_text, dict):
+                # Update with parsed structured data
+                if 'description' in parsed_text:
+                    updated_card_data['description'] = parsed_text['description']
+                if 'name' in parsed_text and parsed_text['name']:
+                    updated_card_data['name'] = parsed_text['name']
+                if 'flavorText' in parsed_text:
+                    updated_card_data['flavorText'] = parsed_text['flavorText']
+                print(f"Updated card data with parsed structured content")
+            else:
+                # If it's a JSON string, use the string content
+                updated_card_data['description'] = str(parsed_text)
+                print(f"Updated card data with JSON string content")
+        except json.JSONDecodeError:
+            # If not JSON, treat as plain description text
+            updated_card_data['description'] = generated_text
+            print(f"Updated card data with plain text content")
+
+    # A forced name (a set's commander name) wins over any LLM-chosen name, and is
+    # applied before ~ replacement so the rules text and the render both use it
+    if force_name:
+        updated_card_data['name'] = force_name
+
+    if generated_text:
+        # Apply text processing and ability reordering to the description
+        if 'description' in updated_card_data and updated_card_data['description']:
+            original_text = updated_card_data['description']
+
+            # Apply the text processing steps that were missing
+            processed_text = original_text
+            print(f"🔍 Step 0 - Original: {repr(processed_text)}")
+
+            # Step 1: Clean up text formatting
+            processed_text = processed_text.replace('\n\n', '\n')  # Double newlines to single
+            processed_text = processed_text.replace(' ~ ', f' {updated_card_data.get("name", "~")} ')  # Replace ~ with card name
+            processed_text = processed_text.replace('~', updated_card_data.get("name", "~"))  # Replace any remaining ~
+            print(f"🔍 Step 1 - After cleanup: {repr(processed_text)}")
+
+            # Step 1.5: Fix markdown bullet points (convert "* item" to "item")
+            processed_text = fix_markdown_bullet_points(processed_text)
+            print(f"🔍 Step 1.5 - After bullet fix: {repr(processed_text)}")
+
+            # Step 2: Skip ability reordering - already done in createCardContent()
+            # processed_text = reorder_abilities_properly(processed_text, updated_card_data)
+
+            # Step 3: Ensure periods on abilities
+            processed_text = ensure_periods_on_abilities(processed_text)
+            print(f"🔍 Step 3 - After period fix: {repr(processed_text)}")
+
+            updated_card_data['description'] = processed_text
+            print(f"🔧 Content model parsed output: {repr(processed_text)}")
+    else:
+        print("No card text found, using original description")
+        if 'description' not in updated_card_data:
+            updated_card_data['description'] = "Generated card rules text"
+
+    text_processing_time = time.time() - text_processing_start
+    print(f"   📝 Text processing: {text_processing_time:.2f}s")
+    print(f"🔍 Final updated_card_data keys: {list(updated_card_data.keys())}")
+    print(f"🔍 Final description: {repr(updated_card_data.get('description', 'NO DESCRIPTION'))}")
+    print(f"🔍 Final name: {repr(updated_card_data.get('name', 'NO NAME'))}")
+    print(f"🔍 Final flavorText: {repr(updated_card_data.get('flavorText', 'NO FLAVOR'))}")
+
+    # Step 2: Stats generation if needed
+    stats_generation_start = time.time()
+    stats_generated = False
+    if (updated_card_data.get('type', '').lower().find('creature') != -1 and
+        (not updated_card_data.get('power') or not updated_card_data.get('toughness'))):
+        print("🎯 Creature missing power/toughness - generating stats...")
+        generated_stats = generate_creature_stats(updated_card_data)
+        if generated_stats:
+            updated_card_data['power'] = generated_stats['power']
+            updated_card_data['toughness'] = generated_stats['toughness']
+            print(f"✅ Generated creature stats: {generated_stats['power']}/{generated_stats['toughness']}")
+            stats_generated = True
+
+    # Step 2.5: Vehicle crew cost generation
+    vehicle_crew_generated = False
+    type_line = updated_card_data.get('typeLine', '').lower()
+    if 'vehicle' in type_line and 'artifact' in type_line:
+        existing_description = updated_card_data.get('description', '')
+        if not existing_description or 'crew' not in existing_description.lower():
+            print("🚗 Vehicle missing crew cost - generating crew ability...")
+            crew_cost = generate_vehicle_crew_cost(updated_card_data)
+            if crew_cost:
+                # Add crew cost to bottom of description (with other active abilities)
+                crew_text = f"Crew {crew_cost}"
+                if existing_description:
+                    updated_card_data['description'] = f"{existing_description}\n{crew_text}"
+                else:
+                    updated_card_data['description'] = crew_text
+                print(f"✅ Generated vehicle crew cost: Crew {crew_cost}")
+                vehicle_crew_generated = True
+
+    stats_generation_time = time.time() - stats_generation_start
+    if stats_generated or vehicle_crew_generated:
+        generated_items = []
+        if stats_generated:
+            generated_items.append("creature P/T")
+        if vehicle_crew_generated:
+            generated_items.append("vehicle crew cost")
+        print(f"   📊 Stats generation: {stats_generation_time:.2f}s ({', '.join(generated_items)})")
+
+    # Step 3: Card image rendering
+    rendering_start = time.time()
+    card_image_data = card_renderer.generate_card_image(updated_card_data, art_b64)
+    rendering_time = time.time() - rendering_start
+    print(f"   🎨 Card rendering: {rendering_time:.2f}s")
+
+    return updated_card_data, card_image_data
+
 def process_card_generation(prompt, width, height, original_card_data):
     """
     Process a card generation request - wrapper function for the queue
@@ -326,122 +451,10 @@ def process_card_generation(prompt, width, height, original_card_data):
         cleanup_start_time = time.time()
         try:
             print("🖼️ Starting cleanup and card rendering...")
-            
-            # Step 1: Text processing and parsing
-            text_processing_start = time.time()
-            print("  📝 Step 1: Processing text data...")
-            updated_card_data = original_card_data.copy()
-            print(f"🔍 Original card data keys: {list(original_card_data.keys())}")
-            print(f"🔍 Original description: {repr(original_card_data.get('description', 'NO DESCRIPTION'))}")
-            if generated_card_text:
-                try:
-                    # Try to parse structured card data
-                    parsed_text = json.loads(generated_card_text)
-                    if isinstance(parsed_text, dict):
-                        # Update with parsed structured data
-                        if 'description' in parsed_text:
-                            updated_card_data['description'] = parsed_text['description']
-                        if 'name' in parsed_text and parsed_text['name']:
-                            updated_card_data['name'] = parsed_text['name']
-                        if 'flavorText' in parsed_text:
-                            updated_card_data['flavorText'] = parsed_text['flavorText']
-                        print(f"Updated card data with parsed structured content")
-                    else:
-                        # If it's a JSON string, use the string content
-                        updated_card_data['description'] = str(parsed_text)
-                        print(f"Updated card data with JSON string content")
-                except json.JSONDecodeError:
-                    # If not JSON, treat as plain description text
-                    updated_card_data['description'] = generated_card_text
-                    print(f"Updated card data with plain text content")
-                
-                # Apply text processing and ability reordering to the description
-                if 'description' in updated_card_data and updated_card_data['description']:
-                    original_text = updated_card_data['description']
-                    
-                    # Apply the text processing steps that were missing
-                    processed_text = original_text
-                    print(f"🔍 Step 0 - Original: {repr(processed_text)}")
-                    
-                    # Step 1: Clean up text formatting
-                    processed_text = processed_text.replace('\n\n', '\n')  # Double newlines to single
-                    processed_text = processed_text.replace(' ~ ', f' {updated_card_data.get("name", "~")} ')  # Replace ~ with card name
-                    processed_text = processed_text.replace('~', updated_card_data.get("name", "~"))  # Replace any remaining ~
-                    print(f"🔍 Step 1 - After cleanup: {repr(processed_text)}")
-                    
-                    # Step 1.5: Fix markdown bullet points (convert "* item" to "item")
-                    processed_text = fix_markdown_bullet_points(processed_text)
-                    print(f"🔍 Step 1.5 - After bullet fix: {repr(processed_text)}")
-                    
-                    # Step 2: Skip ability reordering - already done in createCardContent()
-                    # processed_text = reorder_abilities_properly(processed_text, updated_card_data)
-                    
-                    # Step 3: Ensure periods on abilities
-                    processed_text = ensure_periods_on_abilities(processed_text)
-                    print(f"🔍 Step 3 - After period fix: {repr(processed_text)}")
-                    
-                    updated_card_data['description'] = processed_text
-                    print(f"🔧 Content model parsed output: {repr(processed_text)}")
-            else:
-                print("No card text found, using original description")
-                if 'description' not in updated_card_data:
-                    updated_card_data['description'] = "Generated card rules text"
-            
-            text_processing_time = time.time() - text_processing_start
-            print(f"   📝 Text processing: {text_processing_time:.2f}s")
-            print(f"🔍 Final updated_card_data keys: {list(updated_card_data.keys())}")
-            print(f"🔍 Final description: {repr(updated_card_data.get('description', 'NO DESCRIPTION'))}")
-            print(f"🔍 Final name: {repr(updated_card_data.get('name', 'NO NAME'))}")
-            print(f"🔍 Final flavorText: {repr(updated_card_data.get('flavorText', 'NO FLAVOR'))}")
-            
-            # Step 2: Stats generation if needed
-            stats_generation_start = time.time()
-            stats_generated = False
-            if (updated_card_data.get('type', '').lower().find('creature') != -1 and 
-                (not updated_card_data.get('power') or not updated_card_data.get('toughness'))):
-                print("🎯 Creature missing power/toughness - generating stats...")
-                generated_stats = generate_creature_stats(updated_card_data)
-                if generated_stats:
-                    updated_card_data['power'] = generated_stats['power']
-                    updated_card_data['toughness'] = generated_stats['toughness']
-                    print(f"✅ Generated creature stats: {generated_stats['power']}/{generated_stats['toughness']}")
-                    stats_generated = True
-            
-            # Step 2.5: Vehicle crew cost generation
-            vehicle_crew_generated = False
-            type_line = updated_card_data.get('typeLine', '').lower()
-            if 'vehicle' in type_line and 'artifact' in type_line:
-                existing_description = updated_card_data.get('description', '')
-                if not existing_description or 'crew' not in existing_description.lower():
-                    print("🚗 Vehicle missing crew cost - generating crew ability...")
-                    crew_cost = generate_vehicle_crew_cost(updated_card_data)
-                    if crew_cost:
-                        # Add crew cost to bottom of description (with other active abilities)
-                        crew_text = f"Crew {crew_cost}"
-                        if existing_description:
-                            updated_card_data['description'] = f"{existing_description}\n{crew_text}"
-                        else:
-                            updated_card_data['description'] = crew_text
-                        print(f"✅ Generated vehicle crew cost: Crew {crew_cost}")
-                        vehicle_crew_generated = True
-            
-            stats_generation_time = time.time() - stats_generation_start
-            if stats_generated or vehicle_crew_generated:
-                generated_items = []
-                if stats_generated:
-                    generated_items.append("creature P/T")
-                if vehicle_crew_generated:
-                    generated_items.append("vehicle crew cost")
-                print(f"   📊 Stats generation: {stats_generation_time:.2f}s ({', '.join(generated_items)})")
-            
-            # Step 3: Card image rendering
-            rendering_start = time.time()
-            card_image_data = card_renderer.generate_card_image(updated_card_data, image_data)
-            rendering_time = time.time() - rendering_start
-            print(f"   🎨 Card rendering: {rendering_time:.2f}s")
+            _, card_image_data = finalize_card(original_card_data, generated_card_text, image_data)
             cleanup_end_time = time.time()
             cleanup_time = cleanup_end_time - cleanup_start_time
-            
+
             if card_image_data:
                 print(f"✅ Complete card image generated successfully in {cleanup_time:.2f} seconds")
             else:
@@ -450,7 +463,6 @@ def process_card_generation(prompt, width, height, original_card_data):
             cleanup_end_time = time.time()
             cleanup_time = cleanup_end_time - cleanup_start_time
             print(f"❌ Error generating complete card image after {cleanup_time:.2f} seconds: {e}")
-        
         # Build response with detailed timing
         end_time = time.time()
         total_generation_time = end_time - start_time
@@ -595,211 +607,15 @@ def truncate_prompt_smartly(prompt: str, max_tokens: int = 75) -> str:
     print(f"✂️  Truncated to {final_tokens} tokens: {final_prompt[:100]}...")
     return final_prompt
 
-# Initialize image generation pipeline
-image_pipeline = None
-image_pipeline_loading = False
-
-def get_image_pipeline():
-    """Lazy load the SDXL-Turbo pipeline for image generation"""
-    global image_pipeline, image_pipeline_loading
-    
-    if image_pipeline is not None:
-        return image_pipeline
-        
-    if image_pipeline_loading:
-        return None  # Already loading, avoid concurrent loads
-    
-    if torch is None:
-        print("❌ torch is None - cannot load image generation model")
-        print(f"🔍 Debug: torch variable = {torch}")
-        print(f"🔍 Debug: trying to import torch again...")
-        try:
-            import torch as torch_test
-            print(f"✅ torch re-import successful: {torch_test.__version__}")
-            globals()['torch'] = torch_test
-        except Exception as e:
-            print(f"❌ torch re-import failed: {e}")
-            image_pipeline = False  # Mark as failed
-            return None
-    
-    try:
-        print(f"🔍 Torch version: {torch.__version__}")
-        print(f"🔍 Torch CUDA version: {torch.version.cuda}")
-        cuda_available = torch.cuda.is_available()
-        print(f"🔍 CUDA available: {cuda_available}")
-        if cuda_available:
-            print(f"🔍 GPU name: {torch.cuda.get_device_name(0)}")
-        else:
-            print("🔍 No CUDA GPU detected - will use CPU")
-
-
-        image_pipeline_loading = True
-        import time
-        start_time = time.time()
-        print("Loading SDXL-Turbo model... (this may take several minutes on first run)")
-        
-        # Device selection based on USE_CUDA toggle
-        if USE_CUDA and torch.cuda.is_available():
-            device = "cuda"
-            torch_dtype = torch.float16  # Use half precision for faster GPU inference
-            print("🚀 CUDA GPU mode enabled! Using GPU acceleration")
-            if cuda_available:
-                print(f"🎯 GPU: {torch.cuda.get_device_name(0)}")
-                print(f"🎯 GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-        else:
-            device = "cpu"
-            torch_dtype = torch.float32
-            if not USE_CUDA:
-                print("🖥️  CPU mode selected (USE_CUDA = False) - slower but won't stress GPU")
-            else:
-                print("⚠️  CUDA not available, falling back to CPU mode")
-        
-        print("🔄 Loading pipeline components...")
-        print(f"🎯 Using device: {device}")
-        print(f"🎯 Using dtype: {torch_dtype}")
-        
-        # Select model based on MODEL_SIZE setting
-        model_configs = {
-            "heavy": {
-                "model_id": "stabilityai/sdxl-turbo",
-                "steps": 1,
-                "guidance_scale": 0.0,
-                "description": "SDXL-Turbo (best quality, heavy)"
-            },
-            "medium": {
-                "model_id": "runwayml/stable-diffusion-v1-5", 
-                "steps": 20,
-                "guidance_scale": 7.5,
-                "description": "SD 1.5 (balanced)"
-            },
-            "light": {
-                "model_id": "CompVis/stable-diffusion-v1-4",
-                "steps": 50,
-                "guidance_scale": 7.5, 
-                "description": "SD 1.4 (light, CPU-friendly)"
-            }
-        }
-        
-        # Access global MODEL_SIZE
-        global MODEL_SIZE
-        
-        if MODEL_SIZE == "placeholder":
-            print("🚫 Image generation disabled (placeholder mode)")
-            return None
-            
-        if MODEL_SIZE not in model_configs:
-            print(f"⚠️  Unknown MODEL_SIZE: {MODEL_SIZE}, falling back to light")
-            MODEL_SIZE = "light"
-            
-        config = model_configs[MODEL_SIZE]
-        print(f"🎯 Loading model: {config['description']}")
-        print(f"🔍 About to call AutoPipelineForText2Image.from_pretrained...")
-        
-        try:
-            image_pipeline = AutoPipelineForText2Image.from_pretrained(
-                config["model_id"],
-                torch_dtype=torch_dtype,
-                variant="fp16" if device == "cuda" and MODEL_SIZE == "heavy" else None,
-                safety_checker=None,
-                requires_safety_checker=False,
-                low_cpu_mem_usage=True
-            )
-            print(f"✅ Pipeline loaded successfully!")
-            
-            # Store generation parameters for this model
-            image_pipeline._generation_steps = config["steps"]
-            image_pipeline._generation_guidance = config["guidance_scale"]
-        except Exception as pipeline_error:
-            print(f"❌ Pipeline loading failed: {pipeline_error}")
-            print(f"🔍 Pipeline error type: {type(pipeline_error)}")
-            image_pipeline_loading = False
-            image_pipeline = False
-            return None
-        
-        # Move to device after loading
-        print(f"🔄 Moving pipeline to device: {device}")
-        try:
-            image_pipeline.to(device)
-            print(f"✅ Pipeline moved to {device} successfully!")
-        except Exception as device_error:
-            print(f"❌ Failed to move pipeline to {device}: {device_error}")
-            image_pipeline_loading = False
-            image_pipeline = False
-            return None
-        
-        # Enable GPU memory optimizations for CUDA only
-        if device == "cuda" and USE_CUDA:
-            print("🔧 Enabling GPU memory optimizations...")
-            # Enable memory efficient attention
-            try:
-                image_pipeline.enable_attention_slicing()
-                print("✅ Attention slicing enabled")
-            except Exception as e:
-                print(f"⚠️ Attention slicing failed: {e}")
-            
-            # Enable VAE slicing for memory efficiency
-            print("🔧 Enabling VAE slicing...")
-            try:
-                image_pipeline.vae.enable_slicing()
-                print("✅ VAE slicing enabled")
-            except Exception as e:
-                print(f"⚠️ VAE slicing failed: {e}")
-            
-            # Additional performance optimizations for RTX 3060 Ti
-            # Disabled xformers due to dependency conflicts on Windows
-            try:
-                # Skip xformers to avoid version conflicts
-                print("⚠️ xFormers disabled (version conflicts on Windows)")
-                # image_pipeline.enable_xformers_memory_efficient_attention()
-                # print("✅ xFormers memory efficient attention enabled")
-            except Exception as e:
-                print(f"⚠️ xFormers not available: {e}")
-            
-            try:
-                # Enable VAE slicing for lower memory usage
-                image_pipeline.enable_vae_slicing()
-                print("✅ VAE slicing enabled")
-            except Exception as e:
-                print(f"⚠️ VAE slicing failed: {e}")
-            
-            # Compile model for faster inference (PyTorch 2.0+)
-            # Disabled due to Triton dependency issues on Windows
-            try:
-                if hasattr(torch, 'compile'):
-                    print("⚠️ torch.compile available but disabled (can cause slowdowns on Windows)")
-                    # Skip torch.compile as it can cause massive performance regressions
-                    # image_pipeline.unet = torch.compile(image_pipeline.unet, mode="default", fullgraph=False)
-                else:
-                    print("⚠️ torch.compile not available in this PyTorch version")
-            except Exception as e:
-                print(f"⚠️ Compilation check failed: {e}")
-                
-            print("✅ GPU optimizations enabled for faster inference")
-        else:
-            print("📝 CPU mode - no additional optimizations applied")
-        
-        elapsed_time = time.time() - start_time
-        print(f"🎉 Image generation model loaded successfully on {device}! (took {elapsed_time:.1f} seconds)")
-        print(f"🔍 Final pipeline object: {type(image_pipeline)}")
-        image_pipeline_loading = False
-        return image_pipeline
-        
-    except Exception as e:
-        print(f"❌ Failed to load image generation model: {e}")
-        print(f"🔍 Exception type: {type(e)}")
-        import traceback
-        print(f"🔍 Full traceback:")
-        traceback.print_exc()
-        image_pipeline_loading = False
-        image_pipeline = False
-    finally:
-        image_pipeline_loading = False
-
 app = Flask(__name__)
+# Bounds every request body (413 beyond it): AI Night JSON bodies are a few KB, and an
+# unbounded prompt on a locked set would be re-downloaded by every voter on every poll.
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024
 CORS(app, 
      origins=["*"],  # Allow all origins for ngrok + S3
      methods=["GET", "POST", "OPTIONS"],
-     allow_headers=["Content-Type", "Authorization", "ngrok-skip-browser-warning", "Accept", "Cache-Control"],
+     allow_headers=["Content-Type", "Authorization", "ngrok-skip-browser-warning", "Accept", "Cache-Control",
+                    "X-User-Id", "X-Admin-Pin"],
      max_age=86400,  # Cache preflight for 24 hours
      supports_credentials=False)
 
@@ -812,263 +628,26 @@ def add_ngrok_headers(response):
 
 @app.after_request
 def after_request(response):
-    """Ensure all responses have CORS headers for HTTPS/ngrok compatibility"""
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,ngrok-skip-browser-warning,Accept,Cache-Control')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    response.headers.add('Access-Control-Max-Age', '86400')
-    response.headers.add('ngrok-skip-browser-warning', 'any')
+    """Ensure all responses have CORS headers for HTTPS/ngrok compatibility.
+
+    Assign (not .add) so each header stays single-valued: on exception-handled
+    responses Flask-CORS has already set Access-Control-Allow-Origin, and a
+    second value makes browsers reject the response.
+    """
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,ngrok-skip-browser-warning,Accept,Cache-Control,X-User-Id,X-Admin-Pin'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    response.headers['Access-Control-Max-Age'] = '86400'
+    response.headers['ngrok-skip-browser-warning'] = 'any'
     return response
 
 def createCardImage(prompt, width=408, height=336, card_data=None):
     """
-    Generate card image using SDXL-Turbo with color-aware prompts
-    Returns the image as base64 encoded string
+    Generate card art. Thin wrapper over image_generation.generate_art; width and
+    height are ignored (the art is always config.ART_BOX_SIZE).
+    Returns raw base64 PNG (no data: prefix); raises if the image model fails.
     """
-    print(f"=== STARTING IMAGE GENERATION ===")
-    print(f"Prompt: {prompt}")
-    print(f"Dimensions: {width}x{height}")
-    
-    # Import required modules at function start
-    import io
-    import base64
-    import time
-    from PIL import Image, ImageDraw
-    import numpy as np
-    
-    try:
-        # Check if placeholder mode is enabled  
-        global MODEL_SIZE
-        if MODEL_SIZE == "placeholder":
-            print("🚫 Image generation disabled (placeholder mode)")
-            # Return a simple gray image placeholder
-            placeholder_image = Image.new('RGB', (width, height), color=(50, 50, 50))
-            # Convert to base64
-            buffer = io.BytesIO()
-            placeholder_image.save(buffer, format='PNG')
-            image_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            return f"data:image/png;base64,{image_data}"
-        
-        # Option to disable image generation for testing (re-enabled to show debugging)
-        ENABLE_IMAGE_GENERATION = True  # Set to False to disable SDXL
-        
-        if not ENABLE_IMAGE_GENERATION:
-            print("Image generation disabled - using placeholder")
-            # Create placeholder image
-            image = Image.new('RGB', (width, height), color='#2c3e50')
-            draw = ImageDraw.Draw(image)
-            draw.text((width//2, height//2), "Artwork\nPlaceholder", 
-                     fill='white', anchor='mm')
-            
-            buffer = io.BytesIO()
-            image.save(buffer, format='PNG')
-            img_data = buffer.getvalue()
-            return base64.b64encode(img_data).decode('utf-8')
-        
-        pipeline = get_image_pipeline()
-        
-        if pipeline and pipeline is not False:
-            # Generate image using SDXL-Turbo
-            print(f"Generating AI image for: {prompt}")
-            
-            # Build enhanced color palette guidance
-            color_palette = ""
-            colors = card_data.get('colors', []) if card_data else []
-            print(f"Debug - Colors received: {colors}")
-            
-            if colors:
-                
-                # Handle multicolor combinations first
-                if len(colors) >= 5:
-                    # Five colors - WUBRG (all colors)
-                    color_palette = ", color palette: rainbow prismatic, all five mana colors"
-                
-                elif len(colors) == 4:
-                    # Four color combinations - simplified
-                    color_palette = ", color palette: four-color convergence, rich jewel tones"
-                
-                elif len(colors) == 3:
-                    # Three color combinations (Shards and Wedges) - simplified
-                    colors_set = set(colors)
-                    if colors_set == {'W', 'U', 'G'}:  # Bant
-                        color_palette = ", color palette: white marble, blue sapphire, green emerald"
-                    elif colors_set == {'U', 'B', 'R'}:  # Grixis
-                        color_palette = ", color palette: dark blues, void black, burning red"
-                    elif colors_set == {'B', 'R', 'G'}:  # Jund
-                        color_palette = ", color palette: shadow black, flame red, wild green"
-                    elif colors_set == {'R', 'G', 'W'}:  # Naya
-                        color_palette = ", color palette: burning red, emerald green, pure white"
-                    elif colors_set == {'G', 'W', 'U'}:  # Same as Bant, reordered
-                        color_palette = ", color palette: emerald green, pure white, sapphire blue"
-                    elif colors_set == {'W', 'B', 'G'}:  # Abzan
-                        color_palette = ", color palette: ivory white, deep black, forest green"
-                    elif colors_set == {'U', 'R', 'W'}:  # Jeskai
-                        color_palette = ", color palette: sapphire blue, flame red, pure white"
-                    elif colors_set == {'B', 'G', 'U'}:  # Sultai
-                        color_palette = ", color palette: shadow black, wild green, deep blue"
-                    elif colors_set == {'R', 'W', 'B'}:  # Mardu
-                        color_palette = ", color palette: burning red, bone white, void black"
-                    elif colors_set == {'G', 'U', 'R'}:  # Temur
-                        color_palette = ", color palette: emerald green, ocean blue, molten red"
-                    else:
-                        color_palette = ", color palette: three-color blend, rich jewel tones"
-                
-                elif len(colors) == 2:
-                    # Two color guild combinations - simplified
-                    if 'W' in colors and 'U' in colors:
-                        color_palette = ", color palette: pristine white, sapphire blue"
-                    elif 'W' in colors and 'B' in colors:
-                        color_palette = ", color palette: pure white, deep black"
-                    elif 'W' in colors and 'R' in colors:
-                        color_palette = ", color palette: ivory white, burning red"
-                    elif 'W' in colors and 'G' in colors:
-                        color_palette = ", color palette: marble white, forest green"
-                    elif 'U' in colors and 'B' in colors:
-                        color_palette = ", color palette: midnight blue, void black"
-                    elif 'U' in colors and 'R' in colors:
-                        color_palette = ", color palette: electric blue, molten red"
-                    elif 'U' in colors and 'G' in colors:
-                        color_palette = ", color palette: ocean blue, living green"
-                    elif 'B' in colors and 'R' in colors:
-                        color_palette = ", color palette: shadow black, blood red"
-                    elif 'B' in colors and 'G' in colors:
-                        color_palette = ", color palette: decay black, wild green"
-                    elif 'R' in colors and 'G' in colors:
-                        color_palette = ", color palette: flame red, primal green"
-                
-                # Single color palettes - simplified
-                elif len(colors) == 1:
-                    if 'W' in colors:
-                        color_palette = ", color palette: pure white, warm gold"
-                    elif 'U' in colors:
-                        color_palette = ", color palette: sapphire blue, silver"
-                    elif 'B' in colors:
-                        color_palette = ", color palette: void black, dark purple"
-                    elif 'R' in colors:
-                        color_palette = ", color palette: burning red, molten orange"
-                    elif 'G' in colors:
-                        color_palette = ", color palette: forest green, earth brown"
-                
-                # Colorless - simplified
-                elif 'C' in colors or not colors:
-                    color_palette = ", color palette: metallic silver, steel gray"
-            
-            # Generate type-specific art prompt enhancement
-            art_type_context = ""
-            card_type = card_data.get('type', '').lower() if card_data else ''
-            
-            if 'creature' in card_type:
-                # Creatures should show the actual creature/being
-                # Special handling for blue creatures to diversify away from wizards/mages
-                if colors and 'U' in colors and len(colors) == 1:  # Pure blue creatures
-                    art_type_context = ", detailed creature portrait, living being, aquatic creature, flying creature, sea monster, elemental being, sphinx, merfolk, bird, octopus, dragon, character focus"
-                else:
-                    art_type_context = ", detailed creature portrait, living being, character focus"
-            elif 'instant' in card_type:
-                # Instants should show magical effects in action
-                if colors and 'U' in colors and len(colors) == 1:  # Pure blue instants
-                    art_type_context = ", water magic, ice effects, wind storm, lightning, teleportation, illusion magic, time distortion, crystal energy, arcane symbols, spell energy"
-                else:
-                    art_type_context = ", magical effect in progress, spell energy, dynamic action, casting magic"
-            elif 'sorcery' in card_type:
-                # Sorceries should show powerful magical effects or rituals
-                if colors and 'U' in colors and len(colors) == 1:  # Pure blue sorceries  
-                    art_type_context = ", tidal wave, storm clouds, ice formation, mystical library, ancient knowledge, arcane research, spell scrolls, crystal formations, time magic"
-                else:
-                    art_type_context = ", grand magical ritual, powerful spell effect, mystical ceremony, magical transformation"
-            elif 'artifact' in card_type:
-                # Artifacts should feature the actual artifact/device
-                art_type_context = ", detailed artifact object, magical device, ancient relic, crafted item focus"
-            elif 'enchantment' in card_type:
-                # Enchantments should show magical auras, environments, or ongoing effects
-                if colors and 'U' in colors and len(colors) == 1:  # Pure blue enchantments
-                    art_type_context = ", shimmering water, floating islands, aurora effects, crystalline structures, frozen landscape, misty atmosphere, magical academy, ancient library, time distortion"
-                else:
-                    art_type_context = ", magical aura, enchanted environment, mystical atmosphere, ongoing magic effect"
-            elif 'land' in card_type:
-                # Lands should show landscapes and terrain
-                art_type_context = ", landscape view, terrain, natural environment, geographical location"
-            elif 'planeswalker' in card_type:
-                # Planeswalkers should show the planeswalker character
-                if colors and 'U' in colors and len(colors) == 1:  # Pure blue planeswalkers
-                    art_type_context = ", powerful planeswalker character, scholar, artificer, elemental master, sea witch, storm caller, ancient being, magical portrait, character focus"
-                else:
-                    art_type_context = ", powerful planeswalker character, magical being, character focus"
-            elif 'battle' in card_type:
-                # Battles should show conflict scenes
-                art_type_context = ", epic battle scene, conflict, warfare, dramatic confrontation"
-            else:
-                # Generic fallback
-                art_type_context = ", magical fantasy scene"
-            
-            # Create enhanced art prompt with subject FIRST for better CLIP attention
-            # Format: Subject first, then type context, then style, then Magic context, then color palette
-            art_prompt = f"{prompt}{art_type_context}{color_palette}, fantasy art, Magic: The Gathering style, detailed illustration, dramatic lighting"
-            
-            # Apply smart truncation to stay within CLIP's 77 token limit
-            final_prompt = truncate_prompt_smartly(art_prompt, max_tokens=75)
-            print(f"Debug - Final art prompt ({estimate_tokens(final_prompt)} tokens): {final_prompt}")
-            
-            # Performance timing for image generation
-            inference_start = time.time()
-            if USE_CUDA and torch.cuda.is_available():
-                print(f"🚀 Starting SDXL-Turbo inference on GPU (should take 2-4 seconds)...")
-            else:
-                print(f"🖥️  Starting SDXL-Turbo inference on CPU (will take 30-60 seconds)...")
-            
-            # Use model-specific generation parameters
-            steps = getattr(pipeline, '_generation_steps', 1)
-            guidance = getattr(pipeline, '_generation_guidance', 0.0)
-            print(f"🎯 Using {steps} steps, guidance_scale={guidance}")
-            
-            image = pipeline(
-                prompt=final_prompt,
-                num_inference_steps=steps,
-                guidance_scale=guidance,
-                width=width,               
-                height=height              
-            ).images[0]
-            
-            inference_time = time.time() - inference_start
-            print(f"⚡ Model inference completed in {inference_time:.2f} seconds")
-            
-            # Debug the generated image
-            print(f"🔍 Generated image size: {image.size}")
-            print(f"🔍 Generated image mode: {image.mode}")
-            
-            if inference_time > 10:
-                print(f"⚠️ SLOW INFERENCE DETECTED! Expected ~2-4s, got {inference_time:.2f}s")
-                print("💡 This suggests GPU optimization issues. Consider:")
-                print("   - Updating PyTorch/CUDA drivers")
-                print("   - Installing xformers: pip install xformers")
-                print("   - Checking GPU memory usage during inference")
-            
-        else:
-            # Fallback to placeholder image
-            print(f"Using placeholder image for: {prompt}")
-            image = Image.new('RGB', (width, height), color='#2c3e50')
-        
-        # Convert image to base64
-        buffer = io.BytesIO()
-        image.save(buffer, format='PNG')
-        img_data = buffer.getvalue()
-        img_base64 = base64.b64encode(img_data).decode('utf-8')
-        
-        return img_base64
-    
-    except Exception as e:
-        print(f"Error in createCardImage: {e}")
-        print("Falling back to placeholder image")
-        try:
-            # Fallback to placeholder
-            image = Image.new('RGB', (width, height), color='#2c3e50')
-            buffer = io.BytesIO()
-            image.save(buffer, format='PNG')
-            img_data = buffer.getvalue()
-            img_base64 = base64.b64encode(img_data).decode('utf-8')
-            return img_base64
-        except:
-            return None
+    return image_generation.generate_art(prompt, card_data)
 
 def limit_creature_active_abilities(card_text):
     """
@@ -2526,7 +2105,8 @@ def createCardContent(prompt, card_data=None):
     try:
         # Build enhanced prompt based on card properties
         enhanced_prompt = f"Generate Magic card abilities: {prompt}\n\nOutput format: Only the rules text abilities, no explanations, no card name, no type line."
-        
+        card_type = ''  # read after the card_data branch (type-specific formatting), so bind it up front
+
         if card_data:
             # Analyze mana cost for power level
             cmc = card_data.get('cmc', 0)
@@ -2795,11 +2375,11 @@ def createCardContent(prompt, card_data=None):
             
             # Flying restrictions for ALL creatures (not just legendary)
             creature_flying_guidance = ""
+            # Computed once, unconditionally: the legendary block below reads it even when there is no subtype
+            subtype_lower = (card_data.get('subtype') or '').lower()
             if 'creature' in card_type:
                 subtype = card_data.get('subtype', '')
                 if subtype:
-                    subtype_lower = subtype.lower()
-                    
                     # Define creature types that should rarely have flying
                     flying_restricted_types = [
                         'human', 'dwarf', 'elf', 'orc', 'goblin', 'zombie', 'skeleton', 
@@ -2874,8 +2454,6 @@ def createCardContent(prompt, card_data=None):
                 
                 if subtype:
                     # Add subtype-specific ability suggestions
-                    subtype_lower = subtype.lower()
-                    
                     if 'dragon' in subtype_lower:
                         legendary_guidance += " As a Dragon, consider abilities like flying, dealing damage, treasure generation, or breath weapon effects."
                     elif 'angel' in subtype_lower:
@@ -2991,9 +2569,10 @@ def createCardContent(prompt, card_data=None):
         card_text = ""
         
         for attempt in range(max_attempts):
-            response = ollama.generate(
+            response = ollama_client.generate(
                 model='mistral:latest',
-                prompt=enhanced_prompt
+                prompt=enhanced_prompt,
+                keep_alive="30m"  # keep Mistral in VRAM between cards on AI Night
             )
             
             # Clean up the response
@@ -3016,9 +2595,12 @@ def createCardContent(prompt, card_data=None):
                     print(f"⚠️  Max validation attempts reached, using last generated text")
                     break
         
-        # Remove surrounding quotes if present
-        if (card_text.startswith('"') and card_text.endswith('"')) or \
-           (card_text.startswith("'") and card_text.endswith("'")):
+        # Remove surrounding quotes only when the whole reply is ONE quoted section.
+        # A multi-quoted reply ('"Flying." "When ~ enters, draw a card."', or one
+        # quoted ability per line) must keep its inner quotes: stripping just the
+        # outermost pair leaves 'Flying." "When ...' which the parser reduces to ''.
+        if (card_text.startswith('"') and card_text.endswith('"') and card_text.count('"') == 2) or \
+           (card_text.startswith("'") and card_text.endswith("'") and card_text.count("'") == 2):
             card_text = card_text[1:-1].strip()
         
         # Fix common formatting issues
@@ -3419,29 +3001,6 @@ def create_card_sync():
         response = jsonify({'error': f'Synchronous request failed: {str(e)}'})
         return add_ngrok_headers(response), 500
 
-@app.route('/api/v1/queue_status', methods=['GET', 'OPTIONS'])
-def get_queue_status():
-    """Get overall queue status"""
-    # Handle OPTIONS request for CORS preflight
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        return add_ngrok_headers(response)
-    
-    try:
-        with request_queue.lock:
-            status_info = {
-                'queue_size': request_queue.queue.qsize(),
-                'active_requests': request_queue.current_concurrent,
-                'max_concurrent': request_queue.max_concurrent,
-                'total_active_requests': len(request_queue.active_requests)
-            }
-        response = jsonify(status_info)
-        return add_ngrok_headers(response), 200
-    except Exception as e:
-        print(f"❌ Error getting queue status: {e}")
-        response = jsonify({'error': f'Queue status failed: {str(e)}'})
-        return add_ngrok_headers(response), 500
-
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint - always returns 200 to indicate server is running"""
@@ -3492,15 +3051,67 @@ def instant_response():
     # Return immediately without processing
     return jsonify({'status': 'instant-success', 'timestamp': str(request.args)}), 200
 
+def warn_about_admin_pin(pin):
+    """Print a loud startup banner when ADMIN_PIN is empty or still the default."""
+    from api_routes import admin_pin_warning
+
+    warning = admin_pin_warning(pin)
+    if warning:
+        bar = "!" * 78
+        print(f"\n{bar}\n!!! WARNING: {warning}\n{bar}\n")
+
+
+def init_ai_night(app):
+    """
+    Set up AI Night: data folders, SQLite storage, the two-stage generation queue
+    and the /api/v1 blueprint (spec §3-§5). Returns the GenerationQueue.
+
+    Called only from the __main__ block, so importing app.py (e.g. in tests)
+    opens no database and starts no worker threads.
+    """
+    from pathlib import Path
+
+    import image_generation
+    from api_routes import create_api_blueprint
+    from generation_queue import GenerationQueue
+    from storage import Storage
+
+    data_dir = Path(DATA_DIR)
+    (data_dir / "art").mkdir(parents=True, exist_ok=True)
+    (data_dir / "cards").mkdir(parents=True, exist_ok=True)
+
+    warn_about_admin_pin(ADMIN_PIN)
+    storage = Storage(data_dir / "mtgenesis.db")
+    gen_queue = GenerationQueue(storage, data_dir, createCardContent,
+                                image_generation.generate_art, finalize_card)
+    gen_queue.recover_on_startup()
+    app.register_blueprint(create_api_blueprint(storage, gen_queue, data_dir, ADMIN_PIN),
+                           url_prefix="/api/v1")
+    print(f"🌙 AI Night ready: data in {data_dir}")
+    return gen_queue
+
 if __name__ == '__main__':
     print("🚀 Starting Flask server with intelligent queuing...")
+    gen_queue = init_ai_night(app)
     print("Available endpoints:")
     print("  POST /api/v1/create_card - Generate card (sync, frontend compatible)")
     print("  POST /api/v1/create_card_async - Queue card generation (async)")
     print("  GET  /api/v1/card_status/<request_id> - Check async request status")
-    print("  GET  /api/v1/queue_status - Get overall queue status")
     print("  POST /api/v1/create_card_sync - Generate card (sync, legacy)")
     print("  GET  /health - Health check")
+    print("\n🌙 AI Night endpoints (X-User-Id header on user routes, X-Admin-Pin on admin routes):")
+    print("  POST /api/v1/users/login - Log in or register by username")
+    print("  GET  /api/v1/me/cards - My cards, newest first")
+    print("  GET  /api/v1/me/sets/current - My current commander set")
+    print("  POST /api/v1/generations - Queue 1 free-play card or a 3-card commander set")
+    print("  GET  /api/v1/cards/<id> - Card status, queue position and ETA")
+    print("  POST /api/v1/cards/<id>/reroll - Reroll a set card")
+    print("  POST /api/v1/sets/<id>/lock | /unlock - Lock a set into the open event, or unlock it")
+    print("  GET  /api/v1/events/current | /events | /events/<id> - Events and their locked sets")
+    print("  POST /api/v1/votes - Vote for a card in a locked set")
+    print("  GET  /api/v1/queue_status - Generation queue status and ETA")
+    print("  GET  /api/v1/media/cards/<id>.png | /media/art/<id>.png - Rendered card and artwork")
+    print("  POST /api/v1/admin/events | /admin/events/<id>/close - Host event controls")
     print("\n📋 Queue Configuration:")
     print(f"  - Max concurrent requests: {request_queue.max_concurrent}")
     print("  - All endpoints use queue internally to prevent model overload")
@@ -3510,7 +3121,7 @@ if __name__ == '__main__':
     print("Advanced: Use /api/v1/create_card_async + polling for true async behavior")
     print("\nExample request body:")
     print('{"prompt": "A mystical dragon card", "width": 408, "height": 336}')
-    print("\nNote: SDXL-Turbo model will load on first image request")
+    print("\nNote: the image model loads on first image request")
     
     # Run with HTTP - ngrok will handle HTTPS termination
     app.run(debug=False, host='0.0.0.0', port=5000)

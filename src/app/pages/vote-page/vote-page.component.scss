@@ -1,0 +1,22 @@
+.vote-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+.loading {
+  text-align: center;
+  padding: 2rem;
+}
+
+.history-link {
+  text-align: center;
+  margin: 1rem 0;
+}

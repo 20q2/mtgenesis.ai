@@ -35,6 +35,10 @@ export class CardFormComponent implements OnInit {
   generationStartTime: number | null = null;
   
   @Input() modelsReady: boolean = false;
+  /** Hide the Card Name field (the set builder supplies the commander name instead). */
+  @Input() showName = true;
+  /** Hide the Generate button (the set builder has its own "Generate set of 3"). */
+  @Input() showGenerate = true;
   @Output() cardChange = new EventEmitter<Card>();
   @Output() generateCard = new EventEmitter<Card>();
   @Output() regenerateText = new EventEmitter<Card>();
@@ -154,6 +158,9 @@ export class CardFormComponent implements OnInit {
   }
 
   onSubmit(): void {
+    if (!this.showGenerate) {
+      return; // Enter in a field must not trigger generation when the host page owns the button
+    }
     if (this.isGenerating) {
       return; // Prevent double submission
     }

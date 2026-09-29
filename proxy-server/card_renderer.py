@@ -28,6 +28,14 @@ class MagicCardRenderer:
     - Color-based frame selection
     - Power/Toughness boxes for creatures
     """
+
+    # Card name font: full size, and the smallest it may shrink to so a long name
+    # (commander names can be 40 characters) fits left of the mana cost.
+    TITLE_FONT_SIZE = 22
+    TITLE_MIN_FONT_SIZE = 13
+    TITLE_MANA_GAP = 8          # px kept between the name and the first mana symbol
+    MANA_SYMBOL_SIZE = 22       # render_mana_cost's symbol size and spacing
+    MANA_SYMBOL_SPACING = 3
     
     def __init__(self):
         self.assets_dir = os.path.join(os.path.dirname(__file__), 'assets')
@@ -37,6 +45,7 @@ class MagicCardRenderer:
         
         # Frame cache to avoid loading images repeatedly
         self._image_cache: Dict[str, Image.Image] = {}
+        self._title_font_cache: Dict[int, ImageFont.FreeTypeFont] = {}  # fit_title_font sizes
         
         # Card dimensions (proper Magic card aspect ratio based on 744x1039)
         self.card_width = 496   # Keep current width
@@ -122,7 +131,7 @@ class MagicCardRenderer:
             self.elegant_garamond_path = os.path.join(self.assets_dir, 'Elegant Garamond Regular.otf')
             
             # Different font sizes for different text elements
-            self.title_font = ImageFont.truetype(self.beleren_bold_path, 22)  # Increased by 1 more (21 + 1 = 22)
+            self.title_font = ImageFont.truetype(self.beleren_bold_path, self.TITLE_FONT_SIZE)
             self.type_font = ImageFont.truetype(self.beleren_bold_path, 20)  # Increased by 1 more (19 + 1 = 20)
             
             # Check if Elegant Garamond is available for rules text
@@ -1106,6 +1115,41 @@ class MagicCardRenderer:
         print("No site logo found - skipping logo placement")
         return None
     
+    def mana_cost_width(self, mana_cost: str) -> int:
+        """Width in px that render_mana_cost uses for this cost (0 when there is none)."""
+        if not mana_cost:
+            return 0
+        symbols = self.parse_mana_symbols(mana_cost)
+        if not symbols:
+            return int(round(self.mana_font.getlength(mana_cost)))
+        return len(symbols) * self.MANA_SYMBOL_SIZE + (len(symbols) - 1) * self.MANA_SYMBOL_SPACING
+
+    def _title_font_at(self, size: int):
+        cache = self._title_font_cache
+        if size not in cache:
+            try:
+                cache[size] = ImageFont.truetype(self.beleren_bold_path, size)
+            except Exception:
+                cache[size] = self.title_font
+        return cache[size]
+
+    def fit_title_font(self, name: str, mana_cost: str) -> Tuple[int, float, int]:
+        """
+        Pick the card name's font size: the full TITLE_FONT_SIZE, shrunk one px at a
+        time (down to TITLE_MIN_FONT_SIZE) until the name fits between name_pos and
+        the left edge of the rendered mana cost.
+        Returns (font size, name width at that size, available width).
+        """
+        mana_width = self.mana_cost_width(mana_cost)
+        right = self.mana_cost_pos[0] - (mana_width + self.TITLE_MANA_GAP if mana_width else 0)
+        available = right - self.name_pos[0]
+        size = self.TITLE_FONT_SIZE
+        width = self._title_font_at(size).getlength(name or '')
+        while width > available and size > self.TITLE_MIN_FONT_SIZE:
+            size -= 1
+            width = self._title_font_at(size).getlength(name or '')
+        return size, width, available
+
     def render_mana_cost(self, card_image: Image.Image, mana_cost: str, position: Tuple[int, int]):
         """
         Render mana cost symbols directly onto the card image
@@ -1124,8 +1168,8 @@ class MagicCardRenderer:
             return
         
         # Calculate positioning for right-aligned symbols
-        symbol_size = 22  # Increased size by 2px (20 + 2 = 22)
-        symbol_spacing = 3  # Slightly more spacing
+        symbol_size = self.MANA_SYMBOL_SIZE
+        symbol_spacing = self.MANA_SYMBOL_SPACING
         total_width = len(symbols) * symbol_size + (len(symbols) - 1) * symbol_spacing
         
         # Start from right edge and work backwards
@@ -1486,7 +1530,12 @@ class MagicCardRenderer:
             
             # Step 5: Draw card name
             name_start = time.time()
-            draw.text(self.name_pos, name, fill='black', font=self.title_font)
+            # Shrink long names so they end left of the mana cost; nudge the smaller
+            # font down so the name stays vertically centred in the title bar.
+            title_size, _, _ = self.fit_title_font(name, mana_cost)
+            name_x, name_y = self.name_pos
+            name_y += (self.TITLE_FONT_SIZE - title_size) // 2
+            draw.text((name_x, name_y), name, fill='black', font=self._title_font_at(title_size))
             name_time = time.time() - name_start
             print(f"   📛 Card name: {name_time:.3f}s")
             

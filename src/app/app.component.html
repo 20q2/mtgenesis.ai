@@ -1,27 +1,4 @@
-<!-- Health Check Banner - Only show when checking or there's an error, with delay -->
-<div *ngIf="showHealthBanner && (isCheckingHealth || (healthError && !modelsReady))" class="health-banner">
-  <div class="banner-content">
-    <!-- Loading state -->
-    <div *ngIf="isCheckingHealth" class="banner-loading">
-      <mat-spinner diameter="20"></mat-spinner>
-      <div class="banner-text">
-        <span class="banner-title">Initializing MTGenesis.AI</span>
-        <span class="banner-subtitle">Loading AI models... This may take a few minutes.</span>
-      </div>
-    </div>
-    
-    <!-- Error state -->
-    <div *ngIf="healthError && !isCheckingHealth && !modelsReady" class="banner-error">
-      <span class="material-icons">warning</span>
-      <div class="banner-text">
-        <span class="banner-title">Models Not Available</span>
-        <span class="banner-subtitle">{{ healthError }}</span>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="app-header">
+<header class="app-header">
   <div class="header-content">
     <img src="assets/site_logo.png" alt="MTGenesis.AI Logo" class="site-logo">
     <div class="header-text">
@@ -29,115 +6,38 @@
       <p>Create custom Magic: The Gathering cards with AI</p>
     </div>
   </div>
+</header>
+
+<mat-toolbar class="nav-bar" *ngIf="user$ | async as user">
+  <nav class="nav-links">
+    <a *ngFor="let link of navLinks"
+       [routerLink]="link.path"
+       routerLinkActive="active">{{ link.label }}</a>
+  </nav>
+  <div class="nav-right">
+    <app-queue-badge></app-queue-badge>
+    <div class="nav-user">
+      <span class="material-icons" aria-hidden="true">person</span>
+      <span class="username">{{ user.username }}</span>
+      <button type="button" class="logout" (click)="logout()">Log out</button>
+    </div>
+  </div>
+</mat-toolbar>
+
+<div class="page-outlet">
+  <router-outlet></router-outlet>
 </div>
-
-<main class="app-container">
-
-  <!-- Status messages -->
-  <div class="status-container">
-    <!-- Success message -->
-    <div *ngIf="successMessage" class="status-message success">
-      <div class="message-content">
-        <span class="material-icons">check_circle</span>
-        <p>{{ successMessage }}</p>
-      </div>
-      <button class="close-button" (click)="clearSuccessMessage()">×</button>
-    </div>
-    
-    <!-- Error messages -->
-    <div *ngIf="error || textError || artError" class="status-message error">
-      <div class="message-content">
-        <span class="material-icons">error</span>
-        <div>
-          <p *ngIf="error">{{ error }}</p>
-          <p *ngIf="textError">{{ textError }}</p>
-          <p *ngIf="artError">{{ artError }}</p>
-        </div>
-      </div>
-      <button class="close-button" (click)="clearError()">×</button>
-    </div>
-  </div>
-
-  <div class="card-preview-section">
-    <!-- Loading overlay for the card preview -->
-    <div *ngIf="isGenerating || isGeneratingArt || isGeneratingText" class="loading-overlay">
-      <div class="generation-progress" *ngIf="isGenerating">
-        <div class="progress-content">
-          <div class="progress-icon">
-            <span class="material-icons">auto_awesome</span>
-          </div>
-          
-          <div class="progress-text" *ngIf="!showExtendedMessage" [class.fade-in]="messageVisible" [class.fade-out]="!messageVisible">
-            <h3>{{ currentMessage.title }}</h3>
-          </div>
-          
-          <div class="progress-text" *ngIf="showExtendedMessage">
-            <h3>Almost Ready!</h3>
-            <p>The model is taking longer than expected. Please wait...</p>
-          </div>
-          
-          <div class="progress-bar-container">
-            <div class="progress-bar">
-              <div class="progress-fill" [style.width.%]="generationProgress"></div>
-            </div>
-            <div class="progress-percentage">{{ Math.round(generationProgress) }}%</div>
-          </div>
-          
-          <div class="progress-time">
-            <small *ngIf="showExtendedMessage">Please be patient, generation is still in progress</small>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Keep simple spinners for text/art only generation -->
-      <div *ngIf="!isGenerating && (isGeneratingText || isGeneratingArt)" class="simple-loading">
-        <div class="loading-spinner"></div>
-        <p *ngIf="isGeneratingText">Generating card text...</p>
-        <p *ngIf="isGeneratingArt">Generating card art...</p>
-      </div>
-    </div>
-    
-    <!-- Blueprint-style preview: only show when complete card is not available -->
-    <app-card-preview [card]="currentCard" *ngIf="!currentCard.cardImageUrl"></app-card-preview>
-    
-    <!-- Complete card image displayed automatically underneath preview -->
-    <div class="complete-card-display" 
-         *ngIf="currentCard.cardImageUrl || cardExiting"
-         [class.card-exit-animation]="cardExiting">
-      <img [src]="currentCard.cardImageUrl" alt="Complete Magic Card" class="complete-card-image">
-    </div>
-    
-    <!-- Download buttons -->
-    <div class="download-section">
-      <button 
-        (click)="downloadCardImage()" 
-        [disabled]="!currentCard.imageUrl"
-        class="download-button">
-        <span class="material-icons">download</span>
-        Download Artwork
-      </button>
-      <button 
-        *ngIf="currentCard.cardImageUrl"
-        (click)="downloadCompleteCard()" 
-        class="download-button complete-card-download">
-        <span class="material-icons">download</span>
-        Download Complete Card
-      </button>
-    </div>
-    
-  </div>
-  
-  <div class="card-form-section">
-    <app-card-form 
-      [modelsReady]="modelsReady"
-      (cardChange)="updateCard($event)" 
-      (generateCard)="generateCard($event)"></app-card-form>
-  </div>
-</main>
 
 <footer class="app-footer">
   <div class="footer-content">
     <img src="assets/site_logo.png" alt="MTGenesis.AI Logo" class="footer-logo">
     <p>&copy; 2025 MTGenesis.AI - Create custom Magic: The Gathering cards</p>
+    <nav class="footer-links" *ngIf="user$ | async">
+      <a routerLink="/events">Past events</a>
+      <ng-container *ngIf="showHostTools">
+        <span aria-hidden="true">·</span>
+        <a routerLink="/admin">Host tools</a>
+      </ng-container>
+    </nav>
   </div>
 </footer>

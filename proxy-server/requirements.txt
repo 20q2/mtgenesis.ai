@@ -1,3 +1,6 @@
+# CUDA 12.8 wheels are required for the RTX 5070 (Blackwell, sm_120)
+--extra-index-url https://download.pytorch.org/whl/cu128
+
 # Core web framework
 Flask==3.1.2
 flask-cors==6.0.1
@@ -13,16 +16,15 @@ certifi==2025.8.3
 urllib3==2.5.0
 
 # AI and ML libraries - WORKING CONFIGURATION
-torch==2.8.0+cpu
-torchaudio==2.8.0+cpu
-torchvision==0.23.0+cpu
+torch==2.8.0+cu128
+torchaudio==2.8.0+cu128
+torchvision==0.23.0+cu128
 transformers==4.56.0
 diffusers==0.35.1
 accelerate==1.10.1
 huggingface-hub==0.34.4
 tokenizers==0.22.0
 safetensors==0.6.2
-xformers==0.0.27.post2
 
 # Content generation
 ollama==0.5.3

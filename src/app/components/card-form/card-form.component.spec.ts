@@ -1,4 +1,7 @@
+import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ReactiveFormsModule } from '@angular/forms';
+import { MatButtonToggleModule } from '@angular/material/button-toggle';
 
 import { CardFormComponent } from './card-form.component';
 
@@ -8,7 +11,9 @@ describe('CardFormComponent', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      declarations: [CardFormComponent]
+      imports: [ReactiveFormsModule, MatButtonToggleModule],
+      declarations: [CardFormComponent],
+      schemas: [NO_ERRORS_SCHEMA]
     });
     fixture = TestBed.createComponent(CardFormComponent);
     component = fixture.componentInstance;

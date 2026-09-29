@@ -1,0 +1,51 @@
+.queue-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  border: 1px solid rgba(243, 233, 210, 0.25);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f3e9d2;
+  white-space: nowrap;
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #9ca3af;
+    flex: none;
+  }
+
+  &.idle {
+    border-color: rgba(52, 211, 153, 0.5);
+    .dot { background: #34d399; box-shadow: 0 0 6px #34d399; }
+  }
+
+  &.busy {
+    border-color: rgba(212, 175, 55, 0.6);
+    color: #f5d77a;
+    .dot { background: #f5d77a; box-shadow: 0 0 6px #f5d77a; animation: pulse 1.6s ease-in-out infinite; }
+  }
+
+  &.offline {
+    border-color: rgba(248, 113, 113, 0.6);
+    color: #fecaca;
+    .dot { background: #f87171; }
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (max-width: 480px) {
+  .queue-badge {
+    white-space: normal;
+    font-size: 0.75rem;
+  }
+}

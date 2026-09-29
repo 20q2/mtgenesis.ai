@@ -1,9 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Observable, throwError, of } from 'rxjs';
-import { catchError, retry, map, tap, switchMap, timeout } from 'rxjs/operators';
+import { catchError, retry, map, tap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
-import { HealthService } from './health.service';
 import { 
   CardValidationRequest, 
   CardValidationResponse,
@@ -44,27 +43,7 @@ export class CardService {
     'ngrok-skip-browser-warning': 'true'
   });
 
-  constructor(
-    private http: HttpClient,
-    private healthService: HealthService
-  ) { }
-
-  /**
-   * Get the appropriate timeout value based on whether this is a cold start or warm run
-   */
-  private getDynamicTimeout(): number {
-    const isFirstJobCompleted = this.healthService.isFirstJobCompleted();
-    
-    if (isFirstJobCompleted) {
-      // Warm run - use shorter timeout
-      console.log(`🚀 Using warm run timeout: ${environment.warmRunTimeoutMs}ms`);
-      return environment.warmRunTimeoutMs;
-    } else {
-      // Cold start - use longer timeout
-      console.log(`🔥 Using cold start timeout: ${environment.coldStartTimeoutMs}ms`);
-      return environment.coldStartTimeoutMs;
-    }
-  }
+  constructor(private http: HttpClient) { }
 
   /**
    * Validate a card against Magic: The Gathering rules
@@ -115,7 +94,6 @@ export class CardService {
 
     return this.http.post<CardGenerationResponse>(url, request, { headers: this.defaultHeaders })
       .pipe(
-        timeout(this.getDynamicTimeout()),
         retry({ count: this.retryCount, delay: this.retryDelay }),
         map((response: any) => {
           const updatedCard: Card = { ...card };
@@ -149,108 +127,6 @@ export class CardService {
         }),
         tap(card => console.log('Unified card generation successful:', card)),
         catchError(this.handleError<Card>('generateCompleteCard'))
-      );
-  }
-
-  /**
-   * Generate only card text content (no image)
-   * @param card Card data for text generation
-   * @returns Observable with updated card text
-   */
-  generateCardText(card: Card): Observable<Partial<Card>> {
-    const url = `${environment.apiUrl}${environment.cardGenerationEndpoint}`;
-    
-    const request: CardGenerationRequest = {
-      prompt: card.artPrompt || `Fantasy art of ${card.name}, ${card.type}`,
-      width: environment.defaultCardWidth,
-      height: environment.defaultCardHeight,
-      cardData: {
-        name: card.name,
-        manaCost: card.manaCost,  // Added missing mana cost field
-        supertype: card.supertype,
-        colors: card.colors,
-        type: card.type,
-        subtype: card.subtype,
-        rarity: card.rarity,
-        cmc: card.cmc,
-        description: card.description,
-        power: card.power,
-        toughness: card.toughness
-      }
-    };
-
-    return this.http.post<CardGenerationResponse>(url, request, { headers: this.defaultHeaders })
-      .pipe(
-        timeout(this.getDynamicTimeout()),
-        retry({ count: this.retryCount, delay: this.retryDelay }),
-        map((response: CardGenerationResponse) => {
-          const updatedCardData: Partial<Card> = {};
-          
-          // Process only card data (ignore image)
-          if (response.cardData) {
-            try {
-              // Try to parse structured card data or use as description
-              const parsedData = JSON.parse(response.cardData);
-              if (parsedData.name) updatedCardData.name = parsedData.name;
-              if (parsedData.description) updatedCardData.description = parsedData.description;
-              if (parsedData.flavorText) updatedCardData.flavorText = parsedData.flavorText;
-              if (parsedData.manaCost) updatedCardData.manaCost = parsedData.manaCost;
-            } catch (e) {
-              // If not JSON, treat as description
-              updatedCardData.description = response.cardData;
-            }
-          }
-          
-          return updatedCardData;
-        }),
-        tap(cardData => console.log('Card text generation successful:', cardData)),
-        catchError(this.handleError<Partial<Card>>('generateCardText'))
-      );
-  }
-
-  /**
-   * Generate only card artwork (no text content)
-   * @param card Card data for art generation
-   * @returns Observable with updated card image
-   */
-  generateCardArt(card: Card): Observable<Partial<Card>> {
-    const url = `${environment.apiUrl}${environment.cardGenerationEndpoint}`;
-    
-    const request: CardGenerationRequest = {
-      prompt: card.artPrompt || `Fantasy art of ${card.name}, ${card.type}`,
-      width: environment.defaultCardWidth,
-      height: environment.defaultCardHeight,
-      cardData: {
-        name: card.name,
-        manaCost: card.manaCost,  // Added missing mana cost field
-        supertype: card.supertype,
-        colors: card.colors,
-        type: card.type,
-        subtype: card.subtype,
-        rarity: card.rarity,
-        cmc: card.cmc,
-        description: card.description,
-        power: card.power,
-        toughness: card.toughness
-      }
-    };
-
-    return this.http.post<CardGenerationResponse>(url, request, { headers: this.defaultHeaders })
-      .pipe(
-        timeout(this.getDynamicTimeout()),
-        retry({ count: this.retryCount, delay: this.retryDelay }),
-        map((response: any) => {
-          const updatedCardData: Partial<Card> = {};
-          
-          // Process only image data (ignore card content)
-          if (response.imageData) {
-            updatedCardData.imageUrl = `data:image/png;base64,${response.imageData}`;
-          }
-          
-          return updatedCardData;
-        }),
-        tap(cardData => console.log('Card art generation successful:', cardData)),
-        catchError(this.handleError<Partial<Card>>('generateCardArt'))
       );
   }
 
