@@ -74,4 +74,5 @@ logs
 # AI Models (if any get downloaded)
 *.bin
 *.safetensors
-models/
+/models/
+proxy-server/data/
