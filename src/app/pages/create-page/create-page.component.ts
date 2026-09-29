@@ -212,7 +212,7 @@ export class CreatePageComponent implements OnInit, OnDestroy {
   }
 
   loadGenerationMessages(): void {
-    this.http.get<{messages: any[]}>('/assets/generation-messages.json')
+    this.http.get<{messages: any[]}>('assets/generation-messages.json')
       .subscribe({
         next: (data) => {
           this.generationMessages = data.messages;

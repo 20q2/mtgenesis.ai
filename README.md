@@ -148,13 +148,24 @@ mtgenesis.ai/
 
 ## Deployments
 
-Run the command: 
+Double-click **`Start MTGenesis.cmd`** in the repo root (Windows). It:
 
-```bash
-npm run build -- --configuration production
-```
+1. starts Ollama if it isn't running (and pulls `mistral:latest` if missing),
+2. opens the Flask backend in a "MTGenesis backend" window,
+3. opens an ngrok tunnel to it in a "MTGenesis tunnel" window,
+4. publishes the site to GitHub Pages (`gh-pages` branch) at https://20q2.github.io/mtgenesis.ai/, writing the live tunnel URL to `api-config.json`, which the app reads at startup. The Angular app is only rebuilt when frontend code changed since the last deploy.
+5. opens the site once Pages serves the new URL.
 
-To build the project for production, this will make use of the ngrok endpoint we specified in the environment.prod.ts file
+Press Enter in the launcher window to stop the backend and tunnel. Anything already running is reused, so re-running it is safe.
+
+First run only: it offers to install ngrok with winget, asks for your ngrok authtoken, and, if GitHub Pages isn't enabled yet, opens the repo's Pages settings (choose *Deploy from a branch → `gh-pages` / root*).
+
+Options (append to the command, or run `deploy\start-site.ps1` directly):
+
+- `-NgrokDomain your-name.ngrok-free.app`: use your free static ngrok domain (or set `MTGENESIS_NGROK_DOMAIN`), so the URL never changes.
+- `-Rebuild`: force a frontend rebuild.
+- `-NoPublish`: run locally and print the tunnel URL without pushing.
+- `-CreateShortcut`: add an "MTGenesis" shortcut to the desktop.
 
 ## 🐛 Troubleshooting
 

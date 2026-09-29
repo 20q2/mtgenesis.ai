@@ -68,7 +68,12 @@ Asset images are cached in memory. `cairosvg`/`wand` are optional imports, and `
 
 ### Deployment
 
-- Production runs the Flask server on a local GPU machine, exposed through ngrok.
-- The frontend's prod `apiUrl` comes from `src/environments/config.ts`, currently a hard-coded ngrok URL. `lambda-proxy/lambda_function.py` holds a second hard-coded copy.
-- **When the ngrok URL changes, update both.**
-- `lambda-proxy/` is an optional AWS Lambda + API Gateway CORS proxy in front of ngrok (see `lambda-proxy/deploy.md`).
+- Production runs the Flask server on a local GPU machine, exposed through ngrok. The frontend is served from GitHub Pages (`gh-pages` branch, https://20q2.github.io/mtgenesis.ai/).
+- `Start MTGenesis.cmd` → `deploy/start-site.ps1` does the whole launch:
+  - starts Ollama, Flask and ngrok (reusing any already running)
+  - pushes `api-config.json` with the live tunnel URL to `gh-pages`
+  - rebuilds the app with `--base-href /mtgenesis.ai/` only when the frontend source differs from the commit recorded in `gh-pages/build-info.json`
+  - uses `.deploy/` (gitignored) as its scratch space
+- `src/main.ts` fetches `api-config.json` before bootstrapping in production and overrides `environment.apiUrl`. `src/environments/config.ts` is only the build-time fallback.
+- Because the site lives under a subpath, asset URLs must be relative (`assets/...`, not `/assets/...`).
+- `lambda-proxy/` is an optional AWS Lambda + API Gateway CORS proxy in front of ngrok (see `lambda-proxy/deploy.md`). The launcher doesn't use or update it; its `NGROK_URL` is hard-coded.

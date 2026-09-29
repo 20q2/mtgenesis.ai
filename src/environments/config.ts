@@ -3,7 +3,7 @@ export interface ApiConfig {
 }
 
 export const apiConfig: ApiConfig = {
-  // Lambda proxy URL for card generation (proxies to ngrok)
+  // Build-time fallback only. In production, main.ts reads the live ngrok URL from the
+  // api-config.json that deploy/start-site.ps1 publishes next to the site.
   cardGenerationUrl: 'https://0eccb5a667ac.ngrok-free.app'
 };
-

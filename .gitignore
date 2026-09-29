@@ -76,3 +76,6 @@ logs
 *.safetensors
 /models/
 proxy-server/data/
+
+# Deploy launcher scratch (gh-pages checkout, build output)
+/.deploy/
