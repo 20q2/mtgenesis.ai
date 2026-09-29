@@ -16,10 +16,10 @@ export class AppComponent {
   readonly user$: Observable<User | null>;
 
   readonly navLinks = [
-    { path: '/create', label: 'Create' },
-    { path: '/set', label: 'Commander Set' },
-    { path: '/gallery', label: 'Gallery' },
-    { path: '/vote', label: 'Vote' }
+    { path: '/create', label: 'Create', short: 'Create', icon: 'auto_awesome' },
+    { path: '/set', label: 'Commander Set', short: 'Commander', icon: 'style' },
+    { path: '/gallery', label: 'Gallery', short: 'Gallery', icon: 'collections' },
+    { path: '/vote', label: 'Vote', short: 'Vote', icon: 'how_to_vote' }
   ];
 
   constructor(private users: UserService, private router: Router) {

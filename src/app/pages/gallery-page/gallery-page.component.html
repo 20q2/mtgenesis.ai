@@ -33,10 +33,10 @@
       </div>
 
       <div class="tile-actions" *ngIf="view.status === 'done'">
-        <button type="button" class="btn btn-gold download" (click)="download(view)">
+        <button type="button" class="btn btn-ghost btn-sm download" (click)="download(view)">
           <span class="material-icons">download</span> Card
         </button>
-        <button type="button" class="btn btn-ghost download-art" *ngIf="view.artImageUrl" (click)="downloadArt(view)">
+        <button type="button" class="btn btn-ghost btn-sm download-art" *ngIf="view.artImageUrl" (click)="downloadArt(view)">
           <span class="material-icons">image</span> Art
         </button>
       </div>

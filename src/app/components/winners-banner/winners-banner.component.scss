@@ -1,17 +1,24 @@
 .winners-banner {
-  border-radius: 16px;
-  padding: 1rem 1.25rem;
+  position: relative;
+  border-radius: var(--r-lg);
+  padding: 1.1rem 1.35rem;
   margin-bottom: 1rem;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.28), rgba(120, 90, 20, 0.35));
-  border: 1px solid rgba(245, 215, 122, 0.7);
-  box-shadow: 0 0 24px rgba(212, 175, 55, 0.3);
-  color: #fff7e0;
+  color: var(--text);
+  /* Solid ink with a gold edge, so the names read over any background */
+  background:
+    linear-gradient(135deg, rgba(212, 175, 55, 0.16), transparent 55%),
+    var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-2), 0 0 30px -10px rgba(212, 175, 55, 0.45);
 }
 
 .winners-title {
-  font-family: 'Beleren', 'Palatino', serif;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-display);
   font-size: 1.5rem;
-  color: #f5d77a;
+  color: var(--gold-bright);
   margin-bottom: 0.75rem;
 }
 
@@ -26,9 +33,10 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.5rem;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.25);
+  padding: 0.55rem;
+  border-radius: var(--r-md);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(243, 233, 210, 0.08);
 }
 
 .thumbs {
@@ -40,25 +48,22 @@
     width: 48px;
     aspect-ratio: 63 / 88;
     object-fit: cover;
-    border-radius: 5px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+    box-shadow: var(--shadow-1);
   }
 }
 
 .winner-name {
-  color: #f5d77a;
+  color: var(--gold-bright);
   word-break: break-word;
 }
 
 .winner-version {
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.outcome-tie .winner-version {
-  color: #e5e7eb;
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--text-muted);
 }
 
 .outcome-none .winner-version {
-  color: rgba(255, 247, 224, 0.6);
+  color: var(--text-faint);
 }

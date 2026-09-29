@@ -27,7 +27,7 @@
   <ng-container *ngIf="mode === 'detail' && !loading && event as ev">
     <section class="panel event-header">
       <div>
-        <p class="muted"><a routerLink="/events" class="night-link">&larr; All events</a></p>
+        <p class="muted back-link"><a routerLink="/events" class="night-link">&larr; All events</a></p>
         <h2 class="page-title">{{ ev.name }}</h2>
         <p class="muted">
           {{ ev.createdAt | date:'mediumDate' }}

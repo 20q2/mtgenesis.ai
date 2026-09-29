@@ -13,7 +13,7 @@
          [class.tied]="card.tied">
       <div class="flags">
         <span *ngIf="card.leader" class="flag flag-leader">
-          <span aria-hidden="true">👑</span> {{ final ? 'Winner' : 'Leading' }}
+          <span class="material-icons" aria-hidden="true">workspace_premium</span> {{ final ? 'Winner' : 'Leading' }}
         </span>
         <span *ngIf="card.tied" class="flag flag-tied">Tied</span>
         <span *ngIf="isMine(card)" class="flag flag-mine">Your pick</span>

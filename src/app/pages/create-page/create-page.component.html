@@ -1,74 +1,49 @@
-<!-- Server banner: shown while the first queue check is pending or while the server is offline -->
-<div *ngIf="showHealthBanner && (isCheckingHealth || (healthError && !modelsReady))" class="health-banner">
-  <div class="banner-content">
-    <!-- Loading state -->
-    <div *ngIf="isCheckingHealth" class="banner-loading">
-      <mat-spinner diameter="20"></mat-spinner>
-      <div class="banner-text">
-        <span class="banner-title">Connecting to MTGenesis.AI</span>
-        <span class="banner-subtitle">Checking the generation server...</span>
-      </div>
+<div class="page create-page">
+  <!-- Server banner: shown while the first queue check is pending or while the server is offline -->
+  <ng-container *ngIf="showHealthBanner && (isCheckingHealth || (healthError && !modelsReady))">
+    <div *ngIf="isCheckingHealth" class="alert alert-info health-banner" role="status">
+      <mat-spinner diameter="20" aria-hidden="true"></mat-spinner>
+      <span><strong>Connecting to MTGenesis.AI</strong> &middot; Checking the generation server…</span>
     </div>
-
-    <!-- Error state -->
-    <div *ngIf="healthError && !isCheckingHealth && !modelsReady" class="banner-error">
-      <span class="material-icons">warning</span>
-      <div class="banner-text">
-        <span class="banner-title">Server Offline</span>
-        <span class="banner-subtitle">{{ healthError }}</span>
-      </div>
+    <div *ngIf="healthError && !isCheckingHealth && !modelsReady" class="alert alert-error health-banner" role="alert">
+      <span class="material-icons" aria-hidden="true">cloud_off</span>
+      <span><strong>Server offline</strong> &middot; {{ healthError }}</span>
     </div>
-  </div>
-</div>
+  </ng-container>
 
-<main class="app-container">
+  <div class="create-layout">
+    <!-- The stage: live preview of the card being built -->
+    <section class="stage" aria-label="Card preview">
+      <div class="stage-card" [class.is-generating]="isGenerating">
+        <app-card-preview [card]="currentCard" *ngIf="!currentCard.cardImageUrl"></app-card-preview>
 
-  <!-- Status messages -->
-  <div class="status-container">
-    <!-- Success message -->
-    <div *ngIf="successMessage" class="status-message success">
-      <div class="message-content">
-        <span class="material-icons">check_circle</span>
-        <p>{{ successMessage }}</p>
-      </div>
-      <button class="close-button" (click)="clearSuccessMessage()">×</button>
-    </div>
-
-    <!-- Error messages -->
-    <div *ngIf="error" class="status-message error">
-      <div class="message-content">
-        <span class="material-icons">error</span>
-        <div>
-          <p>{{ error }}</p>
+        <div class="complete-card-display"
+             *ngIf="currentCard.cardImageUrl || cardExiting"
+             [class.card-exit-animation]="cardExiting">
+          <img [src]="currentCard.cardImageUrl | media | async"
+               [alt]="currentCard.name || 'Your generated card'"
+               class="complete-card-image">
         </div>
-      </div>
-      <button class="close-button" (click)="clearError()">×</button>
-    </div>
-  </div>
 
-  <div class="card-preview-section">
-    <!-- Loading overlay for the card preview -->
-    <div *ngIf="isGenerating" class="loading-overlay">
-      <div class="generation-progress">
-        <div class="progress-content">
-          <div class="progress-icon">
+        <!-- Generation progress, laid over the preview -->
+        <div *ngIf="isGenerating" class="loading-overlay" role="status" aria-live="polite">
+          <div class="progress-icon" aria-hidden="true">
             <span class="material-icons">auto_awesome</span>
           </div>
 
-          <div class="progress-text" [class.fade-in]="messageVisible" [class.fade-out]="!messageVisible">
-            <h3>{{ currentMessage.title }}</h3>
-          </div>
+          <h3 class="progress-title" [class.fade-in]="messageVisible" [class.fade-out]="!messageVisible">
+            {{ currentMessage.title }}
+          </h3>
 
-          <!-- Queue position and ETA replace the old fake progress bar -->
           <div class="job-status" *ngIf="jobView as job">
             <div class="job-line">{{ jobStatusLine(job) }}</div>
             <div class="job-checklist" *ngIf="job.status === 'generating' || job.status === 'rendering'">
               <span [class.ready]="job.textReady">
-                <span class="material-icons">{{ job.textReady ? 'check_circle' : 'radio_button_unchecked' }}</span>
+                <span class="material-icons" aria-hidden="true">{{ job.textReady ? 'check_circle' : 'radio_button_unchecked' }}</span>
                 Rules text
               </span>
               <span [class.ready]="job.artReady">
-                <span class="material-icons">{{ job.artReady ? 'check_circle' : 'radio_button_unchecked' }}</span>
+                <span class="material-icons" aria-hidden="true">{{ job.artReady ? 'check_circle' : 'radio_button_unchecked' }}</span>
                 Artwork
               </span>
             </div>
@@ -77,47 +52,50 @@
             <div class="job-line">Sending to the server…</div>
           </div>
 
-          <div class="progress-time">
-            <small>You can leave this page &mdash; finished cards are saved to your Gallery.</small>
-          </div>
+          <p class="progress-note">You can leave this page &mdash; finished cards are saved to your Gallery.</p>
         </div>
       </div>
-    </div>
 
-    <!-- Blueprint-style preview: only show when complete card is not available -->
-    <app-card-preview [card]="currentCard" *ngIf="!currentCard.cardImageUrl"></app-card-preview>
+      <div class="download-section">
+        <button type="button"
+                class="btn btn-ghost btn-sm download-button"
+                (click)="downloadCardImage()"
+                [disabled]="!currentCard.imageUrl">
+          <span class="material-icons" aria-hidden="true">image</span>
+          Download artwork
+        </button>
+        <button type="button"
+                *ngIf="currentCard.cardImageUrl"
+                class="btn btn-gold btn-sm download-button complete-card-download"
+                (click)="downloadCompleteCard()">
+          <span class="material-icons" aria-hidden="true">download</span>
+          Download card
+        </button>
+      </div>
+    </section>
 
-    <!-- Complete card image displayed automatically underneath preview -->
-    <div class="complete-card-display"
-         *ngIf="currentCard.cardImageUrl || cardExiting"
-         [class.card-exit-animation]="cardExiting">
-      <img [src]="currentCard.cardImageUrl | media | async" alt="Complete Magic Card" class="complete-card-image">
-    </div>
+    <section class="panel form-panel" aria-labelledby="create-title">
+      <h2 class="page-title" id="create-title">Create a card</h2>
+      <p class="muted intro">Pick a cost, a type and a rarity. The AI writes the rules text and paints the art.</p>
+      <app-card-form
+        [modelsReady]="modelsReady"
+        (cardChange)="updateCard($event)"
+        (generateCard)="generateCard($event)"></app-card-form>
+    </section>
+  </div>
+</div>
 
-    <!-- Download buttons -->
-    <div class="download-section">
-      <button
-        (click)="downloadCardImage()"
-        [disabled]="!currentCard.imageUrl"
-        class="download-button">
-        <span class="material-icons">download</span>
-        Download Artwork
-      </button>
-      <button
-        *ngIf="currentCard.cardImageUrl"
-        (click)="downloadCompleteCard()"
-        class="download-button complete-card-download">
-        <span class="material-icons">download</span>
-        Download Complete Card
-      </button>
-    </div>
-
+<!-- Toasts -->
+<div class="status-container" aria-live="polite">
+  <div *ngIf="successMessage" class="alert alert-success toast">
+    <span class="material-icons" aria-hidden="true">check_circle</span>
+    <span>{{ successMessage }}</span>
+    <button type="button" class="alert-close" (click)="clearSuccessMessage()" aria-label="Dismiss">×</button>
   </div>
 
-  <div class="card-form-section">
-    <app-card-form
-      [modelsReady]="modelsReady"
-      (cardChange)="updateCard($event)"
-      (generateCard)="generateCard($event)"></app-card-form>
+  <div *ngIf="error" class="alert alert-error toast" role="alert">
+    <span class="material-icons" aria-hidden="true">error</span>
+    <span>{{ error }}</span>
+    <button type="button" class="alert-close" (click)="clearError()" aria-label="Dismiss">×</button>
   </div>
-</main>
+</div>

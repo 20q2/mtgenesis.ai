@@ -21,11 +21,15 @@ import config
 MAX_PROMPT_TOKENS = 75       # CLIP's 77 minus the start/end tokens
 SUBJECT_MIN_TOKENS = 30      # the subject always keeps at least this much room
 
-STYLE_SUFFIX = "painterly Magic: The Gathering fantasy illustration, dramatic lighting, highly detailed"
+# DreamShaper leans photoreal, and at IMAGE_GUIDANCE 2.0 style words only steer weakly, so
+# the style sits right after the subject (CLIP weights early tokens most) and names a
+# painted/digital-art look. No "highly detailed": it pulls toward photographic realism.
+ART_STYLE = "digital fantasy painting, painterly concept art, Magic: The Gathering card art, dramatic lighting"
 # Spec §6 list, plus nsfw/nudity: SDXL has no safety checker and DreamShaper drifts toward
-# nudity on humanoid subjects (seen on a sphinx in the comparison run).
-NEGATIVE_PROMPT = ("text, letters, watermark, signature, border, frame, card, UI, "
-                   "blurry, lowres, deformed, extra limbs, nsfw, nudity")
+# nudity on humanoid subjects (seen on a sphinx in the comparison run). The photo terms push
+# away from hyperrealism; "render" is deliberately absent, since digital renders look right.
+NEGATIVE_PROMPT = ("photograph, photorealistic, hyperrealistic, text, letters, watermark, signature, "
+                   "border, frame, card, UI, blurry, lowres, deformed, extra limbs, nsfw, nudity")
 GENERIC_CONTEXT = "magical fantasy scene"
 
 WUBRG = "WUBRG"
@@ -201,10 +205,10 @@ def _trim_to_tokens(text: str, max_tokens: int) -> str:
 def build_art_prompt(prompt: str, card_data: dict | None) -> tuple[str, str]:
     """(positive prompt of at most 75 CLIP tokens, subject first; negative prompt).
 
-    The positive prompt is ordered: subject, type context, color mood and palette,
-    style suffix. When the budget is tight the subject is trimmed (keeping its first
-    words, never below SUBJECT_MIN_TOKENS), then the palette, type context and style
-    are dropped in that order.
+    The positive prompt is ordered: subject, art style, type context, color mood and
+    palette. When the budget is tight the subject is trimmed (keeping its first words,
+    never below SUBJECT_MIN_TOKENS), then the palette, type context and style are
+    dropped in that order.
     """
     subject = " ".join(str(prompt or "").split()).strip(" ,;")
     if not subject:
@@ -212,7 +216,7 @@ def build_art_prompt(prompt: str, card_data: dict | None) -> tuple[str, str]:
 
     type_context = _type_context(card_data)
     color_part = _color_part(card_data)
-    tail = [p for p in (type_context, color_part, STYLE_SUFFIX) if p]
+    tail = [p for p in (ART_STYLE, type_context, color_part) if p]
 
     def tail_tokens(parts: list[str]) -> int:
         return sum(estimate_tokens(p) + 1 for p in parts)  # +1 for the joining comma
@@ -220,7 +224,7 @@ def build_art_prompt(prompt: str, card_data: dict | None) -> tuple[str, str]:
     subject = _trim_to_tokens(subject, max(MAX_PROMPT_TOKENS - tail_tokens(tail), SUBJECT_MIN_TOKENS))
 
     # Drop lowest-priority tail parts until everything fits.
-    for part in [p for p in (color_part, type_context, STYLE_SUFFIX) if p]:
+    for part in [p for p in (color_part, type_context, ART_STYLE) if p]:
         if estimate_tokens(subject) + tail_tokens(tail) <= MAX_PROMPT_TOKENS:
             break
         tail.remove(part)

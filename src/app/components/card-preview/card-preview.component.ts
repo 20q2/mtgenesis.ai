@@ -19,8 +19,6 @@ export class CardPreviewComponent {
     description: 'Card text appears here'
   };
 
-  // Default placeholder image - using a data URL to avoid external requests
-  placeholderImage = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjY1IiBoZWlnaHQ9IjM3MCIgdmlld0JveD0iMCAwIDI2NSAzNzAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIyNjUiIGhlaWdodD0iMzcwIiBmaWxsPSIjMmEyYTJhIi8+Cjx0ZXh0IHg9IjUwJSIgeT0iNDUlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmZmIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiPkNhcmQgQXJ0PC90ZXh0Pgo8dGV4dCB4PSI1MCUiIHk9IjU1JSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZmZiIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIj5XaWxsIEFwcGVhciBIZXJlPC90ZXh0Pgo8L3N2Zz4K';
 
   constructor(private manaService: ManaService) {}
 

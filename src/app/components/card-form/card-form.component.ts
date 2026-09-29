@@ -305,6 +305,11 @@ export class CardFormComponent implements OnInit {
     }
   }
 
+  /** True when the named control holds exactly this value (drives the chips' pressed state). */
+  isSelected(control: string, value: string): boolean {
+    return this.cardForm.get(control)?.value === value;
+  }
+
   setRarity(rarity: Rarity): void {
     this.cardForm.get('rarity')?.setValue(rarity);
     this.cardForm.get('rarity')?.markAsDirty();

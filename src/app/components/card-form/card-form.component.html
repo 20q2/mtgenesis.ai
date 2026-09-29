@@ -1,188 +1,163 @@
-<div class="card-form-container">
-  <form [formGroup]="cardForm" (ngSubmit)="onSubmit()" class="card-form">
-    <div class="form-content">
-      <!-- Card Name -->
-      <div class="form-group" *ngIf="showName">
-        <div class="custom-form-field">
-          <label for="name">Card Name</label>
-          <input 
-            id="name"
-            type="text"
-            formControlName="name" 
-            placeholder="Enter card name"
-            maxlength="30"
-            class="form-input"
-            [class.invalid]="cardForm.get('name')?.invalid && cardForm.get('name')?.touched">
-          <div class="error-message" *ngIf="cardForm.get('name')?.errors?.['maxlength'] && cardForm.get('name')?.touched">Card name must be 30 characters or less</div>
-        </div>
-      </div>
-
-      <!-- Mana Cost -->
-      <div class="form-group full-width">
-        <div class="custom-form-field">
-          <label for="manaCost">Mana Cost</label>
-          <input 
-            id="manaCost"
-            type="text"
-            formControlName="manaCost" 
-            placeholder="{1}{W}{U} or {X}"
-            class="form-input"
-            [class.invalid]="false"
-            (input)="onManaCostChange()"
-            (blur)="reorderManaCost()">
-        </div>
-        <div class="mana-symbols">
-          <button 
-            type="button" 
-            *ngFor="let symbol of manaSymbols" 
-            class="mana-symbol-btn"
-            (click)="insertManaSymbol(symbol.symbol)"
-            [title]="symbol.description"
-            [style.background]="symbol.color"
-            [style.color]="symbol.textColor">
-            <i class="ms ms-{{getSymbolClass(symbol.symbol)}} mana-icon"></i>
-          </button>
-          <button type="button" class="clear-btn" (click)="clearManaCost()" title="Clear">Clear</button>
-        </div>
-      </div>
-
-      <!-- Supertype -->
-      <div class="form-group full-width">
-        <div class="custom-form-field">
-          <label for="supertype">Supertype (Optional)</label>
-          <input 
-            id="supertype"
-            type="text"
-            formControlName="supertype" 
-            placeholder="Legendary, Basic, Snow, etc."
-            class="form-input">
-        </div>
-        <div class="supertype-suggestions">
-          <button 
-            type="button" 
-            mat-stroked-button
-            *ngFor="let supertype of supertypeOptions" 
-            class="suggestion-btn"
-            (click)="selectSupertype(supertype.value)">
-            <span class="type-icon">{{supertype.icon}}</span>
-            {{supertype.label}}
-          </button>
-        </div>
-      </div>
-
-      <!-- Card Type -->
-      <div class="form-group full-width">
-        <div class="custom-form-field">
-          <label for="type">Card Type</label>
-          <input 
-            id="type"
-            type="text"
-            formControlName="type" 
-            placeholder="Creature, Instant, Sorcery, etc."
-            maxlength="50"
-            class="form-input"
-            [class.invalid]="cardForm.get('type')?.invalid && cardForm.get('type')?.touched">
-          <div class="error-message" *ngIf="cardForm.get('type')?.errors?.['maxlength'] && cardForm.get('type')?.touched">Card type must be 50 characters or less</div>
-        </div>
-        <div class="type-suggestions">
-          <button 
-            type="button" 
-            mat-stroked-button
-            *ngFor="let type of cardTypeOptions" 
-            class="suggestion-btn"
-            (click)="selectCardType(type.value)">
-            <span class="type-icon">{{type.icon}}</span>
-            {{type.label}}
-          </button>
-        </div>
-      </div>
-
-      <!-- Subtype -->
-      <div class="form-group" *ngIf="filteredSubtypes.length > 0">
-        <div class="custom-form-field">
-          <label for="subtype">Subtype</label>
-          <input 
-            id="subtype"
-            type="text"
-            formControlName="subtype" 
-            placeholder="Human, Wizard, Equipment, etc."
-            class="form-input">
-        </div>
-        <div class="subtype-suggestions">
-          <button 
-            type="button" 
-            mat-stroked-button
-            *ngFor="let subtype of filteredSubtypes" 
-            class="suggestion-btn"
-            (click)="selectSubtype(subtype)">
-            {{subtype}}
-          </button>
-        </div>
-      </div>
-
-      <!-- Power/Toughness (for creatures) -->
-      <div class="form-group creature-stats" *ngIf="showPowerToughness">
-        <div class="custom-form-field">
-          <label for="powerToughness">Power/Toughness</label>
-          <input 
-            id="powerToughness"
-            type="text"
-            formControlName="powerToughness" 
-            placeholder="2/3 or */X"
-            class="form-input creature-stats-input"
-            [class.invalid]="isFieldInvalid('power') || isFieldInvalid('toughness')"
-            (input)="onPowerToughnessChange()">
-        </div>
-      </div>
-
-      <!-- Rarity -->
-      <div class="form-group full-width">
-        <label>Rarity</label>
-        <mat-button-toggle-group 
-          formControlName="rarity" 
-          aria-label="Card Rarity"
-          class="rarity-toggle-group">
-          <mat-button-toggle 
-            *ngFor="let rarity of rarityOptions" 
-            [value]="rarity.value"
-            [class]="'rarity-' + rarity.value.toLowerCase()">
-            <span class="rarity-icon">{{rarity.icon}}</span>
-            {{rarity.label}}
-          </mat-button-toggle>
-        </mat-button-toggle-group>
-      </div>
-
+<form [formGroup]="cardForm" (ngSubmit)="onSubmit()" class="card-form">
+  <!-- Name + mana cost: the card's header line -->
+  <div class="form-row">
+    <div class="field" *ngIf="showName">
+      <label for="name" class="field-label">Card name</label>
+      <input id="name"
+             type="text"
+             formControlName="name"
+             placeholder="Enter card name"
+             maxlength="30"
+             autocomplete="off"
+             class="night-input name-input"
+             [class.invalid]="cardForm.get('name')?.invalid && cardForm.get('name')?.touched">
+      <span class="field-error" *ngIf="cardForm.get('name')?.errors?.['maxlength'] && cardForm.get('name')?.touched">Card name must be 30 characters or less</span>
     </div>
 
-    <!-- Submit Button -->
-    <div class="form-actions flex-space-between">
-      <div class="generation-time-note" *ngIf="lastGenerationTime !== null">
-        Last generation took {{lastGenerationTime.toFixed(1)}}s
-      </div>
-      <div class="form-action-buttons">
-        <button type="button" mat-stroked-button (click)="clearForm()" class="clear-form-btn" [disabled]="isGenerating">
-          Clear Form
+    <div class="field">
+      <label for="manaCost" class="field-label">Mana cost</label>
+      <input id="manaCost"
+             type="text"
+             formControlName="manaCost"
+             placeholder="{1}{W}{U} or {X}"
+             autocomplete="off"
+             spellcheck="false"
+             class="night-input mana-input"
+             (input)="onManaCostChange()"
+             (blur)="reorderManaCost()">
+      <div class="mana-symbols" role="group" aria-label="Add mana symbols">
+        <button type="button"
+                *ngFor="let symbol of manaSymbols"
+                class="pip-btn"
+                (click)="insertManaSymbol(symbol.symbol)"
+                [title]="symbol.description"
+                [attr.aria-label]="'Add ' + symbol.description">
+          <i class="ms ms-{{getSymbolClass(symbol.symbol)}} ms-cost" aria-hidden="true"></i>
         </button>
-        <button *ngIf="showGenerate" type="submit" mat-raised-button color="primary" [disabled]="isGenerating || !modelsReady">
-          <span *ngIf="!isGenerating && modelsReady">Generate Card</span>
-          <span *ngIf="!isGenerating && !modelsReady">Server Offline</span>
-          <span *ngIf="isGenerating">
-            <mat-spinner diameter="20" style="display: inline-block; margin-right: 8px;"></mat-spinner>
-            Generating...
-          </span>
-        </button>
-        <button 
-          type="button" 
-          mat-stroked-button 
-          color="accent" 
-          (click)="onRegenerateText()" 
-          class="regenerate-text-btn"
-          [disabled]="isGenerating"
-          *ngIf="shouldShowRegenerateButton()">
-          Regenerate Text
+        <button type="button" class="chip clear-btn" (click)="clearManaCost()">
+          <span class="material-icons" aria-hidden="true">backspace</span>
+          Clear
         </button>
       </div>
     </div>
-  </form>
-</div>
+  </div>
 
+  <!-- Type line -->
+  <div class="field">
+    <label for="supertype" class="field-label">Supertype <span class="optional">optional</span></label>
+    <input id="supertype"
+           type="text"
+           formControlName="supertype"
+           placeholder="Legendary, Basic, Snow, etc."
+           autocomplete="off"
+           class="night-input">
+    <div class="chips">
+      <button type="button"
+              *ngFor="let supertype of supertypeOptions"
+              class="chip"
+              [attr.aria-pressed]="isSelected('supertype', supertype.value)"
+              (click)="selectSupertype(supertype.value)">
+        {{ supertype.label }}
+      </button>
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="type" class="field-label">Card type</label>
+    <input id="type"
+           type="text"
+           formControlName="type"
+           placeholder="Creature, Instant, Sorcery, etc."
+           maxlength="50"
+           autocomplete="off"
+           class="night-input"
+           [class.invalid]="cardForm.get('type')?.invalid && cardForm.get('type')?.touched">
+    <span class="field-error" *ngIf="cardForm.get('type')?.errors?.['maxlength'] && cardForm.get('type')?.touched">Card type must be 50 characters or less</span>
+    <div class="chips">
+      <button type="button"
+              *ngFor="let type of cardTypeOptions"
+              class="chip"
+              [attr.aria-pressed]="isSelected('type', type.value)"
+              (click)="selectCardType(type.value)">
+        <i *ngFor="let icon of type.icons" class="ms {{ icon }}" aria-hidden="true"></i>
+        {{ type.label }}
+      </button>
+    </div>
+  </div>
+
+  <div class="form-row">
+    <div class="field" *ngIf="filteredSubtypes.length > 0">
+      <label for="subtype" class="field-label">Subtype</label>
+      <input id="subtype"
+             type="text"
+             formControlName="subtype"
+             placeholder="Human, Wizard, Equipment, etc."
+             autocomplete="off"
+             class="night-input">
+      <div class="chips">
+        <button type="button"
+                *ngFor="let subtype of filteredSubtypes"
+                class="chip chip-sm"
+                [attr.aria-pressed]="isSelected('subtype', subtype)"
+                (click)="selectSubtype(subtype)">
+          {{ subtype }}
+        </button>
+      </div>
+    </div>
+
+    <div class="field pt-field" *ngIf="showPowerToughness">
+      <label for="powerToughness" class="field-label">Power / toughness</label>
+      <input id="powerToughness"
+             type="text"
+             formControlName="powerToughness"
+             placeholder="2/3 or */X"
+             autocomplete="off"
+             class="night-input pt-input"
+             [class.invalid]="isFieldInvalid('power') || isFieldInvalid('toughness')"
+             (input)="onPowerToughnessChange()">
+    </div>
+  </div>
+
+  <!-- Rarity -->
+  <div class="field">
+    <span class="field-label" id="rarity-label">Rarity</span>
+    <div class="rarity-group" role="radiogroup" aria-labelledby="rarity-label">
+      <label *ngFor="let rarity of rarityOptions" class="rarity-option rarity-{{ rarity.value.toLowerCase() }}">
+        <input type="radio" class="sr-only" formControlName="rarity" [value]="rarity.value">
+        <span class="gem" aria-hidden="true"></span>
+        {{ rarity.label }}
+      </label>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="form-actions" [class.sticky-actions]="showGenerate">
+    <span class="generation-time-note" *ngIf="lastGenerationTime !== null">
+      Last card took {{ lastGenerationTime.toFixed(1) }}s
+    </span>
+    <div class="action-buttons">
+      <button type="button" class="btn btn-ghost clear-form-btn" (click)="clearForm()" [disabled]="isGenerating">
+        <span class="material-icons" aria-hidden="true">restart_alt</span>
+        Clear form
+      </button>
+      <button type="button"
+              class="btn btn-ghost regenerate-text-btn"
+              (click)="onRegenerateText()"
+              [disabled]="isGenerating"
+              *ngIf="shouldShowRegenerateButton()">
+        <span class="material-icons" aria-hidden="true">refresh</span>
+        Regenerate text
+      </button>
+      <button *ngIf="showGenerate" type="submit" class="btn btn-gold generate-btn" [disabled]="isGenerating || !modelsReady">
+        <ng-container *ngIf="isGenerating; else idleLabel">
+          <mat-spinner diameter="18" aria-hidden="true"></mat-spinner>
+          Generating…
+        </ng-container>
+        <ng-template #idleLabel>
+          <span class="material-icons" aria-hidden="true">{{ modelsReady ? 'auto_awesome' : 'cloud_off' }}</span>
+          {{ modelsReady ? 'Generate card' : 'Server offline' }}
+        </ng-template>
+      </button>
+    </div>
+  </div>
+</form>

@@ -1,29 +1,47 @@
 .login-page {
   display: flex;
   justify-content: center;
-  padding-top: 2rem;
+  padding-top: clamp(1rem, 6vh, 4rem);
 }
 
 .login-panel {
   width: 100%;
-  max-width: 440px;
+  max-width: 460px;
   text-align: center;
+  padding: 2rem 1.75rem 1.75rem;
+}
+
+.login-logo {
+  display: block;
+  width: 88px;
+  height: 88px;
+  margin: -0.5rem auto 0.75rem;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 18px rgba(95, 176, 230, 0.45));
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.tagline {
+  font-family: var(--font-caps);
+  color: var(--text);
+  margin-bottom: 0.6rem;
 }
 
 .login-form {
   display: flex;
   gap: 0.5rem;
-  margin-top: 1rem;
+  margin-top: 1.25rem;
+
+  .night-input {
+    flex: 1;
+  }
 
   @media (max-width: 420px) {
     flex-direction: column;
   }
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
 }

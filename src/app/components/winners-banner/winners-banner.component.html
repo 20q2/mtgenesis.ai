@@ -1,5 +1,5 @@
 <section class="winners-banner">
-  <h3 class="winners-title"><span aria-hidden="true">🏆</span> {{ title }}</h3>
+  <h3 class="winners-title"><span class="material-icons" aria-hidden="true">emoji_events</span> {{ title }}</h3>
   <p *ngIf="!sets.length" class="muted">No sets were locked in.</p>
   <ul class="winners-list">
     <li *ngFor="let set of sets; trackBy: trackSet" class="winner-item" [ngClass]="'outcome-' + outcome(set).kind">

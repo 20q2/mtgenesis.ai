@@ -17,7 +17,7 @@
     <!-- Form: commander name, card details, Generate -->
     <section class="panel form-panel">
       <div class="commander-field">
-        <label for="commanderName" class="section-title">Commander name</label>
+        <label for="commanderName" class="field-label">Commander name</label>
         <input id="commanderName"
                class="night-input"
                type="text"
@@ -43,7 +43,7 @@
 
       <div class="generate-row">
         <button type="button"
-                class="btn btn-primary generate-set"
+                class="btn btn-gold generate-set"
                 [disabled]="!canGenerate()"
                 (click)="generate()">
           <span class="material-icons">auto_awesome</span>

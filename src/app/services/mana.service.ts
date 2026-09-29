@@ -24,7 +24,7 @@ export class ManaService {
     return symbols.map(symbol => {
       // Remove the braces to get the symbol content
       const symbolContent = symbol.slice(1, -1).toLowerCase();
-      return `<i class="ms ms-${symbolContent}"></i>`;
+      return `<i class="ms ms-${symbolContent} ms-cost"></i>`;
     }).join('');
   }
 

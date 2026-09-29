@@ -1,0 +1,44 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/pages/create-page/create-page.component.html"
+        ],
+        "createdAt": "2026-09-29T15:25:38.448Z",
+        "reason": "Claude verified: img src is set by an Angular [src] property binding (media pipe), which the static scanner cannot see"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/components/card-preview/card-preview.component.html"
+        ],
+        "createdAt": "2026-09-29T15:26:30.539Z",
+        "reason": "Claude verified: img is rendered only when card.imageUrl is set, via an Angular [src] binding the static scanner cannot see"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/components/card-slot/card-slot.component.html"
+        ],
+        "createdAt": "2026-09-29T15:26:30.566Z",
+        "reason": "Claude verified: img src comes from an Angular [src] binding through the media pipe"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/components/winners-banner/winners-banner.component.html"
+        ],
+        "createdAt": "2026-09-29T15:26:30.592Z",
+        "reason": "Claude verified: img src comes from an Angular [src] binding through the media pipe"
+      }
+    ]
+  }
+}

@@ -6,15 +6,20 @@ def test_subject_first_and_style():
     assert positive.startswith("a goblin shaman")
     assert "fiery" in positive
     assert "character focus" in positive
-    assert "painterly Magic: The Gathering fantasy illustration, dramatic lighting, highly detailed" in positive
-    # Ordered: subject, type context, color mood and palette, style suffix.
-    assert positive.index("character focus") < positive.index("fiery") < positive.index("painterly")
+    assert "digital fantasy painting, painterly concept art" in positive
+    assert "highly detailed" not in positive
+    # Ordered: subject, art style, type context, color mood and palette.
+    assert positive.index("painterly") < positive.index("character focus") < positive.index("fiery")
 
 
 def test_negative_prompt():
     _, negative = build_art_prompt("a goblin shaman", {"colors": ["R"], "type": "Creature"})
-    for word in ("text", "watermark", "border", "frame", "blurry", "nsfw", "nudity"):
+    for word in ("text", "watermark", "border", "frame", "blurry", "nsfw", "nudity",
+                 "photograph", "photorealistic", "hyperrealistic"):
         assert word in negative
+    # Digital renders are a wanted look, so they must not be pushed away.
+    assert "render" not in negative
+    assert estimate_tokens(negative) <= 75
 
 
 def test_token_limit():

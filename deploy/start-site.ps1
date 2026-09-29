@@ -238,7 +238,7 @@ function Start-Tunnel {
     } else {
         $ngrok = Initialize-Ngrok
         $ngrokArgs = "http $BackendPort"
-        if ($NgrokDomain) { $ngrokArgs += " --domain=$NgrokDomain" }
+        if ($NgrokDomain) { $ngrokArgs += ' --url=https://' + ($NgrokDomain -replace '^https?://', '').TrimEnd('/') }
         $proc = Start-Window 'MTGenesis tunnel' $ngrok $ngrokArgs $RepoRoot
         $url = Wait-For 'the tunnel' { Get-TunnelUrl } 60 { Test-ChildRunning $proc 'ngrok.exe' }
         if (-not $url) {

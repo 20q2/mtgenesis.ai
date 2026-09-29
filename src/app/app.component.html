@@ -1,43 +1,54 @@
-<header class="app-header">
-  <div class="header-content">
-    <img src="assets/site_logo.png" alt="MTGenesis.AI Logo" class="site-logo">
-    <div class="header-text">
-      <h1>{{ title }}</h1>
-      <p>Create custom Magic: The Gathering cards with AI</p>
+<header class="nav-bar">
+  <a class="brand" routerLink="/" aria-label="MTGenesis.AI home">
+    <img src="assets/site_logo.png" alt="" class="brand-logo" width="40" height="40">
+    <h1 class="brand-name">MTGenesis<span class="brand-tld">.AI</span></h1>
+  </a>
+
+  <ng-container *ngIf="user$ | async as user">
+    <nav class="nav-links" aria-label="Main">
+      <a *ngFor="let link of navLinks"
+         [routerLink]="link.path"
+         routerLinkActive="active"
+         ariaCurrentWhenActive="page">{{ link.label }}</a>
+    </nav>
+
+    <div class="nav-right">
+      <app-queue-badge></app-queue-badge>
+      <div class="nav-user">
+        <span class="avatar" aria-hidden="true" [title]="user.username">{{ user.username.charAt(0) }}</span>
+        <span class="username">{{ user.username }}</span>
+        <button type="button" class="logout" (click)="logout()" title="Log out">
+          <span class="material-icons" aria-hidden="true">logout</span>
+          <span class="logout-label">Log out</span>
+        </button>
+      </div>
     </div>
-  </div>
+  </ng-container>
 </header>
 
-<mat-toolbar class="nav-bar" *ngIf="user$ | async as user">
-  <nav class="nav-links">
-    <a *ngFor="let link of navLinks"
-       [routerLink]="link.path"
-       routerLinkActive="active">{{ link.label }}</a>
-  </nav>
-  <div class="nav-right">
-    <app-queue-badge></app-queue-badge>
-    <div class="nav-user">
-      <span class="material-icons" aria-hidden="true">person</span>
-      <span class="username">{{ user.username }}</span>
-      <button type="button" class="logout" (click)="logout()">Log out</button>
-    </div>
-  </div>
-</mat-toolbar>
-
-<div class="page-outlet">
+<main class="page-outlet">
   <router-outlet></router-outlet>
-</div>
+</main>
 
 <footer class="app-footer">
-  <div class="footer-content">
-    <img src="assets/site_logo.png" alt="MTGenesis.AI Logo" class="footer-logo">
-    <p>&copy; 2025 MTGenesis.AI - Create custom Magic: The Gathering cards</p>
-    <nav class="footer-links" *ngIf="user$ | async">
-      <a routerLink="/events">Past events</a>
-      <ng-container *ngIf="showHostTools">
-        <span aria-hidden="true">·</span>
-        <a routerLink="/admin">Host tools</a>
-      </ng-container>
-    </nav>
-  </div>
+  <img src="assets/site_logo.png" alt="" class="footer-logo" width="28" height="28">
+  <p>&copy; 2025 MTGenesis.AI &middot; Create custom Magic: The Gathering cards</p>
+  <nav class="footer-links" *ngIf="user$ | async" aria-label="More">
+    <a routerLink="/events">Past events</a>
+    <ng-container *ngIf="showHostTools">
+      <span aria-hidden="true">&middot;</span>
+      <a routerLink="/admin">Host tools</a>
+    </ng-container>
+  </nav>
 </footer>
+
+<!-- Phones: the main destinations live in a thumb-reach tab bar -->
+<nav class="tab-bar" *ngIf="user$ | async" aria-label="Main">
+  <a *ngFor="let link of navLinks"
+     [routerLink]="link.path"
+     routerLinkActive="active"
+     ariaCurrentWhenActive="page">
+    <span class="material-icons" aria-hidden="true">{{ link.icon }}</span>
+    <span class="tab-label">{{ link.short }}</span>
+  </a>
+</nav>

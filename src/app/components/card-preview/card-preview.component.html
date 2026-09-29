@@ -1,29 +1,35 @@
 <div class="card-preview-wrapper">
-  <div class="card-container" [style.background]="getCardBackground()">
-    <div class="card-header">
-      <div class="card-name">{{ card.name || 'Card Name' }}</div>
-      <div class="card-mana" [innerHTML]="getManaSymbolsHtml()"></div>
+  <article class="mtg-card" [style.--frame]="getCardBackground()" aria-label="Card preview">
+    <div class="frame">
+      <header class="title-bar">
+        <span class="card-name" [class.placeholder]="!card.name">{{ card.name || 'Card Name' }}</span>
+        <span class="card-mana" [innerHTML]="getManaSymbolsHtml()"></span>
+      </header>
+
+      <div class="art-box">
+        <img *ngIf="card.imageUrl; else noArt" [src]="card.imageUrl" [alt]="card.name ? 'Art for ' + card.name : 'Card art'">
+        <ng-template #noArt>
+          <div class="art-placeholder">
+            <span class="material-icons" aria-hidden="true">brush</span>
+            <span>Art appears here</span>
+          </div>
+        </ng-template>
+      </div>
+
+      <div class="type-bar">
+        <span class="type-line" [class.placeholder]="!card.type">{{ getFullTypeLine() }}</span>
+        <span class="rarity-gem rarity-{{ (card.rarity || 'common').toLowerCase() }}" aria-hidden="true"></span>
+      </div>
+
+      <div class="text-box">
+        <p [class.placeholder]="!card.description">{{ card.description || 'Generated card text will be here' }}</p>
+      </div>
+
+      <div class="power-toughness" *ngIf="shouldShowPowerToughness()">
+        {{ card.power || '0' }}/{{ card.toughness || '0' }}
+      </div>
+
+      <footer class="card-footer">™ &amp; © 2025 MTGenesis.ai</footer>
     </div>
-    
-    <div class="card-image">
-      <img [src]="card.imageUrl || placeholderImage" alt="Card Image">
-    </div>
-    
-    <div class="card-type-line">
-      {{ getFullTypeLine() }}
-    </div>
-    
-    <div class="card-text-box">
-      <p>{{ card.description || 'Generated card text will be here' }}</p>
-    </div>
-    
-    <!-- Power/Toughness box for creatures -->
-    <div class="power-toughness" *ngIf="shouldShowPowerToughness()">
-      {{ card.power || '0' }}/{{ card.toughness || '0' }}
-    </div>
-    
-    <div class="card-footer">
-      <div class="mtg-copyright">™ & © 2025 MTGenesis.ai</div>
-    </div>
-  </div>
+  </article>
 </div>

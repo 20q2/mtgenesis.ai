@@ -1,6 +1,8 @@
 <div class="page login-page">
   <section class="panel login-panel">
+    <img src="assets/site_logo.png" alt="" class="login-logo" width="88" height="88">
     <h2 class="page-title">Welcome, Planeswalker</h2>
+    <p class="tagline">Create custom Magic: The Gathering cards with AI</p>
     <p class="muted">Pick a username to join AI Night. No password &mdash; just your name.</p>
 
     <form [formGroup]="form" (ngSubmit)="submit()" class="login-form">
@@ -16,13 +18,13 @@
              [attr.aria-invalid]="!!error"
              autofocus>
       <button type="submit" class="btn btn-gold" [disabled]="submitting">
-        <span class="material-icons">login</span>
+        <span class="material-icons" aria-hidden="true">login</span>
         {{ submitting ? 'Entering…' : 'Enter' }}
       </button>
     </form>
 
     <div *ngIf="error" class="alert alert-error" role="alert">
-      <span class="material-icons">error</span>
+      <span class="material-icons" aria-hidden="true">error</span>
       <span>{{ error }}</span>
     </div>
   </section>

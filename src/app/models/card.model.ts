@@ -50,27 +50,28 @@ export const ColorOptions: ColorOption[] = [
 export interface LabeledOption {
   value: string;
   label: string;
-  icon: string;
+  /** mana-font glyph classes (e.g. 'ms-creature'), drawn in order before the label. */
+  icons?: string[];
 }
 
 export const SupertypeOptions: LabeledOption[] = [
-  { value: 'Legendary', label: 'Legendary', icon: '👑' },
-  { value: 'Basic', label: 'Basic', icon: '⛰️' },
-  { value: 'Snow', label: 'Snow', icon: '❄️' },
-  { value: 'World', label: 'World', icon: '🌍' }
+  { value: 'Legendary', label: 'Legendary' },
+  { value: 'Basic', label: 'Basic' },
+  { value: 'Snow', label: 'Snow' },
+  { value: 'World', label: 'World' }
 ];
 
 export const CardTypeOptions: LabeledOption[] = [
-  { value: 'Creature', label: 'Creature', icon: '🐉' },
-  { value: 'Instant', label: 'Instant', icon: '⚡' },
-  { value: 'Sorcery', label: 'Sorcery', icon: '📜' },
-  { value: 'Enchantment', label: 'Enchantment', icon: '✨' },
-  { value: 'Artifact', label: 'Artifact', icon: '⚙️' },
-  { value: 'Artifact Creature', label: 'Artifact Creature', icon: '🤖' },
-  { value: 'Enchantment Creature', label: 'Enchantment Creature', icon: '🦄' },
-  { value: 'Land', label: 'Land', icon: '🏔️' },
-  { value: 'Planeswalker', label: 'Planeswalker', icon: '🧙' },
-  { value: 'Battle', label: 'Battle', icon: '⚔️' }
+  { value: 'Creature', label: 'Creature', icons: ['ms-creature'] },
+  { value: 'Instant', label: 'Instant', icons: ['ms-instant'] },
+  { value: 'Sorcery', label: 'Sorcery', icons: ['ms-sorcery'] },
+  { value: 'Enchantment', label: 'Enchantment', icons: ['ms-enchantment'] },
+  { value: 'Artifact', label: 'Artifact', icons: ['ms-artifact'] },
+  { value: 'Artifact Creature', label: 'Artifact Creature', icons: ['ms-artifact', 'ms-creature'] },
+  { value: 'Enchantment Creature', label: 'Enchantment Creature', icons: ['ms-enchantment', 'ms-creature'] },
+  { value: 'Land', label: 'Land', icons: ['ms-land'] },
+  { value: 'Planeswalker', label: 'Planeswalker', icons: ['ms-planeswalker'] },
+  { value: 'Battle', label: 'Battle', icons: ['ms-battle'] }
 ];
 
 export const CommonSubtypes: Record<string, string[]> = {
@@ -85,10 +86,10 @@ export const CommonSubtypes: Record<string, string[]> = {
 };
 
 export const RarityOptions: LabeledOption[] = [
-  { value: Rarity.COMMON, label: 'Common', icon: '●' },
-  { value: Rarity.UNCOMMON, label: 'Uncommon', icon: '◆' },
-  { value: Rarity.RARE, label: 'Rare', icon: '★' },
-  { value: Rarity.MYTHIC, label: 'Mythic', icon: '✦' }
+  { value: Rarity.COMMON, label: 'Common' },
+  { value: Rarity.UNCOMMON, label: 'Uncommon' },
+  { value: Rarity.RARE, label: 'Rare' },
+  { value: Rarity.MYTHIC, label: 'Mythic' }
 ];
 
 export interface ManaSymbol {

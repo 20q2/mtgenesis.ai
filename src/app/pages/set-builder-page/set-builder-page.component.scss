@@ -9,6 +9,14 @@
   }
 }
 
+/* Wide screens: the versions stay in view while the form scrolls. */
+@media (min-width: 1001px) {
+  .slots-panel {
+    position: sticky;
+    top: calc(var(--topbar-h) + 1rem);
+  }
+}
+
 /* Once a set exists, show the slots first on narrow screens. */
 @media (max-width: 1000px) {
   .has-set .slots-panel {
@@ -18,7 +26,7 @@
 
 .commander-field {
   position: relative;
-  margin-bottom: 1rem;
+  margin-bottom: 1.35rem;
 
   label {
     display: block;
@@ -46,16 +54,45 @@
   }
 }
 
+.form-panel {
+  margin-bottom: 0;
+}
+
+/* The form's own action row ends the card details; Generate follows it, and stays in
+   reach as the reader scrolls the form. */
 .generate-row {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.75rem;
-  margin-top: 1rem;
+  margin: 1rem -1.35rem -1.35rem;
+  padding: 0.9rem 1.35rem;
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(21, 19, 34, 0.75), rgba(21, 19, 34, 0.97) 35%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 
   .generate-set {
     font-size: 1.05rem;
     padding: 0.8rem 1.4rem;
+  }
+
+  @media (max-width: 700px) {
+    margin: 1rem -1rem -1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0 0 var(--r-md) var(--r-md);
+  }
+
+  @media (max-width: 767px) {
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+
+    .generate-set {
+      flex: 1;
+    }
   }
 }
 
