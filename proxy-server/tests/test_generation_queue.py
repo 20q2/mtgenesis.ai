@@ -1,14 +1,12 @@
 """GenerationQueue: two-stage (text + image) card pipeline, spec §5.
 
-Uses an in-memory FakeStorage implementing only the Storage contract methods the
-queue calls (get_card, get_set, update_card, unfinished_card_ids), fake
-text/art/render functions, and start_workers=False so tests drive the workers
-by calling process_next_text / process_next_image directly.
+Runs against the real SQLite Storage (the tmp_storage fixture from conftest.py),
+with fake text/art/render functions and start_workers=False so tests drive the
+workers by calling process_next_text / process_next_image directly.
 """
 import base64
 import copy
 import io
-import threading
 import time
 import uuid
 
@@ -27,59 +25,28 @@ def _png_b64(color="gray", size=(8, 8)):
 ART_B64 = _png_b64("gray")
 CARD_B64 = _png_b64("black")
 
-CARD_UPDATE_FIELDS = {"status", "text_ready", "art_ready", "card", "art_path", "card_path",
-                      "error", "finished_at"}
+DEFAULT_PARAMS = {"name": "Stormwing", "manaCost": "{3}{U}", "colors": ["U"],
+                  "type": "Creature", "rarity": "rare", "cmc": 4}
 
 
-class FakeStorage:
-    """In-memory stand-in for storage.Storage (same signatures and row shapes)."""
+def _user_id(storage):
+    return storage.login("queue-tester")["id"]
 
-    def __init__(self):
-        self.cards = {}
-        self.sets = {}
-        self._lock = threading.Lock()
 
-    # helpers used by the tests only
-    def add_set(self, commander_name):
-        set_id = str(uuid.uuid4())
-        self.sets[set_id] = {"id": set_id, "user_id": "u1", "event_id": None,
-                             "commander_name": commander_name, "prompt": "p",
-                             "card_params": {}, "status": "draft",
-                             "created_at": "2026-09-28T00:00:00+00:00", "locked_at": None}
-        return set_id
+def add_set(storage, commander_name):
+    """A draft commander set owned by the test user; returns its id."""
+    return storage.create_set(_user_id(storage), commander_name, "p", {})["id"]
 
-    def add_card(self, prompt="a storm dragon", card_params=None, set_id=None, slot=None,
-                 status="queued"):
-        card_id = str(uuid.uuid4())
-        params = card_params or {"name": "Stormwing", "manaCost": "{3}{U}", "colors": ["U"],
-                                 "type": "Creature", "rarity": "rare", "cmc": 4}
-        self.cards[card_id] = {"id": card_id, "user_id": "u1", "set_id": set_id, "slot": slot,
-                               "replaced": 0, "prompt": prompt, "card_params": params,
-                               "card": None, "art_path": None, "card_path": None,
-                               "status": status, "text_ready": 0, "art_ready": 0,
-                               "error": None, "created_at": "2026-09-28T00:00:00+00:00",
-                               "finished_at": None}
-        return card_id
 
-    # Storage contract
-    def get_card(self, card_id):
-        with self._lock:
-            return copy.deepcopy(self.cards.get(card_id))
-
-    def get_set(self, set_id):
-        with self._lock:
-            return copy.deepcopy(self.sets.get(set_id))
-
-    def update_card(self, card_id, **fields):
-        unknown = set(fields) - CARD_UPDATE_FIELDS
-        assert not unknown, f"update_card got fields outside the contract: {unknown}"
-        with self._lock:
-            self.cards[card_id].update(copy.deepcopy(fields))
-
-    def unfinished_card_ids(self):
-        with self._lock:
-            return [c["id"] for c in self.cards.values()
-                    if c["status"] in ("queued", "generating", "rendering")]
+def add_card(storage, prompt="a storm dragon", card_params=None, set_id=None, slot=None,
+             status="queued"):
+    """A card owned by the test user, moved to `status` if not 'queued'; returns its id."""
+    card = storage.create_card(_user_id(storage), prompt,
+                               copy.deepcopy(card_params or DEFAULT_PARAMS),
+                               set_id=set_id, slot=slot)
+    if status != "queued":
+        storage.update_card(card["id"], status=status)
+    return card["id"]
 
 
 class Recorder:
@@ -109,8 +76,8 @@ class Recorder:
 
 
 @pytest.fixture
-def storage():
-    return FakeStorage()
+def storage(tmp_storage):
+    return tmp_storage
 
 
 @pytest.fixture
@@ -133,7 +100,7 @@ def _is_png_file(path):
 
 def test_lifecycle(storage, rec, tmp_path):
     q = make_queue(storage, tmp_path, rec)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
 
     q.enqueue(card_id)
     assert storage.get_card(card_id)["status"] == "queued"
@@ -169,7 +136,7 @@ def test_lifecycle(storage, rec, tmp_path):
 
 def test_text_and_art_get_prompt_and_params(storage, rec, tmp_path):
     q = make_queue(storage, tmp_path, rec)
-    card_id = storage.add_card(prompt="a fiery phoenix")
+    card_id = add_card(storage, prompt="a fiery phoenix")
     q.enqueue(card_id)
     q.process_next_text()
     q.process_next_image()
@@ -180,7 +147,7 @@ def test_text_and_art_get_prompt_and_params(storage, rec, tmp_path):
 
 def test_image_first_order(storage, rec, tmp_path):
     q = make_queue(storage, tmp_path, rec)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
     q.enqueue(card_id)
 
     assert q.process_next_image() is True
@@ -201,8 +168,8 @@ def test_image_first_order(storage, rec, tmp_path):
 def test_set_card_forces_commander_name(storage, rec, tmp_path):
     rec.text = '{"name": "Other", "description": "Flying"}'
     q = make_queue(storage, tmp_path, rec)
-    set_id = storage.add_set("Zur'ka, Élan of Ash")
-    card_id = storage.add_card(set_id=set_id, slot=1)
+    set_id = add_set(storage, "Zur'ka, Élan of Ash")
+    card_id = add_card(storage, set_id=set_id, slot=1)
     q.enqueue(card_id)
     q.process_next_text()
     q.process_next_image()
@@ -216,7 +183,7 @@ def test_set_card_forces_commander_name(storage, rec, tmp_path):
 
 def test_free_play_card_has_no_force_name(storage, rec, tmp_path):
     q = make_queue(storage, tmp_path, rec)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
     q.enqueue(card_id)
     q.process_next_text()
     q.process_next_image()
@@ -230,7 +197,7 @@ def test_text_failure_marks_failed(storage, rec, tmp_path):
         raise ConnectionError("ollama down")
 
     q = GenerationQueue(storage, tmp_path, boom, rec.art_fn, rec.render_fn, start_workers=False)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
     q.enqueue(card_id)
 
     assert q.process_next_text() is True
@@ -249,7 +216,7 @@ def test_text_none_marks_failed(storage, rec, tmp_path):
     """app.createCardContent returns None when Ollama errors (it swallows the exception)."""
     rec.text = None
     q = make_queue(storage, tmp_path, rec)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
     q.enqueue(card_id)
     q.process_next_text()
     row = storage.get_card(card_id)
@@ -257,12 +224,28 @@ def test_text_none_marks_failed(storage, rec, tmp_path):
     assert "Text generation failed" in row["error"]
 
 
+@pytest.mark.parametrize("blank", ["", "   \n\t "])
+def test_blank_text_marks_failed(storage, rec, tmp_path, blank):
+    """A blank model reply must fail the card, not render placeholder rules text."""
+    rec.text = blank
+    q = make_queue(storage, tmp_path, rec)
+    card_id = add_card(storage)
+    q.enqueue(card_id)
+    assert q.process_next_text() is True
+    q.process_next_image()
+    row = storage.get_card(card_id)
+    assert row["status"] == "failed"
+    assert "Text generation failed" in row["error"]
+    assert row["text_ready"] == 0
+    assert rec.render_calls == []
+
+
 def test_art_failure_marks_failed(storage, rec, tmp_path):
     def boom(prompt, card_params):
         raise RuntimeError("CUDA out of memory")
 
     q = GenerationQueue(storage, tmp_path, rec.text_fn, boom, rec.render_fn, start_workers=False)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
     q.enqueue(card_id)
 
     assert q.process_next_image() is True
@@ -280,7 +263,7 @@ def test_art_failure_after_text_done(storage, rec, tmp_path):
         raise RuntimeError("CUDA out of memory")
 
     q = GenerationQueue(storage, tmp_path, rec.text_fn, boom, rec.render_fn, start_workers=False)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
     q.enqueue(card_id)
     q.process_next_text()
     q.process_next_image()
@@ -296,7 +279,7 @@ def test_render_failure_marks_failed(storage, rec, tmp_path):
 
     q = GenerationQueue(storage, tmp_path, rec.text_fn, rec.art_fn, bad_render,
                         start_workers=False)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
     q.enqueue(card_id)
     q.process_next_text()
     q.process_next_image()
@@ -308,7 +291,7 @@ def test_render_failure_marks_failed(storage, rec, tmp_path):
 def test_render_returning_no_image_marks_failed(storage, rec, tmp_path):
     q = GenerationQueue(storage, tmp_path, rec.text_fn, rec.art_fn,
                         lambda p, t, a, f: (dict(p), None), start_workers=False)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
     q.enqueue(card_id)
     q.process_next_text()
     q.process_next_image()
@@ -319,7 +302,7 @@ def test_render_returning_no_image_marks_failed(storage, rec, tmp_path):
 
 def test_fifo_order(storage, rec, tmp_path):
     q = make_queue(storage, tmp_path, rec)
-    ids = [storage.add_card(prompt=f"card {i}") for i in range(3)]
+    ids = [add_card(storage, prompt=f"card {i}") for i in range(3)]
     for card_id in ids:
         q.enqueue(card_id)
     while q.process_next_image():
@@ -342,7 +325,7 @@ def test_missing_card_is_skipped(storage, rec, tmp_path):
 def test_background_workers_finish_card(storage, rec, tmp_path):
     q = make_queue(storage, tmp_path, rec, start_workers=True)
     try:
-        card_id = storage.add_card()
+        card_id = add_card(storage)
         q.enqueue(card_id)
         deadline = time.monotonic() + 5
         while storage.get_card(card_id)["status"] != "done" and time.monotonic() < deadline:
@@ -366,7 +349,7 @@ def test_background_workers_many_cards_with_failure(storage, tmp_path):
     rec = Recorder()
     q = GenerationQueue(storage, tmp_path, text_fn, art_fn, rec.render_fn)
     try:
-        ids = [storage.add_card(prompt=f"card {i}") for i in range(8)]
+        ids = [add_card(storage, prompt=f"card {i}") for i in range(8)]
         for card_id in ids:
             q.enqueue(card_id)
         deadline = time.monotonic() + 10
@@ -397,7 +380,7 @@ def test_failure_marked_even_if_logging_breaks(storage, rec, tmp_path, monkeypat
     fns = {"text_fn": rec.text_fn, "art_fn": rec.art_fn, "render_fn": rec.render_fn}
     fns[f"{stage}_fn"] = boom
     q = GenerationQueue(storage, tmp_path, start_workers=False, **fns)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
     q.enqueue(card_id)
     q.process_next_text()
     q.process_next_image()
@@ -428,7 +411,7 @@ def timed_art(t, durations):
 def test_positions_and_eta_default(storage, rec, tmp_path):
     t, clock = fake_clock()
     q = make_queue(storage, tmp_path, rec, clock=clock)
-    ids = [storage.add_card() for _ in range(3)]
+    ids = [add_card(storage) for _ in range(3)]
     for card_id in ids:
         q.enqueue(card_id)
 
@@ -461,7 +444,7 @@ def test_eta_uses_rolling_average(storage, tmp_path):
     q = GenerationQueue(storage, tmp_path, rec.text_fn, art_fn, rec.render_fn,
                         clock=clock, start_workers=False)
     for name in ("first", "second", "x", "next"):
-        ids[name] = storage.add_card(prompt=name)
+        ids[name] = add_card(storage, prompt=name)
         q.enqueue(ids[name])
 
     q.process_next_image()
@@ -491,7 +474,7 @@ def test_remaining_never_negative(storage, tmp_path):
     q = GenerationQueue(storage, tmp_path, rec.text_fn, art_fn, rec.render_fn,
                         clock=clock, start_workers=False)
     for name in ("slow", "next"):
-        ids[name] = storage.add_card(prompt=name)
+        ids[name] = add_card(storage, prompt=name)
         q.enqueue(ids[name])
     q.process_next_image()
     assert seen["slow"] == (0, 0)
@@ -504,7 +487,7 @@ def test_average_window_10(storage, tmp_path):
     q = GenerationQueue(storage, tmp_path, rec.text_fn, timed_art(t, range(1, 13)),
                         rec.render_fn, clock=clock, start_workers=False)
     for _ in range(12):
-        q.enqueue(storage.add_card())
+        q.enqueue(add_card(storage))
     for _ in range(12):
         q.process_next_image()
     # durations 1..12; only the last 10 (3..12) count
@@ -521,7 +504,7 @@ def test_failed_image_not_counted_in_average(storage, tmp_path):
     rec = Recorder()
     q = GenerationQueue(storage, tmp_path, rec.text_fn, art_fn, rec.render_fn,
                         clock=clock, start_workers=False)
-    q.enqueue(storage.add_card())
+    q.enqueue(add_card(storage))
     q.process_next_image()
     status = q.status()
     assert status["avgImageSeconds"] == 10
@@ -530,7 +513,7 @@ def test_failed_image_not_counted_in_average(storage, tmp_path):
 
 def test_position_none_after_art(storage, rec, tmp_path):
     q = make_queue(storage, tmp_path, rec)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
     q.enqueue(card_id)
     q.process_next_image()
     assert storage.get_card(card_id)["text_ready"] == 0
@@ -545,7 +528,7 @@ def test_position_none_after_failure(storage, rec, tmp_path):
         raise ConnectionError("ollama down")
 
     q = GenerationQueue(storage, tmp_path, boom, rec.art_fn, rec.render_fn, start_workers=False)
-    card_id = storage.add_card()
+    card_id = add_card(storage)
     q.enqueue(card_id)
     q.process_next_text()
     assert q.position(card_id) == (None, None)
@@ -563,7 +546,7 @@ def test_status_splits_waiting_and_generating(storage, rec, tmp_path):
     t, clock = fake_clock()
     q = GenerationQueue(storage, tmp_path, rec.text_fn, timed_art(t, [12, 12]), rec.render_fn,
                         clock=clock, start_workers=False)
-    first, second = storage.add_card(), storage.add_card()
+    first, second = add_card(storage), add_card(storage)
     q.enqueue(first)
     q.enqueue(second)
     q.process_next_image()  # first: art done, text pending
@@ -580,9 +563,9 @@ def test_status_splits_waiting_and_generating(storage, rec, tmp_path):
 
 
 def test_recover_on_startup(storage, rec, tmp_path):
-    ids = {status: storage.add_card(status=status)
+    ids = {status: add_card(storage, status=status)
            for status in ("queued", "generating", "rendering", "done", "failed")}
-    storage.cards[ids["done"]]["finished_at"] = "2026-09-28T01:00:00+00:00"
+    storage.update_card(ids["done"], finished_at="2026-09-28T01:00:00+00:00")
     done_before = storage.get_card(ids["done"])
     failed_before = storage.get_card(ids["failed"])
 

@@ -145,6 +145,8 @@ class GenerationQueue:
             if text is None:
                 # app.createCardContent swallows Ollama errors and returns None
                 raise RuntimeError("no rules text was returned (is Ollama running?)")
+            if not text.strip():
+                raise RuntimeError("the text model returned an empty reply")
         except Exception as exc:
             self._fail(card_id, f"Text generation failed: {_error_detail(exc)}")
             _log_exception()
