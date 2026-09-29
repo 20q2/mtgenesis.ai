@@ -1,12 +1,14 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
-import { EMPTY, Observable, Subscription, catchError, exhaustMap, filter, interval } from 'rxjs';
+import { EMPTY, Observable, Subscription, catchError, exhaustMap, filter, timeout } from 'rxjs';
 import { CardView } from '../../models/api.model';
 import { apiErrorMessage, safeFileName } from '../../services/api.util';
 import { isPending } from '../../services/card-status';
-import { GenerationService } from '../../services/generation.service';
+import { GenerationService, isTransientError } from '../../services/generation.service';
 import { MediaService } from '../../services/media.service';
+import { PageVisibilityService } from '../../services/page-visibility.service';
 
 export const GALLERY_POLL_MS = 5000;
+export const GALLERY_REQUEST_TIMEOUT_MS = 15000;
 
 /** /gallery: every card I've generated (spec §7), newest first, with downloads. */
 @Component({
@@ -21,14 +23,24 @@ export class GalleryPageComponent implements OnInit, OnDestroy {
   private loadSub?: Subscription;
   private pollSub?: Subscription;
 
-  constructor(private generation: GenerationService, private media: MediaService) {}
+  constructor(private generation: GenerationService, private media: MediaService,
+              private visibility: PageVisibilityService) {}
 
   ngOnInit(): void {
     this.loadSub = this.fetch().subscribe(cards => this.apply(cards));
-    // Refresh while any card is still being made, so tiles finish on their own.
-    this.pollSub = interval(GALLERY_POLL_MS).pipe(
+    // Refresh while any card is still being made, so tiles finish on their own. Paused
+    // while the page is hidden; a poll unanswered after 15s is dropped and retried.
+    this.pollSub = this.visibility.poll(GALLERY_POLL_MS, GALLERY_POLL_MS).pipe(
       filter(() => this.hasPending()),
-      exhaustMap(() => this.fetch())
+      exhaustMap(() => this.generation.myCards().pipe(
+        timeout(GALLERY_REQUEST_TIMEOUT_MS),
+        catchError(err => {
+          if (!isTransientError(err)) {
+            this.error = apiErrorMessage(err, 'Could not load your cards.');
+          }
+          return EMPTY;
+        })
+      ))
     ).subscribe(cards => this.apply(cards));
   }
 

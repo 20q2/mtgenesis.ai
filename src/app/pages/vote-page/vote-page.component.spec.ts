@@ -9,12 +9,15 @@ import { WinnersBannerComponent } from '../../components/winners-banner/winners-
 import { MediaPipe } from '../../pipes/media.pipe';
 import { EventService } from '../../services/event.service';
 import { MediaService } from '../../services/media.service';
+import { PageVisibilityService } from '../../services/page-visibility.service';
+import { fakeVisibility } from '../../testing/fake-visibility';
 import { eventView, setCard, setView } from '../../testing/fixtures';
-import { VotePageComponent } from './vote-page.component';
+import { VOTE_POLL_MS, VotePageComponent } from './vote-page.component';
 
 describe('VotePageComponent', () => {
   let fixture: ComponentFixture<VotePageComponent>;
   let events: jasmine.SpyObj<EventService>;
+  let visibility: ReturnType<typeof fakeVisibility>;
 
   function setA(overrides: Partial<SetView> = {}): SetView {
     return setView({
@@ -45,12 +48,14 @@ describe('VotePageComponent', () => {
     events.current.and.returnValue(of(current));
     const media = jasmine.createSpyObj<MediaService>('MediaService', ['src']);
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
+    visibility = fakeVisibility();
     TestBed.configureTestingModule({
       imports: [RouterTestingModule],
       declarations: [VotePageComponent, SetRowComponent, WinnersBannerComponent, CardSlotComponent, MediaPipe],
       providers: [
         { provide: EventService, useValue: events },
-        { provide: MediaService, useValue: media }
+        { provide: MediaService, useValue: media },
+        { provide: PageVisibilityService, useValue: visibility }
       ]
     });
     fixture = TestBed.createComponent(VotePageComponent);
@@ -169,18 +174,40 @@ describe('VotePageComponent', () => {
     expect(link).not.toBeNull();
   });
 
-  it('polls every 5s and shows the winners when the event it was showing gets closed', fakeAsync(() => {
+  it('polls every 10s and shows the winners when the event it was showing gets closed', fakeAsync(() => {
+    expect(VOTE_POLL_MS).toBe(10000);
     setup(eventView({ sets: [setA()] }));
     const closed = eventView({ status: 'closed', sets: [setA()] });
     events.current.and.returnValue(of(null));
     events.get.and.returnValue(of(closed));
 
-    tick(5000);
+    tick(9999);
+    expect(events.get).not.toHaveBeenCalled();
+    tick(1);
     fixture.detectChanges();
 
     expect(events.get).toHaveBeenCalledWith('e-1');
     expect(el().querySelector('.winners-banner')).not.toBeNull();
     expect(voteButtons().every(b => b.disabled)).toBeTrue();
+    fixture.destroy();
+  }));
+
+  it('stops polling while the page is hidden and refreshes at once when it is shown', fakeAsync(() => {
+    setup(eventView({ sets: [setA()] }));
+    expect(events.current).toHaveBeenCalledTimes(1);
+
+    visibility.visibleSubject.next(false);
+    tick(60000);
+    expect(events.current).toHaveBeenCalledTimes(1);
+
+    events.current.and.returnValue(of(eventView({ sets: [setA(), setB()] })));
+    visibility.visibleSubject.next(true);
+    expect(events.current).toHaveBeenCalledTimes(2);
+    fixture.detectChanges();
+    expect(el().querySelectorAll('app-set-row').length).toBe(2);
+
+    tick(10000);
+    expect(events.current).toHaveBeenCalledTimes(3);
     fixture.destroy();
   }));
 });

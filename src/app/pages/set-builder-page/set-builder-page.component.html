@@ -23,9 +23,17 @@
                type="text"
                [formControl]="commanderName"
                [maxlength]="maxNameLength"
-               [readonly]="isLocked"
+               [readonly]="nameReadOnly"
                placeholder="e.g. Zur'ka, Élan of Ash">
         <span class="muted counter">{{ commanderName.value.length }}/{{ maxNameLength }}</span>
+      </div>
+      <div class="name-actions" *ngIf="canChangeName">
+        <span class="muted name-hint">
+          {{ renaming ? 'Generate a new set to use the new name.' : 'The name is part of the rendered cards.' }}
+        </span>
+        <button type="button" class="btn btn-ghost change-name" (click)="toggleRename()">
+          {{ renaming ? 'Cancel' : 'Change name' }}
+        </button>
       </div>
 
       <app-card-form [modelsReady]="true"
@@ -49,7 +57,7 @@
     <section class="panel slots-panel">
       <div class="slots-header">
         <h3 class="section-title">
-          {{ setId ? (commanderName.value || 'Your commander') : 'Your 3 versions' }}
+          {{ setId ? (setName || 'Your commander') : 'Your 3 versions' }}
         </h3>
         <span *ngIf="isLocked" class="badge badge-gold locked-badge">
           <span class="material-icons">lock</span> Locked

@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { RouterTestingModule } from '@angular/router/testing';
 import { of } from 'rxjs';
@@ -6,8 +6,10 @@ import { environment } from '../../../environments/environment';
 import { CardSlotComponent } from '../../components/card-slot/card-slot.component';
 import { MediaPipe } from '../../pipes/media.pipe';
 import { MediaService } from '../../services/media.service';
+import { PageVisibilityService } from '../../services/page-visibility.service';
+import { fakeVisibility } from '../../testing/fake-visibility';
 import { cardView, doneCard } from '../../testing/fixtures';
-import { GalleryPageComponent } from './gallery-page.component';
+import { GALLERY_POLL_MS, GALLERY_REQUEST_TIMEOUT_MS, GalleryPageComponent } from './gallery-page.component';
 
 describe('GalleryPageComponent', () => {
   let fixture: ComponentFixture<GalleryPageComponent>;
@@ -21,7 +23,10 @@ describe('GalleryPageComponent', () => {
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, RouterTestingModule],
       declarations: [GalleryPageComponent, CardSlotComponent, MediaPipe],
-      providers: [{ provide: MediaService, useValue: media }]
+      providers: [
+        { provide: MediaService, useValue: media },
+        { provide: PageVisibilityService, useValue: fakeVisibility() }
+      ]
     });
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(GalleryPageComponent);
@@ -77,4 +82,59 @@ describe('GalleryPageComponent', () => {
     fixture.detectChanges();
     expect(el().textContent).toContain('No cards yet');
   });
+});
+
+describe('GalleryPageComponent polling', () => {
+  let fixture: ComponentFixture<GalleryPageComponent>;
+  let http: HttpTestingController;
+  let visibility: ReturnType<typeof fakeVisibility>;
+  const url = `${environment.apiUrl}/api/v1/me/cards`;
+
+  beforeEach(() => {
+    const media = jasmine.createSpyObj<MediaService>('MediaService', ['src', 'download']);
+    media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
+    visibility = fakeVisibility();
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule, RouterTestingModule],
+      declarations: [GalleryPageComponent, CardSlotComponent, MediaPipe],
+      providers: [
+        { provide: MediaService, useValue: media },
+        { provide: PageVisibilityService, useValue: visibility }
+      ]
+    });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  function start(): void {
+    fixture = TestBed.createComponent(GalleryPageComponent);
+    fixture.detectChanges();
+    http.expectOne(url).flush([cardView({ id: 'p1', status: 'queued' })]);
+  }
+
+  it('drops a poll with no answer after 15s and keeps polling', fakeAsync(() => {
+    expect(GALLERY_REQUEST_TIMEOUT_MS).toBe(15000);
+    start();
+    tick(GALLERY_POLL_MS);
+    const hung = http.expectOne(url);
+    tick(GALLERY_REQUEST_TIMEOUT_MS);
+    expect(hung.cancelled).toBeTrue();
+    expect(fixture.componentInstance.error).toBeNull();
+
+    tick(GALLERY_POLL_MS);   // the next poll after the timeout
+    http.expectOne(url).flush([doneCard({ id: 'p1' })]);
+    expect(fixture.componentInstance.hasPending()).toBeFalse();
+    fixture.destroy();
+  }));
+
+  it('pauses while the page is hidden and polls at once when it is shown', fakeAsync(() => {
+    start();
+    visibility.visibleSubject.next(false);
+    tick(60000);
+    http.expectNone(url);
+
+    visibility.visibleSubject.next(true);
+    http.expectOne(url).flush([doneCard({ id: 'p1' })]);
+    expect(fixture.componentInstance.hasPending()).toBeFalse();
+    fixture.destroy();
+  }));
 });

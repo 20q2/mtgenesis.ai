@@ -1,20 +1,25 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormControl } from '@angular/forms';
-import { EMPTY, Subscription, catchError, finalize, interval, startWith, switchMap } from 'rxjs';
+import { EMPTY, Subscription, catchError, finalize, switchMap } from 'rxjs';
 import { CardView, EventView, SetView } from '../../models/api.model';
 import { Card } from '../../models/card.model';
 import { apiErrorMessage } from '../../services/api.util';
 import { isFinished, isPending } from '../../services/card-status';
 import { EventService } from '../../services/event.service';
 import { GenerationService } from '../../services/generation.service';
+import { PageVisibilityService } from '../../services/page-visibility.service';
 
 export const COMMANDER_NAME_MAX = 40;
-export const EVENT_POLL_MS = 10000;
+export const EVENT_POLL_MS = 30000;
 export const UNLOCK_CONFIRM = 'This clears votes on your set';
 
 /**
  * /set: build a 3-card commander set, reroll slots, lock it into the open event (spec §7).
  * State comes from GET /me/sets/current, so a refresh loses nothing.
+ *
+ * Once a set exists the commander name is read-only and Lock in sends the set's stored
+ * name, so the name on /vote always matches the name rendered on the three cards.
+ * "Change name" frees the field for the next Generate (which starts a new set).
  */
 @Component({
   selector: 'app-set-builder-page',
@@ -30,6 +35,10 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
 
   setId: string | null = null;
   setStatus: SetView['status'] | null = null;
+  /** The current set's commander name as stored on the server (what its cards show). */
+  setName: string | null = null;
+  /** True after "Change name": the field is editable for the next set. */
+  renaming = false;
   /** Current card per slot (index 0..2 = slot 1..3). */
   slots: (CardView | null)[] = [null, null, null];
   /** The current event (null when none is open). */
@@ -46,7 +55,8 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
   private eventSub?: Subscription;
   private loadSub?: Subscription;
 
-  constructor(private generation: GenerationService, private events: EventService) {}
+  constructor(private generation: GenerationService, private events: EventService,
+              private visibility: PageVisibilityService) {}
 
   ngOnInit(): void {
     this.loadSub = this.events.mySet().subscribe({
@@ -60,9 +70,9 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
       }
     });
 
-    // Keep the event fresh so Lock in enables as soon as the host opens one.
-    this.eventSub = interval(EVENT_POLL_MS).pipe(
-      startWith(0),
+    // Keep the event fresh so Lock in enables soon after the host opens one
+    // (paused while the page is hidden, checked at once when it is shown).
+    this.eventSub = this.visibility.poll(EVENT_POLL_MS).pipe(
       switchMap(() => this.events.current().pipe(catchError(() => EMPTY)))
     ).subscribe(event => (this.event = event));
   }
@@ -75,6 +85,27 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
 
   get isLocked(): boolean {
     return this.setStatus === 'locked';
+  }
+
+  /** The name field is read-only while a set exists, unless "Change name" was pressed. */
+  get nameReadOnly(): boolean {
+    return !!this.setId && !this.renaming;
+  }
+
+  /** "Change name" is offered for a draft (a locked set must be unlocked first). */
+  get canChangeName(): boolean {
+    return !!this.setId && !this.isLocked;
+  }
+
+  /** Toggles "Change name"; cancelling puts the set's name back. */
+  toggleRename(): void {
+    if (!this.canChangeName) {
+      return;
+    }
+    this.renaming = !this.renaming;
+    if (!this.renaming) {
+      this.commanderName.setValue(this.setName ?? '');
+    }
   }
 
   get eventOpen(): boolean {
@@ -138,6 +169,9 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
         this.stopWatches();
         this.setId = response.setId;
         this.setStatus = 'draft';
+        this.setName = name;
+        this.renaming = false;
+        this.commanderName.setValue(name);
         this.slots = [null, null, null];
         for (const view of response.cards) {
           this.placeCard(view);
@@ -180,19 +214,23 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
     if (this.slots.some(s => !s || s.status !== 'done')) {
       return 'Waiting for all 3 cards';
     }
-    if (!this.commanderName.value.trim()) {
+    if (!this.setName) {
       return 'Enter a commander name';
+    }
+    if (this.renaming && this.commanderName.value.trim() !== this.setName) {
+      return 'Generate a new set to use the new name';
     }
     return null;
   }
 
   lock(): void {
-    if (this.locking || this.isLocked || this.lockDisabledReason() || !this.setId) {
+    if (this.locking || this.isLocked || this.lockDisabledReason() || !this.setId || !this.setName) {
       return;
     }
     this.error = null;
     this.locking = true;
-    this.events.lock(this.setId, this.commanderName.value.trim()).pipe(
+    // The stored name, never the field: the cards were rendered with it.
+    this.events.lock(this.setId, this.setName).pipe(
       finalize(() => (this.locking = false))
     ).subscribe({
       next: set => this.applySet(set),
@@ -227,15 +265,18 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
 
   private applySet(set: SetView | null): void {
     this.stopWatches();
+    this.renaming = false;
     if (!set || set.status === 'abandoned') {
       this.setId = null;
       this.setStatus = null;
+      this.setName = null;
       this.slots = [null, null, null];
       return;
     }
     this.setId = set.id;
     this.setStatus = set.status;
-    this.commanderName.setValue(set.commanderName ?? '');
+    this.setName = set.commanderName ?? '';
+    this.commanderName.setValue(this.setName);
     this.slots = [null, null, null];
     for (const view of set.cards ?? []) {
       this.placeCard(view);

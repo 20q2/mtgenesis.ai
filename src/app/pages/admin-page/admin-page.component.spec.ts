@@ -98,6 +98,17 @@ describe('AdminPageComponent', () => {
     expect(text()).toContain('Wrong PIN');
   });
 
+  it('shows the lockout message on a 429 (too many wrong PINs)', () => {
+    setup(null, []);
+    component.pin.setValue('0000');
+    component.eventName.setValue('AI Night #3');
+    component.createEvent();
+    http.expectOne(`${base}/admin/events`).flush(
+      { error: 'Too many wrong PINs - wait a few minutes' }, { status: 429, statusText: 'Too Many Requests' });
+    fixture.detectChanges();
+    expect(text()).toContain('Too many wrong PINs - wait a few minutes');
+  });
+
   it('shows the server text on a 409 (an event is already open)', () => {
     setup(null, []);
     component.pin.setValue('4242');

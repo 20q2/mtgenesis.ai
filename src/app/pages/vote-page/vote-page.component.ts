@@ -1,17 +1,19 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import {
-  EMPTY, Observable, Subject, Subscription, catchError, finalize, interval, of, startWith, switchMap
+  EMPTY, Observable, Subject, Subscription, catchError, finalize, of, startWith, switchMap
 } from 'rxjs';
 import { EventView, SetCardView, SetView } from '../../models/api.model';
 import { apiErrorMessage } from '../../services/api.util';
 import { EventService } from '../../services/event.service';
+import { PageVisibilityService } from '../../services/page-visibility.service';
 
-export const VOTE_POLL_MS = 5000;
+export const VOTE_POLL_MS = 10000;
 
 /**
  * /vote: every locked set in the current event, one vote per set, live counts (spec §7).
- * Polls every 5s. If the event being shown gets closed, it keeps showing that event
+ * Polls every 10s while the page is visible (paused while hidden, refreshed at once
+ * when shown again). If the event being shown gets closed, it keeps showing that event
  * (now with the winners banner) instead of dropping to "No event open".
  */
 @Component({
@@ -31,13 +33,13 @@ export class VotePageComponent implements OnInit, OnDestroy {
   private lastEventId: string | null = null;
   private sub?: Subscription;
 
-  constructor(private events: EventService) {}
+  constructor(private events: EventService, private visibility: PageVisibilityService) {}
 
   ngOnInit(): void {
-    // refresh() restarts the 5s timer with an immediate fetch.
+    // refresh() restarts the poll timer with an immediate fetch.
     this.sub = this.refresh$.pipe(
       startWith(undefined),
-      switchMap(() => interval(VOTE_POLL_MS).pipe(startWith(0))),
+      switchMap(() => this.visibility.poll(VOTE_POLL_MS)),
       switchMap(() => this.load())
     ).subscribe(event => {
       this.event = event;

@@ -7,6 +7,7 @@ import { BehaviorSubject } from 'rxjs';
 import { AppComponent } from './app.component';
 import { User } from './models/api.model';
 import { UserService } from './services/user.service';
+import { ADMIN_PIN_STORAGE_KEY } from './pages/admin-page/admin-page.component';
 
 describe('AppComponent (shell)', () => {
   let fixture: ComponentFixture<AppComponent>;
@@ -14,6 +15,7 @@ describe('AppComponent (shell)', () => {
   let users: jasmine.SpyObj<UserService>;
 
   beforeEach(() => {
+    sessionStorage.removeItem(ADMIN_PIN_STORAGE_KEY);
     user$ = new BehaviorSubject<User | null>({ id: 'u-1', username: 'Alice' });
     users = jasmine.createSpyObj<UserService>('UserService', ['logout', 'currentUser'], { user$ });
     users.logout.and.callFake(() => user$.next(null));
@@ -63,5 +65,20 @@ describe('AppComponent (shell)', () => {
 
   it('renders a router outlet', () => {
     expect(fixture.nativeElement.querySelector('router-outlet')).not.toBeNull();
+  });
+
+  afterEach(() => sessionStorage.removeItem(ADMIN_PIN_STORAGE_KEY));
+
+  it('does not show attendees the Host tools link (the /admin route still works by URL)', () => {
+    const el: HTMLElement = fixture.nativeElement;
+    const links = Array.from(el.querySelectorAll('nav.footer-links a')).map(a => a.textContent!.trim());
+    expect(links).toEqual(['Past events']);
+    expect(el.querySelector('a[href="/admin"]')).toBeNull();
+  });
+
+  it('shows Host tools in a tab that already holds the host PIN', () => {
+    sessionStorage.setItem(ADMIN_PIN_STORAGE_KEY, 'k7#Qm2vX9p');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('nav.footer-links a[href="/admin"]')).not.toBeNull();
   });
 });

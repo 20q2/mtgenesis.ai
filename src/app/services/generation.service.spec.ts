@@ -3,16 +3,23 @@ import { HttpClientTestingModule, HttpTestingController } from '@angular/common/
 import { environment } from '../../environments/environment';
 import { CardView, GenerationRequest } from '../models/api.model';
 import { Card, Rarity } from '../models/card.model';
+import { fakeVisibility } from '../testing/fake-visibility';
 import { cardView, doneCard } from '../testing/fixtures';
-import { GenerationService } from './generation.service';
+import { GenerationService, WATCH_REQUEST_TIMEOUT_MS } from './generation.service';
+import { PageVisibilityService } from './page-visibility.service';
 
 describe('GenerationService', () => {
   let service: GenerationService;
   let http: HttpTestingController;
+  let visibility: ReturnType<typeof fakeVisibility>;
   const base = `${environment.apiUrl}/api/v1`;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [HttpClientTestingModule] });
+    visibility = fakeVisibility();
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [{ provide: PageVisibilityService, useValue: visibility }]
+    });
     service = TestBed.inject(GenerationService);
     http = TestBed.inject(HttpTestingController);
   });
@@ -124,4 +131,39 @@ describe('GenerationService', () => {
     expect(card.cardImageUrl).toBeUndefined();
     expect(card.imageUrl).toBeUndefined();
   });
+
+  it('watch drops a request with no answer after 15s and keeps polling (phone slept, tunnel stalled)', fakeAsync(() => {
+    expect(WATCH_REQUEST_TIMEOUT_MS).toBe(15000);
+    const statuses: string[] = [];
+    let error: unknown;
+    service.watch('c-1').subscribe({ next: v => statuses.push(v.status), error: e => (error = e) });
+
+    tick(2000);
+    const hung = http.expectOne(`${base}/cards/c-1`);
+    tick(14999);
+    expect(hung.cancelled).toBeFalse();
+    tick(1);
+    expect(hung.cancelled).toBeTrue();   // timed out: treated like a network blip
+    expect(error).toBeUndefined();
+
+    tick(1000);                           // the next 2s tick (t=18s) polls again
+    http.expectOne(`${base}/cards/c-1`).flush(doneCard());
+    expect(statuses).toEqual(['done']);
+  }));
+
+  it('watch pauses while the page is hidden and polls at once when it is shown again', fakeAsync(() => {
+    const statuses: string[] = [];
+    const sub = service.watch('c-1').subscribe(v => statuses.push(v.status));
+    tick(2000);
+    http.expectOne(`${base}/cards/c-1`).flush(cardView({ status: 'queued' }));
+
+    visibility.visibleSubject.next(false);
+    tick(60000);
+    http.expectNone(`${base}/cards/c-1`);
+
+    visibility.visibleSubject.next(true);
+    http.expectOne(`${base}/cards/c-1`).flush(doneCard());
+    expect(statuses).toEqual(['queued', 'done']);
+    sub.unsubscribe();
+  }));
 });

@@ -1,17 +1,27 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { EMPTY, Observable, catchError, exhaustMap, takeWhile, throwError, timer } from 'rxjs';
+import {
+  EMPTY, Observable, TimeoutError, catchError, exhaustMap, takeWhile, throwError, timeout
+} from 'rxjs';
 import { CardParams, CardView, GenerationRequest, GenerationResponse } from '../models/api.model';
 import { Card, Rarity } from '../models/card.model';
 import { api, mediaUrl } from './api.util';
 import { isFinished } from './card-status';
+import { PageVisibilityService } from './page-visibility.service';
 
 export const WATCH_INTERVAL_MS = 2000;
+export const WATCH_REQUEST_TIMEOUT_MS = 15000;
+
+/** A poll failure worth retrying: no answer in time, network down (status 0) or a 5xx. */
+export function isTransientError(err: unknown): boolean {
+  return err instanceof TimeoutError
+    || (err instanceof HttpErrorResponse && (err.status === 0 || err.status >= 500));
+}
 
 /** Submit, reroll and poll generation jobs (spec §4 /generations, /cards/<id>). */
 @Injectable({ providedIn: 'root' })
 export class GenerationService {
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private visibility: PageVisibilityService) {}
 
   submit(req: GenerationRequest): Observable<GenerationResponse> {
     return this.http.post<GenerationResponse>(api('/generations'), req);
@@ -32,16 +42,16 @@ export class GenerationService {
 
   /**
    * Polls GET /cards/<id> every 2s and emits each CardView; completes after the
-   * card is done or failed (that last view is emitted). Network blips and 5xx are
-   * skipped so a flaky connection doesn't abandon the job; other errors propagate.
+   * card is done or failed (that last view is emitted). Network blips, 5xx and
+   * requests unanswered after 15s (phone slept, tunnel stalled) are skipped so a flaky
+   * connection doesn't abandon the job; other errors propagate. Paused while the page
+   * is hidden, polled at once when it is shown again.
    */
   watch(cardId: string): Observable<CardView> {
-    return timer(WATCH_INTERVAL_MS, WATCH_INTERVAL_MS).pipe(
+    return this.visibility.poll(WATCH_INTERVAL_MS, WATCH_INTERVAL_MS).pipe(
       exhaustMap(() => this.getCard(cardId).pipe(
-        catchError((err: unknown) =>
-          err instanceof HttpErrorResponse && (err.status === 0 || err.status >= 500)
-            ? EMPTY
-            : throwError(() => err))
+        timeout(WATCH_REQUEST_TIMEOUT_MS),
+        catchError((err: unknown) => isTransientError(err) ? EMPTY : throwError(() => err))
       )),
       takeWhile(view => !isFinished(view.status), true)
     );

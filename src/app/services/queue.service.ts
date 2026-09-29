@@ -1,12 +1,13 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, catchError, distinctUntilChanged, map, of, shareReplay, switchMap, timer } from 'rxjs';
+import { Observable, catchError, distinctUntilChanged, map, of, shareReplay, switchMap } from 'rxjs';
 import { QueueStatus } from '../models/api.model';
 import { api } from './api.util';
+import { PageVisibilityService } from './page-visibility.service';
 
 export const QUEUE_POLL_MS = 5000;
 
-/** Polls GET /queue_status every 5s (replaces the old /health polling). */
+/** Polls GET /queue_status every 5s while the page is visible (replaces the old /health polling). */
 @Injectable({ providedIn: 'root' })
 export class QueueService {
   /** Latest queue status; null when the server can't be reached. Shared between subscribers. */
@@ -14,8 +15,8 @@ export class QueueService {
   /** True while /queue_status answers. */
   readonly online$: Observable<boolean>;
 
-  constructor(private http: HttpClient) {
-    this.status$ = timer(0, QUEUE_POLL_MS).pipe(
+  constructor(private http: HttpClient, visibility: PageVisibilityService) {
+    this.status$ = visibility.poll(QUEUE_POLL_MS).pipe(
       switchMap(() => this.http.get<QueueStatus>(api('/queue_status')).pipe(
         catchError(() => of(null))
       )),
