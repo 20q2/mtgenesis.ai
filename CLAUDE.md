@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-MTGenesis.AI generates custom Magic: The Gathering cards. An Angular 16 + Angular Material frontend collects card properties; a Flask backend generates rules text with Ollama (`mistral:latest`) and artwork with a local Stable Diffusion pipeline (diffusers), then composites a finished card PNG with Pillow.
+MTGenesis.AI generates custom Magic: The Gathering cards. An Angular 16 + Angular Material frontend collects card properties; a Flask backend generates rules text with Ollama (`qwen3:8b`, set by `TEXT_MODEL` in `proxy-server/config.py`) and artwork with a local Stable Diffusion pipeline (diffusers), then composites a finished card PNG with Pillow.
 
 ## Commands
 
 Local dev needs three processes:
 
 ```bash
-ollama serve                         # Ollama on :11434 (needs `ollama pull mistral:latest`)
+ollama serve                         # Ollama on :11434 (needs `ollama pull qwen3:8b`)
 cd proxy-server && python app.py     # Flask on :5000
 npm run start                        # Angular dev server on :4200
 ```
@@ -20,6 +20,8 @@ npm run start                        # Angular dev server on :4200
 - Production build: `npm run build` (uses `environment.prod.ts`).
 - Frontend tests (Karma/Jasmine, Chrome): `npm test`; single spec: `npx ng test --include src/app/components/card-form/card-form.component.spec.ts`. Existing specs are CLI scaffolds.
 - Renderer smoke test (no Flask/Ollama needed): `python test_colored_artifact.py` from the repo root. It imports `proxy-server/card_renderer.py` directly and renders a card.
+- Backend tests: `python -m pytest tests` from `proxy-server/` (the `slow` ones import app.py and torch).
+- Rules-text e2e (needs Ollama): `python tools/e2e_rules_text.py --label <name> [--model M] [--repeat N] [--from-db]` from `proxy-server/`. It runs a fixed matrix of card requests (or the stored ones) through the real pipeline and writes rendered PNGs plus `report.md` (raw replies, final text, lint findings) to `data/e2e/<name>/`. Use it after any prompt or cleanup change.
 - No linter or Python test framework is configured.
 
 ## Known issue: missing frontend models
@@ -40,19 +42,21 @@ Every service and component imports from `src/app/models/` (`card.model.ts`, `ap
 5. `card_renderer.generate_card_image(card_data, artwork_base64)` composites the final card.
 6. The response contains `cardData` (rules text), `imageData` (base64 art), `card_image` (base64 rendered card) and `generation_time`.
 
-### Backend (`proxy-server/app.py`, one ~3.5k-line file)
+### Backend (`proxy-server/app.py`, ~1.3k lines, plus `rules_text.py`, `image_generation.py`, `api_routes.py`)
 
-- **Config constants at the top of the file**, not env vars:
+- **Config constants live in `proxy-server/config.py`** (imported with `from config import *`):
   - `USE_CUDA` selects GPU or CPU.
-  - `MODEL_SIZE` picks the image model: `heavy` = sdxl-turbo, `medium` = SD 1.5, `light` = SD 1.4, `placeholder` = no image generation (handy for fast iteration).
+  - `MODEL_SIZE`: `placeholder` = no image generation (gray art; handy for fast iteration); anything else uses `IMAGE_MODEL_ID` (an SDXL fine-tune).
+  - `TEXT_MODEL` (Ollama rules-text model, `MTG_TEXT_MODEL` env override), `TEXT_ATTEMPTS`, `TEXT_THINK`.
   - Timeout constants (`COLD_START_TIMEOUT`, etc.).
   - xformers is disabled through env vars that must be set before `diffusers` is imported.
 - **The image pipeline loads lazily** in `get_image_pipeline()`. `_models_loaded` tracks whether the cold-start or warm timeout applies.
-- **Rules-text generation (`createCardContent`)** is mostly prompt engineering plus defensive cleanup. It builds a long constrained prompt from `cardData` (CMC, colors, type, rarity, asterisk P/T), asks the LLM for abilities as quoted strings, then:
-  - retries up to 3 times through `strip_non_rules_text` / `validate_rules_text`
-  - runs the output through a chain of sanitizers: `sanitize_*_abilities`, `apply_universal_complexity_limits`, `reorder_abilities_properly` (keywords → triggered → activated), `limit_creature_active_abilities`, etc.
-
-  Most "bad card text" bugs are fixed in one of these helpers.
+- **Rules text lives in `proxy-server/rules_text.py`**; `createCardContent` in app.py just calls `generate_rules_text`:
+  - `build_messages` sends a system prompt (Oracle templating rules, card-type rules, few-shot examples) plus the card's facts, an ability budget by rarity, type-specific requirements, and one random color "design hook" for variety.
+  - The model answers in JSON (`{"abilities": [...]}` via Ollama's `format` schema), one ability per item, with `think=False` and `num_ctx` 2560. **Keep the context small**: at 4096 the 8B model grows enough that SDXL spills out of the 12 GB GPU and art goes from ~5 s to ~120 s.
+  - `clean_abilities` turns that list into legal, legible templating (symbols, modern wording, self-references, keyword line in rules order, card-type rules, */* definitions, rarity cap). `lint_rules_text` scores the result; up to `TEXT_ATTEMPTS` replies are tried and the one with the fewest lint errors wins.
+  - Most "bad card text" bugs are a new fixer in `_fix_templating`/`clean_abilities` or a new lint rule. Add a case to `tests/test_rules_text.py` (they're real model outputs) and re-run `tools/e2e_rules_text.py`.
+  - `finalize_card` still replaces `~`, fixes bullets and periods (keyword lines get no period), and generates missing creature/Vehicle P/T and Vehicle crew. Stats are a deterministic curve by mana value and rarity; `*` P/T only comes from the request.
 - **CORS/ngrok headers:** every response goes through `add_ngrok_headers`. New routes should do the same and handle `OPTIONS`.
 
 ### Card renderer (`proxy-server/card_renderer.py`)

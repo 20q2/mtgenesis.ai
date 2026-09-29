@@ -47,9 +47,9 @@ cd ..
 #### 4. Install & Setup Ollama
 1. **Download Ollama**: https://ollama.com/
 2. **Install Ollama** on your system
-3. **Pull the Mistral model**:
+3. **Pull the rules-text model** (Qwen3 8B, ~5 GB):
    ```bash
-   ollama pull mistral:latest
+   ollama pull qwen3:8b
    ```
 
 ### 🚀 Running the Application
@@ -115,7 +115,7 @@ mtgenesis.ai/
 
 - **Frontend**: Angular 16 with Material UI
 - **Backend**: Flask with CORS enabled
-- **AI Text**: Ollama with Mistral model
+- **AI Text**: Ollama with Qwen3 8B (see `TEXT_MODEL` in `proxy-server/config.py`)
 - **AI Images**: Placeholder (ready for diffusers integration)
 - **Communication**: Single unified API endpoint
 
@@ -150,7 +150,7 @@ mtgenesis.ai/
 
 Double-click **`Start MTGenesis.cmd`** in the repo root (Windows). It:
 
-1. starts Ollama if it isn't running (and pulls `mistral:latest` if missing),
+1. starts Ollama if it isn't running (and pulls the rules-text model from `config.py` if missing),
 2. opens the Flask backend in a "MTGenesis backend" window,
 3. opens an ngrok tunnel to it in a "MTGenesis tunnel" window,
 4. publishes the site to GitHub Pages (`gh-pages` branch) at https://20q2.github.io/mtgenesis.ai/, writing the live tunnel URL to `api-config.json`, which the app reads at startup. The Angular app is only rebuilt when frontend code changed since the last deploy.
@@ -182,7 +182,7 @@ ollama serve
 ollama list
 
 # Install model if needed
-ollama pull mistral:latest
+ollama pull qwen3:8b
 ```
 
 ### Port Conflicts

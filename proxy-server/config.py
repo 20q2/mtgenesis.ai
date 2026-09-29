@@ -1,6 +1,7 @@
 """
 Server configuration toggles. Edit these values, then restart `python app.py`.
 """
+import os
 from pathlib import Path
 
 # ===== PERFORMANCE TOGGLE =====
@@ -26,10 +27,17 @@ ART_BOX_SIZE = (408, 336)      # size of the art window on the rendered card
 # ~1.5 GB less VRAM, visually identical). None = use the model's own VAE.
 IMAGE_VAE_ID = "madebyollin/sdxl-vae-fp16-fix"
 # Keep each SDXL component in RAM and move it to the GPU only while it runs (peak ~5.6 GB
-# instead of ~9.4 GB). Needed on a 12 GB card while Ollama keeps Mistral (~5 GB) resident:
+# instead of ~9.4 GB). Needed on a 12 GB card while Ollama keeps the text model (~5.3 GB) resident:
 # without it the driver spills to system RAM and one image takes ~280s instead of ~4s.
 # Set False on a 16 GB+ GPU (or with no LLM on the GPU) for ~2s instead of ~4s per image.
 IMAGE_CPU_OFFLOAD = True
+
+# ===== RULES TEXT (LLM) =====
+# Ollama model that writes rules text (run `ollama pull <model>` first). It shares the GPU
+# with SDXL, so keep it around 5 GB. MTG_TEXT_MODEL overrides it (tools/e2e_rules_text.py).
+TEXT_MODEL = os.environ.get("MTG_TEXT_MODEL", "qwen3:8b")
+TEXT_ATTEMPTS = 3              # regenerate (up to twice) while the cleaned text still has lint errors
+TEXT_THINK = os.environ.get("MTG_TEXT_THINK") == "1"  # reasoning models: think before answering (slower)
 
 # ===== AI NIGHT =====
 ADMIN_PIN = "1234"             # change before the event; required for /admin actions

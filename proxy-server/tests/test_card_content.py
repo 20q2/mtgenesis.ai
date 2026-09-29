@@ -1,8 +1,11 @@
-"""createCardContent: rules-text generation must not crash on missing/empty/None subtypes.
+"""createCardContent: rules-text generation must not crash on missing/empty/None subtypes,
+keeps every ability the model returns, and fails the card when Ollama fails.
 
 Imports app.py (torch/diffusers/ollama), so it is marked slow. Only the Ollama boundary
-(app.ollama_client.generate) is monkeypatched.
+(app.ollama_client.chat) is monkeypatched.
 """
+import json
+
 import pytest
 
 pytestmark = pytest.mark.slow
@@ -12,12 +15,14 @@ import app  # noqa: E402
 _MISSING = object()
 
 
+def _reply(*abilities):
+    return {"message": {"content": json.dumps({"abilities": list(abilities)})}}
+
+
 @pytest.fixture
 def fake_ollama(monkeypatch):
-    def fake_generate(*args, **kwargs):
-        return {"response": "Trample. When ~ enters, deal 2 damage to any target."}
-
-    monkeypatch.setattr(app.ollama_client, "generate", fake_generate)
+    monkeypatch.setattr(app.ollama_client, "chat",
+                        lambda *a, **k: _reply("Trample", "When ~ enters, deal 2 damage to any target."))
 
 
 def _card(supertype, subtype):
@@ -50,26 +55,21 @@ def test_content_generated_without_card_data(fake_ollama):
     assert text.strip()
 
 
-# Mistral is asked to wrap each ability in its own quoted section. Only a reply that is a
-# single quoted section may lose its outer quotes; multi-quoted replies keep every ability.
-@pytest.mark.parametrize("reply", [
-    '"Flying." "When ~ enters, draw a card."',
-    '"Flying."\n"When ~ enters, draw a card."',
-    '"Flying"\n\n"When ~ enters, draw a card."',
-], ids=["same-line", "newline", "blank-line"])
-def test_multi_quoted_reply_keeps_every_ability(monkeypatch, reply):
-    monkeypatch.setattr(app.ollama_client, "generate", lambda *a, **k: {"response": reply})
+def test_every_ability_is_kept_one_per_line(monkeypatch):
+    monkeypatch.setattr(app.ollama_client, "chat",
+                        lambda *a, **k: _reply("Flying", "When ~ enters, draw a card."))
+    text = app.createCardContent("A storm dragon", _card("Legendary", "Dragon"))
+    assert text.split("\n") == ["Flying", "When Zur'ka enters, draw a card."]
+
+
+def test_plain_text_reply_still_parsed(monkeypatch):
+    # A model that ignores the JSON format: one quoted ability per line still works
+    monkeypatch.setattr(app.ollama_client, "chat",
+                        lambda *a, **k: {"message": {"content": '"Flying."\n"When ~ enters, draw a card."'}})
     text = app.createCardContent("A storm dragon", _card("Legendary", "Dragon"))
     assert "Flying" in text
     assert "draw a card" in text
-
-
-def test_single_quoted_reply_loses_outer_quotes(monkeypatch):
-    monkeypatch.setattr(app.ollama_client, "generate",
-                        lambda *a, **k: {"response": '"When ~ enters, draw a card."'})
-    text = app.createCardContent("A storm dragon", _card("Legendary", "Dragon"))
-    assert "draw a card" in text
-    assert not text.startswith('"')
+    assert '"' not in text
 
 
 def test_ollama_client_has_a_timeout():
@@ -78,16 +78,22 @@ def test_ollama_client_has_a_timeout():
     assert app.ollama_client._client.timeout.read == app.OLLAMA_TIMEOUT_SECONDS
 
 
-def test_generate_keeps_mistral_resident(monkeypatch):
+def test_chat_keeps_the_model_resident_and_small(monkeypatch):
     calls = []
 
-    def fake_generate(*args, **kwargs):
+    def fake_chat(*args, **kwargs):
         calls.append(kwargs)
-        return {"response": "Flying."}
+        return _reply("Flying")
 
-    monkeypatch.setattr(app.ollama_client, "generate", fake_generate)
+    monkeypatch.setattr(app.ollama_client, "chat", fake_chat)
     app.createCardContent("A storm dragon", _card("Legendary", "Dragon"))
-    assert calls and all(c.get("keep_alive") == "30m" for c in calls)
+    assert calls
+    for c in calls:
+        assert c.get("keep_alive") == "30m"
+        assert c.get("model") == app.TEXT_MODEL
+        assert c.get("think") is False
+        # a small context keeps the LLM beside SDXL on a 12 GB GPU
+        assert c["options"]["num_ctx"] <= 2560
 
 
 def test_ollama_timeout_fails_the_card(monkeypatch):
@@ -96,5 +102,5 @@ def test_ollama_timeout_fails_the_card(monkeypatch):
     def stalled(*args, **kwargs):
         raise httpx.ReadTimeout("timed out")
 
-    monkeypatch.setattr(app.ollama_client, "generate", stalled)
+    monkeypatch.setattr(app.ollama_client, "chat", stalled)
     assert not app.createCardContent("A storm dragon", _card("Legendary", "Dragon"))

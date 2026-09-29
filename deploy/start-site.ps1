@@ -49,7 +49,10 @@ $PagesBranch = 'gh-pages'
 $BackendPort = 5000
 $BackendUrl  = "http://127.0.0.1:$BackendPort"
 $OllamaUrl   = 'http://127.0.0.1:11434'
-$OllamaModel = 'mistral:latest'
+# The rules-text model, read from proxy-server/config.py (TEXT_MODEL) so there is one source of truth.
+$OllamaModel = 'qwen3:8b'
+$configMatch = Select-String -Path (Join-Path $ServerDir 'config.py') -Pattern '"MTG_TEXT_MODEL",\s*"([^"]+)"' -ErrorAction SilentlyContinue
+if ($configMatch) { $OllamaModel = $configMatch.Matches[0].Groups[1].Value }
 $NgrokApi    = 'http://127.0.0.1:4040/api/tunnels'
 # Frontend inputs; a change to any of these since the last deploy triggers a rebuild.
 $FrontendPaths = @('src', 'angular.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.app.json')

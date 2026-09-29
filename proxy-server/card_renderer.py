@@ -238,7 +238,9 @@ class MagicCardRenderer:
                 if i < len(paragraphs) - 1:
                     total_height += (ability_separation - line_height)
             
-            fits = total_height <= max_height
+            # Mana symbols are measured as bare letters above but drawn wider, so keep a
+            # little slack rather than letting the last line spill out of the box
+            fits = total_height <= max_height - int(font_size * 0.4)
             if not fits:
                 print(f"   Font size {font_size}px: {total_height}px height > {max_height}px limit")
             
@@ -1294,18 +1296,20 @@ class MagicCardRenderer:
         
         return segments
     
-    def draw_text_with_mana_symbols(self, card_image: Image.Image, text: str, position: Tuple[int, int], 
-                                   max_width: int, font: ImageFont.ImageFont = None, fill='black') -> int:
+    def draw_text_with_mana_symbols(self, card_image: Image.Image, text: str, position: Tuple[int, int],
+                                   max_width: int, font: ImageFont.ImageFont = None, fill='black',
+                                   max_height: Optional[int] = None) -> int:
         """
         Draw text with embedded mana symbols, handling word wrapping and explicit newlines.
-        Uses dynamic font sizing to fit text within available space.
-        Returns the height used by the text
+        Uses dynamic font sizing to fit text within available space (max_height, default
+        self.available_text_height). Returns the height used by the text
         """
         draw = ImageDraw.Draw(card_image)
-        
+
         # Calculate optimal font size if no font provided
         if font is None:
-            optimal_font_size = self.calculate_optimal_font_size(text, max_width, self.available_text_height)
+            optimal_font_size = self.calculate_optimal_font_size(
+                text, max_width, max_height or self.available_text_height)
             font = self.get_text_font(optimal_font_size)
             font_size = optimal_font_size
             print(f"🎨 Using dynamic font size: {optimal_font_size}px for rules text")
@@ -1596,8 +1600,12 @@ class MagicCardRenderer:
             rules_text_start = time.time()
             if text:
                 print(f"Drawing card text with mana symbols at position {self.text_pos}: '{text}'")
-                self.draw_text_with_mana_symbols(card_image, text, self.text_pos, 
-                                                self.text_width)
+                # The P/T box overlaps the bottom-right of the text box: fit the text above it
+                text_height = self.available_text_height
+                if needs_pt_box and power is not None and toughness is not None:
+                    text_height -= 34
+                self.draw_text_with_mana_symbols(card_image, text, self.text_pos,
+                                                self.text_width, max_height=text_height)
             else:
                 print("No card text to draw")
             rules_text_time = time.time() - rules_text_start
