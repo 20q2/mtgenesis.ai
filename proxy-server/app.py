@@ -814,7 +814,8 @@ app = Flask(__name__)
 CORS(app, 
      origins=["*"],  # Allow all origins for ngrok + S3
      methods=["GET", "POST", "OPTIONS"],
-     allow_headers=["Content-Type", "Authorization", "ngrok-skip-browser-warning", "Accept", "Cache-Control"],
+     allow_headers=["Content-Type", "Authorization", "ngrok-skip-browser-warning", "Accept", "Cache-Control",
+                    "X-User-Id", "X-Admin-Pin"],
      max_age=86400,  # Cache preflight for 24 hours
      supports_credentials=False)
 
@@ -829,7 +830,7 @@ def add_ngrok_headers(response):
 def after_request(response):
     """Ensure all responses have CORS headers for HTTPS/ngrok compatibility"""
     response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,ngrok-skip-browser-warning,Accept,Cache-Control')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,ngrok-skip-browser-warning,Accept,Cache-Control,X-User-Id,X-Admin-Pin')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     response.headers.add('Access-Control-Max-Age', '86400')
     response.headers.add('ngrok-skip-browser-warning', 'any')
@@ -3008,7 +3009,8 @@ def createCardContent(prompt, card_data=None):
         for attempt in range(max_attempts):
             response = ollama.generate(
                 model='mistral:latest',
-                prompt=enhanced_prompt
+                prompt=enhanced_prompt,
+                keep_alive="30m"  # keep Mistral in VRAM between cards on AI Night
             )
             
             # Clean up the response
@@ -3434,29 +3436,6 @@ def create_card_sync():
         response = jsonify({'error': f'Synchronous request failed: {str(e)}'})
         return add_ngrok_headers(response), 500
 
-@app.route('/api/v1/queue_status', methods=['GET', 'OPTIONS'])
-def get_queue_status():
-    """Get overall queue status"""
-    # Handle OPTIONS request for CORS preflight
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        return add_ngrok_headers(response)
-    
-    try:
-        with request_queue.lock:
-            status_info = {
-                'queue_size': request_queue.queue.qsize(),
-                'active_requests': request_queue.current_concurrent,
-                'max_concurrent': request_queue.max_concurrent,
-                'total_active_requests': len(request_queue.active_requests)
-            }
-        response = jsonify(status_info)
-        return add_ngrok_headers(response), 200
-    except Exception as e:
-        print(f"❌ Error getting queue status: {e}")
-        response = jsonify({'error': f'Queue status failed: {str(e)}'})
-        return add_ngrok_headers(response), 500
-
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint - always returns 200 to indicate server is running"""
@@ -3507,15 +3486,56 @@ def instant_response():
     # Return immediately without processing
     return jsonify({'status': 'instant-success', 'timestamp': str(request.args)}), 200
 
+def init_ai_night(app):
+    """
+    Set up AI Night: data folders, SQLite storage, the two-stage generation queue
+    and the /api/v1 blueprint (spec §3-§5). Returns the GenerationQueue.
+
+    Called only from the __main__ block, so importing app.py (e.g. in tests)
+    opens no database and starts no worker threads.
+    """
+    from pathlib import Path
+
+    import image_generation
+    from api_routes import create_api_blueprint
+    from generation_queue import GenerationQueue
+    from storage import Storage
+
+    data_dir = Path(DATA_DIR)
+    (data_dir / "art").mkdir(parents=True, exist_ok=True)
+    (data_dir / "cards").mkdir(parents=True, exist_ok=True)
+
+    storage = Storage(data_dir / "mtgenesis.db")
+    gen_queue = GenerationQueue(storage, data_dir, createCardContent,
+                                image_generation.generate_art, finalize_card)
+    gen_queue.recover_on_startup()
+    app.register_blueprint(create_api_blueprint(storage, gen_queue, data_dir, ADMIN_PIN),
+                           url_prefix="/api/v1")
+    print(f"🌙 AI Night ready: data in {data_dir}")
+    return gen_queue
+
 if __name__ == '__main__':
     print("🚀 Starting Flask server with intelligent queuing...")
+    gen_queue = init_ai_night(app)
     print("Available endpoints:")
     print("  POST /api/v1/create_card - Generate card (sync, frontend compatible)")
     print("  POST /api/v1/create_card_async - Queue card generation (async)")
     print("  GET  /api/v1/card_status/<request_id> - Check async request status")
-    print("  GET  /api/v1/queue_status - Get overall queue status")
     print("  POST /api/v1/create_card_sync - Generate card (sync, legacy)")
     print("  GET  /health - Health check")
+    print("\n🌙 AI Night endpoints (X-User-Id header on user routes, X-Admin-Pin on admin routes):")
+    print("  POST /api/v1/users/login - Log in or register by username")
+    print("  GET  /api/v1/me/cards - My cards, newest first")
+    print("  GET  /api/v1/me/sets/current - My current commander set")
+    print("  POST /api/v1/generations - Queue 1 free-play card or a 3-card commander set")
+    print("  GET  /api/v1/cards/<id> - Card status, queue position and ETA")
+    print("  POST /api/v1/cards/<id>/reroll - Reroll a set card")
+    print("  POST /api/v1/sets/<id>/lock | /unlock - Lock a set into the open event, or unlock it")
+    print("  GET  /api/v1/events/current | /events | /events/<id> - Events and their locked sets")
+    print("  POST /api/v1/votes - Vote for a card in a locked set")
+    print("  GET  /api/v1/queue_status - Generation queue status and ETA")
+    print("  GET  /api/v1/media/cards/<id>.png | /media/art/<id>.png - Rendered card and artwork")
+    print("  POST /api/v1/admin/events | /admin/events/<id>/close - Host event controls")
     print("\n📋 Queue Configuration:")
     print(f"  - Max concurrent requests: {request_queue.max_concurrent}")
     print("  - All endpoints use queue internally to prevent model overload")
@@ -3525,7 +3545,7 @@ if __name__ == '__main__':
     print("Advanced: Use /api/v1/create_card_async + polling for true async behavior")
     print("\nExample request body:")
     print('{"prompt": "A mystical dragon card", "width": 408, "height": 336}')
-    print("\nNote: SDXL-Turbo model will load on first image request")
+    print("\nNote: the image model loads on first image request")
     
     # Run with HTTP - ngrok will handle HTTPS termination
     app.run(debug=False, host='0.0.0.0', port=5000)
