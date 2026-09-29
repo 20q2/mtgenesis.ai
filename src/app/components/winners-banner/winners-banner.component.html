@@ -1,0 +1,18 @@
+<section class="winners-banner">
+  <h3 class="winners-title"><span aria-hidden="true">🏆</span> {{ title }}</h3>
+  <p *ngIf="!sets.length" class="muted">No sets were locked in.</p>
+  <ul class="winners-list">
+    <li *ngFor="let set of sets; trackBy: trackSet" class="winner-item" [ngClass]="'outcome-' + outcome(set).kind">
+      <div class="thumbs">
+        <img *ngFor="let card of outcome(set).cards"
+             [src]="card.cardImageUrl | media | async"
+             [alt]="set.commanderName + ' version ' + card.slot">
+      </div>
+      <div class="winner-text">
+        <strong class="winner-name">{{ set.commanderName }}</strong>
+        <span class="muted"> by {{ set.username }}</span>
+        <div class="winner-version">{{ label(outcome(set)) }}</div>
+      </div>
+    </li>
+  </ul>
+</section>

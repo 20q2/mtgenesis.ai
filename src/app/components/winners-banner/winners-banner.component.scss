@@ -1,0 +1,64 @@
+.winners-banner {
+  border-radius: 16px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.28), rgba(120, 90, 20, 0.35));
+  border: 1px solid rgba(245, 215, 122, 0.7);
+  box-shadow: 0 0 24px rgba(212, 175, 55, 0.3);
+  color: #fff7e0;
+}
+
+.winners-title {
+  font-family: 'Beleren', 'Palatino', serif;
+  font-size: 1.5rem;
+  color: #f5d77a;
+  margin-bottom: 0.75rem;
+}
+
+.winners-list {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.75rem;
+}
+
+.winner-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.thumbs {
+  display: flex;
+  gap: 0.25rem;
+  flex: none;
+
+  img {
+    width: 48px;
+    aspect-ratio: 63 / 88;
+    object-fit: cover;
+    border-radius: 5px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  }
+}
+
+.winner-name {
+  color: #f5d77a;
+  word-break: break-word;
+}
+
+.winner-version {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.outcome-tie .winner-version {
+  color: #e5e7eb;
+}
+
+.outcome-none .winner-version {
+  color: rgba(255, 247, 224, 0.6);
+}

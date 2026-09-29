@@ -1,0 +1,57 @@
+<div class="page history-page">
+  <div *ngIf="error" class="alert alert-error" role="alert">
+    <span class="material-icons">error</span>
+    <span>{{ error }}</span>
+  </div>
+
+  <p *ngIf="loading" class="muted loading">Loading…</p>
+
+  <!-- /events -->
+  <ng-container *ngIf="mode === 'list' && !loading">
+    <section class="panel">
+      <h2 class="page-title">Past Events</h2>
+      <p class="muted" *ngIf="!events?.length">No events yet.</p>
+      <ul class="event-list">
+        <li *ngFor="let ev of events">
+          <a [routerLink]="['/events', ev.id]" class="night-link event-name">{{ ev.name }}</a>
+          <span class="badge" [class.badge-gold]="ev.status === 'open'" [class.badge-muted]="ev.status === 'closed'">
+            {{ ev.status === 'open' ? 'Open' : 'Closed' }}
+          </span>
+          <span class="muted">{{ ev.createdAt | date:'mediumDate' }}</span>
+        </li>
+      </ul>
+    </section>
+  </ng-container>
+
+  <!-- /events/:id -->
+  <ng-container *ngIf="mode === 'detail' && !loading && event as ev">
+    <section class="panel event-header">
+      <div>
+        <p class="muted"><a routerLink="/events" class="night-link">&larr; All events</a></p>
+        <h2 class="page-title">{{ ev.name }}</h2>
+        <p class="muted">
+          {{ ev.createdAt | date:'mediumDate' }}
+          <ng-container *ngIf="ev.closedAt"> · closed {{ ev.closedAt | date:'short' }}</ng-container>
+        </p>
+      </div>
+      <span class="badge" [class.badge-gold]="ev.status === 'open'" [class.badge-muted]="ev.status === 'closed'">
+        {{ ev.status === 'open' ? 'Open' : 'Closed' }}
+      </span>
+    </section>
+
+    <app-winners-banner *ngIf="ev.status === 'closed'" [sets]="ev.sets"></app-winners-banner>
+
+    <section *ngIf="ev.status === 'open'" class="panel">
+      <p class="muted">Voting is still open. <a routerLink="/vote" class="night-link">Go vote</a>.</p>
+    </section>
+
+    <section *ngIf="!ev.sets.length" class="panel">
+      <p class="muted">No sets were locked in.</p>
+    </section>
+
+    <app-set-row *ngFor="let set of ev.sets; trackBy: trackSet"
+                 [set]="set"
+                 [showVoteButtons]="false"
+                 [final]="ev.status === 'closed'"></app-set-row>
+  </ng-container>
+</div>

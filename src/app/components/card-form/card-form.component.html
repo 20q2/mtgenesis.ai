@@ -2,7 +2,7 @@
   <form [formGroup]="cardForm" (ngSubmit)="onSubmit()" class="card-form">
     <div class="form-content">
       <!-- Card Name -->
-      <div class="form-group">
+      <div class="form-group" *ngIf="showName">
         <div class="custom-form-field">
           <label for="name">Card Name</label>
           <input 
@@ -163,9 +163,9 @@
         <button type="button" mat-stroked-button (click)="clearForm()" class="clear-form-btn" [disabled]="isGenerating">
           Clear Form
         </button>
-        <button type="submit" mat-raised-button color="primary" [disabled]="isGenerating || !modelsReady">
+        <button *ngIf="showGenerate" type="submit" mat-raised-button color="primary" [disabled]="isGenerating || !modelsReady">
           <span *ngIf="!isGenerating && modelsReady">Generate Card</span>
-          <span *ngIf="!isGenerating && !modelsReady">Models Loading...</span>
+          <span *ngIf="!isGenerating && !modelsReady">Server Offline</span>
           <span *ngIf="isGenerating">
             <mat-spinner diameter="20" style="display: inline-block; margin-right: 8px;"></mat-spinner>
             Generating...

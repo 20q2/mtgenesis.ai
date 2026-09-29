@@ -1,0 +1,39 @@
+<article class="set-row panel">
+  <header class="set-row-header">
+    <h3 class="commander">{{ set.commanderName }}</h3>
+    <span class="by muted">by {{ set.username }}</span>
+  </header>
+
+  <div class="cards">
+    <div *ngFor="let card of set.cards; trackBy: trackCard"
+         class="vote-card"
+         [attr.data-card-id]="card.id"
+         [class.mine]="isMine(card)"
+         [class.leader]="card.leader"
+         [class.tied]="card.tied">
+      <div class="flags">
+        <span *ngIf="card.leader" class="flag flag-leader">
+          <span aria-hidden="true">👑</span> {{ final ? 'Winner' : 'Leading' }}
+        </span>
+        <span *ngIf="card.tied" class="flag flag-tied">Tied</span>
+        <span *ngIf="isMine(card)" class="flag flag-mine">Your pick</span>
+      </div>
+
+      <app-card-slot [view]="card" [showReroll]="false" [label]="'Version ' + card.slot"></app-card-slot>
+
+      <div class="vote-bar">
+        <span class="count">{{ card.votes }} {{ card.votes === 1 ? 'vote' : 'votes' }}</span>
+        <button *ngIf="showVoteButtons"
+                type="button"
+                class="btn vote-button"
+                [class.btn-gold]="isMine(card)"
+                [class.btn-ghost]="!isMine(card)"
+                [disabled]="disabled"
+                (click)="onVote(card)">
+          <span class="material-icons">{{ isMine(card) ? 'how_to_vote' : 'thumb_up' }}</span>
+          {{ isMine(card) ? 'Voted' : 'Vote' }}
+        </button>
+      </div>
+    </div>
+  </div>
+</article>
