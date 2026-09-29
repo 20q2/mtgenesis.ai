@@ -76,6 +76,18 @@ describe('AdminPageComponent', () => {
     expect(text()).toContain('AI Night #3');
   });
 
+  it('submitting the create form sends the request without a native page submit', () => {
+    setup(null, []);
+    component.pin.setValue('4242');
+    component.eventName.setValue('AI Night #3');
+    fixture.detectChanges();
+    const event = new Event('submit', { cancelable: true });
+    (fixture.nativeElement.querySelector('form.create-row') as HTMLFormElement).dispatchEvent(event);
+    expect(event.defaultPrevented).toBeTrue();
+    http.expectOne(`${base}/admin/events`).flush(eventView({ id: 'e-3', sets: [] }));
+    http.expectOne(`${base}/events`).flush([]);
+  });
+
   it('shows "Wrong PIN" on a 403', () => {
     setup(null, []);
     component.pin.setValue('0000');

@@ -3,7 +3,7 @@
     <h2 class="page-title">Welcome, Planeswalker</h2>
     <p class="muted">Pick a username to join AI Night. No password &mdash; just your name.</p>
 
-    <form (ngSubmit)="submit()" class="login-form">
+    <form [formGroup]="form" (ngSubmit)="submit()" class="login-form">
       <label for="username" class="sr-only">Username</label>
       <input id="username"
              class="night-input"

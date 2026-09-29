@@ -223,6 +223,8 @@
 
   .nav-bar {
     padding: 0.35rem 0.5rem;
+    /* On phones the nav wraps to several rows; don't pin it over the content. */
+    position: static;
   }
 
   .nav-links a {

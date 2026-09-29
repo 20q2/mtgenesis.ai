@@ -50,7 +50,7 @@
 
       <ng-template #noEvent>
         <p class="muted">No event is open.</p>
-        <form class="create-row" (ngSubmit)="createEvent()">
+        <form class="create-row" [formGroup]="createForm" (ngSubmit)="createEvent()">
           <input class="night-input"
                  type="text"
                  [formControl]="eventName"

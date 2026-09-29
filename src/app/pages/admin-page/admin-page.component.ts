@@ -1,6 +1,6 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
-import { FormControl } from '@angular/forms';
+import { FormControl, FormGroup } from '@angular/forms';
 import { Subscription, finalize } from 'rxjs';
 import { EventSummary, EventView } from '../../models/api.model';
 import { apiErrorMessage } from '../../services/api.util';
@@ -17,6 +17,8 @@ export const ADMIN_PIN_STORAGE_KEY = 'mtgenesis.adminPin';
 export class AdminPageComponent implements OnInit, OnDestroy {
   readonly pin = new FormControl('', { nonNullable: true });
   readonly eventName = new FormControl('', { nonNullable: true });
+  /** [formGroup] makes (ngSubmit) work and prevents a native page submit on Enter. */
+  readonly createForm = new FormGroup({ name: this.eventName });
 
   current: EventView | null = null;
   history: EventSummary[] = [];

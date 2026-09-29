@@ -43,6 +43,18 @@ describe('LoginPageComponent', () => {
     expect(router.navigateByUrl).toHaveBeenCalledWith('/create');
   });
 
+  it('submitting the form (Enter) logs in without a native page submit', () => {
+    setup();
+    users.login.and.returnValue(of({ id: 'u-1', username: 'Alice' }));
+    const input = fixture.nativeElement.querySelector('#username') as HTMLInputElement;
+    input.value = 'Alice';
+    input.dispatchEvent(new Event('input'));
+    const event = new Event('submit', { cancelable: true });
+    (fixture.nativeElement.querySelector('form') as HTMLFormElement).dispatchEvent(event);
+    expect(users.login).toHaveBeenCalledWith('Alice');
+    expect(event.defaultPrevented).toBeTrue();
+  });
+
   it('returns to the page the guard bounced from', () => {
     setup('/vote');
     users.login.and.returnValue(of({ id: 'u-1', username: 'Alice' }));

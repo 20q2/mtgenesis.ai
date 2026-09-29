@@ -1,5 +1,5 @@
 import { Component, OnInit } from '@angular/core';
-import { FormControl, Validators } from '@angular/forms';
+import { FormControl, FormGroup, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { finalize } from 'rxjs';
 import { apiErrorMessage } from '../../services/api.util';
@@ -15,6 +15,8 @@ export const USERNAME_PATTERN = /^[A-Za-z0-9 _-]{1,24}$/;
 })
 export class LoginPageComponent implements OnInit {
   readonly username = new FormControl('', { nonNullable: true, validators: [Validators.required] });
+  /** [formGroup] makes (ngSubmit) work and prevents a native page submit on Enter. */
+  readonly form = new FormGroup({ username: this.username });
   submitting = false;
   error: string | null = null;
 
