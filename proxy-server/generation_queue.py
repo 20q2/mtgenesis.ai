@@ -66,6 +66,22 @@ def _error_detail(exc: BaseException) -> str:
     return detail[:MAX_ERROR_DETAIL]
 
 
+def _log(message: str) -> None:
+    """Best-effort console logging: an unprintable message must never break a worker."""
+    try:
+        print(message)
+    except Exception:
+        pass
+
+
+def _log_exception() -> None:
+    """Best-effort traceback of the exception being handled."""
+    try:
+        traceback.print_exc()
+    except Exception:
+        pass
+
+
 def _seconds(value: float) -> float:
     return round(value, 1)
 
@@ -130,8 +146,8 @@ class GenerationQueue:
                 # app.createCardContent swallows Ollama errors and returns None
                 raise RuntimeError("no rules text was returned (is Ollama running?)")
         except Exception as exc:
-            traceback.print_exc()
             self._fail(card_id, f"Text generation failed: {_error_detail(exc)}")
+            _log_exception()
             return True
         self._half_done(card_id, "text", text)
         return True
@@ -152,8 +168,8 @@ class GenerationQueue:
             art_path.write_bytes(_decode_b64_png(art_b64))
         except Exception as exc:
             self._finish_painting(record_duration=False)
-            traceback.print_exc()
             self._fail(card_id, f"Artwork generation failed: {_error_detail(exc)}")
+            _log_exception()
             return True
         self._half_done(card_id, "art", art_b64, art_path=str(art_path))
         return True
@@ -198,7 +214,7 @@ class GenerationQueue:
                                      finished_at=_now_iso())
             recovered += 1
         if recovered:
-            print(f"♻️ Marked {recovered} interrupted card(s) failed: {RESTART_ERROR}")
+            _log(f"♻️ Marked {recovered} interrupted card(s) failed: {RESTART_ERROR}")
 
     def stop(self) -> None:
         self._stop.set()
@@ -214,7 +230,7 @@ class GenerationQueue:
                 worked = step()
             except Exception:
                 # Per-card failures are handled inside step(); this guards the thread itself.
-                traceback.print_exc()
+                _log_exception()
                 worked = False
             if not worked:
                 self._stop.wait(IDLE_SLEEP_SECONDS)
@@ -271,11 +287,11 @@ class GenerationQueue:
                 pass
 
     def _fail(self, card_id: str, message: str) -> None:
-        print(f"❌ Card {card_id} failed: {message}")
         with self._lock:
             self._drop(card_id)
             self.storage.update_card(card_id, status="failed", error=message,
                                      finished_at=_now_iso())
+        _log(f"❌ Card {card_id} failed: {message}")
 
     def _half_done(self, card_id: str, half: str, value: str, **fields) -> None:
         """Record a finished half; the second half to finish renders the card."""
@@ -314,8 +330,8 @@ class GenerationQueue:
             card_path = self.cards_dir / f"{card_id}.png"
             card_path.write_bytes(_decode_b64_png(rendered_b64))
         except Exception as exc:
-            traceback.print_exc()
             self._fail(card_id, f"Card rendering failed: {_error_detail(exc)}")
+            _log_exception()
             return
         with self._lock:
             self.storage.update_card(card_id, status="done", card=final_card,

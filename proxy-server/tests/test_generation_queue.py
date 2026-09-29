@@ -381,6 +381,31 @@ def test_background_workers_many_cards_with_failure(storage, tmp_path):
         q.stop()
 
 
+@pytest.mark.parametrize("stage", ["text", "art", "render"])
+def test_failure_marked_even_if_logging_breaks(storage, rec, tmp_path, monkeypatch, stage):
+    """A console that cannot print (e.g. cp1252 without app.py's UTF-8 reconfigure) must
+    never stop a failing card from being marked failed."""
+    import sys
+
+    strict = io.TextIOWrapper(io.BytesIO(), encoding="ascii", errors="strict")
+    monkeypatch.setattr(sys, "stdout", strict)
+    monkeypatch.setattr(sys, "stderr", strict)
+
+    def boom(*args):
+        raise RuntimeError("café ❌ down")
+
+    fns = {"text_fn": rec.text_fn, "art_fn": rec.art_fn, "render_fn": rec.render_fn}
+    fns[f"{stage}_fn"] = boom
+    q = GenerationQueue(storage, tmp_path, start_workers=False, **fns)
+    card_id = storage.add_card()
+    q.enqueue(card_id)
+    q.process_next_text()
+    q.process_next_image()
+    row = storage.get_card(card_id)
+    assert row["status"] == "failed"
+    assert "café" in row["error"]
+
+
 # ----- B3: positions, ETA, status, recovery -----
 
 def fake_clock():
