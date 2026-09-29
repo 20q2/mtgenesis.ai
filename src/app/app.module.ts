@@ -26,6 +26,7 @@ import { EventHistoryPageComponent } from './pages/event-history-page/event-hist
 import { AdminPageComponent } from './pages/admin-page/admin-page.component';
 import { QueueBadgeComponent } from './components/queue-badge/queue-badge.component';
 import { MediaPipe } from './pipes/media.pipe';
+import { CardSlotComponent } from './components/card-slot/card-slot.component';
 
 @NgModule({
   declarations: [
@@ -40,6 +41,7 @@ import { MediaPipe } from './pipes/media.pipe';
     EventHistoryPageComponent,
     AdminPageComponent,
     QueueBadgeComponent,
+    CardSlotComponent,
     MediaPipe
   ],
   imports: [

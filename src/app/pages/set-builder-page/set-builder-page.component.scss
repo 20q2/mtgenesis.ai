@@ -1,0 +1,88 @@
+.set-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 1rem;
+  align-items: start;
+
+  @media (max-width: 1000px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Once a set exists, show the slots first on narrow screens. */
+@media (max-width: 1000px) {
+  .has-set .slots-panel {
+    order: -1;
+  }
+}
+
+.commander-field {
+  position: relative;
+  margin-bottom: 1rem;
+
+  label {
+    display: block;
+  }
+
+  .counter {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0.7rem;
+    font-size: 0.75rem;
+    pointer-events: none;
+  }
+}
+
+.generate-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+
+  .generate-set {
+    font-size: 1.05rem;
+    padding: 0.8rem 1.4rem;
+  }
+}
+
+.slots-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+
+  @media (max-width: 700px) {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 0.5rem;
+
+    app-card-slot {
+      flex: 0 0 78%;
+      scroll-snap-align: center;
+    }
+  }
+}
+
+.lock-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(212, 175, 55, 0.2);
+
+  .lock {
+    font-size: 1.05rem;
+  }
+}

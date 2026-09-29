@@ -1,0 +1,62 @@
+<div class="slot" [ngClass]="view ? 'status-' + view.status : 'status-empty'">
+  <ng-container *ngIf="view as v; else empty">
+    <ng-container [ngSwitch]="v.status">
+      <!-- Finished card: tap to enlarge -->
+      <ng-container *ngSwitchCase="'done'">
+        <img class="slot-image"
+             [src]="v.cardImageUrl | media | async"
+             [alt]="v.card?.name || 'Generated card'"
+             (click)="open()"
+             title="Tap to enlarge">
+      </ng-container>
+
+      <div *ngSwitchCase="'failed'" class="slot-status failed">
+        <span class="material-icons">error_outline</span>
+        <p class="status-line">Failed: {{ v.error || 'unknown error' }}</p>
+      </div>
+
+      <div *ngSwitchCase="'rendering'" class="slot-status">
+        <div class="spinner" aria-hidden="true"></div>
+        <p class="status-line">Rendering…</p>
+      </div>
+
+      <div *ngSwitchDefault class="slot-status">
+        <div class="spinner" aria-hidden="true"></div>
+        <p class="status-line" *ngIf="queueText(v) as q">{{ q }}</p>
+        <p class="status-line" *ngIf="!queueText(v) && painting(v)">Painting artwork…</p>
+        <p class="status-line" *ngIf="!queueText(v) && !painting(v) && v.status === 'queued'">Queued</p>
+        <ul class="checklist" *ngIf="v.status === 'generating'">
+          <li [class.ready]="v.textReady">
+            <span class="material-icons">{{ v.textReady ? 'check_circle' : 'radio_button_unchecked' }}</span>
+            Rules text
+          </li>
+          <li [class.ready]="v.artReady">
+            <span class="material-icons">{{ v.artReady ? 'check_circle' : 'radio_button_unchecked' }}</span>
+            Artwork
+          </li>
+        </ul>
+      </div>
+    </ng-container>
+
+    <button *ngIf="showReroll"
+            type="button"
+            class="btn btn-ghost reroll"
+            [disabled]="!canReroll"
+            (click)="onReroll()">
+      <span class="material-icons">casino</span>
+      Reroll
+    </button>
+  </ng-container>
+
+  <ng-template #empty>
+    <div class="slot-status empty">
+      <span class="material-icons">style</span>
+      <p class="status-line">{{ label || 'Empty slot' }}</p>
+    </div>
+  </ng-template>
+</div>
+
+<div class="lightbox" *ngIf="enlarged && view?.cardImageUrl" (click)="close()" role="dialog" aria-label="Enlarged card">
+  <img [src]="view!.cardImageUrl | media | async" [alt]="view!.card?.name || 'Generated card'">
+  <span class="lightbox-hint">Tap anywhere to close</span>
+</div>
