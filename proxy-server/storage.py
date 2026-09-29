@@ -464,17 +464,50 @@ class Storage:
     def cast_vote(self, voter_id: str, set_id: str, card_id: str) -> None:
         """One vote per (voter, set); a new vote overwrites. 400 card not a current card of the set,
         409 set not locked, 409 "Voting is closed" when the event is closed."""
-        raise NotImplementedError
+        with self._tx() as conn:
+            s = conn.execute("SELECT status, event_id FROM sets WHERE id = ?", (set_id,)).fetchone()
+            if s is None:
+                raise StorageError(404, "Set not found")
+            if s["status"] != "locked":
+                raise StorageError(409, "This set is not locked in")
+            event = conn.execute("SELECT status FROM events WHERE id = ?",
+                                 (s["event_id"],)).fetchone()
+            if event is None or event["status"] != "open":
+                raise StorageError(409, "Voting is closed")
+            card = conn.execute("SELECT set_id, replaced FROM cards WHERE id = ?",
+                                (card_id,)).fetchone()
+            if card is None or card["set_id"] != set_id or card["replaced"]:
+                raise StorageError(400, "That card is not one of this set's versions")
+            # Upsert: a double-click or two tabs racing still leave exactly one row.
+            conn.execute(
+                "INSERT INTO votes (voter_id, set_id, card_id, created_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(voter_id, set_id) DO UPDATE SET "
+                "card_id = excluded.card_id, created_at = excluded.created_at",
+                (voter_id, set_id, card_id, _now()))
 
     def vote_tally(self, set_id: str) -> dict[str, int]:
         """card_id -> count, only cards that have votes."""
-        raise NotImplementedError
+        rows = self._conn().execute(
+            "SELECT card_id, COUNT(*) AS n FROM votes WHERE set_id = ? GROUP BY card_id",
+            (set_id,)).fetchall()
+        return {r["card_id"]: r["n"] for r in rows}
 
     def user_vote(self, voter_id: str, set_id: str) -> str | None:
-        raise NotImplementedError
+        row = self._conn().execute(
+            "SELECT card_id FROM votes WHERE voter_id = ? AND set_id = ?",
+            (voter_id, set_id)).fetchone()
+        return row["card_id"] if row is not None else None
 
 
 def leader_flags(tally: dict[str, int], card_ids: list[str]) -> dict[str, dict]:
     """{card_id: {"votes": int, "leader": bool, "tied": bool}} for every id in card_ids.
     A top count > 0 held by one card -> leader; held by several -> all tied; no votes -> neither."""
-    raise NotImplementedError
+    votes = {cid: int(tally.get(cid, 0)) for cid in card_ids}
+    top = max(votes.values(), default=0)
+    top_ids = [cid for cid, n in votes.items() if n == top] if top > 0 else []
+    return {
+        cid: {"votes": n,
+              "leader": len(top_ids) == 1 and cid in top_ids,
+              "tied": len(top_ids) > 1 and cid in top_ids}
+        for cid, n in votes.items()
+    }
