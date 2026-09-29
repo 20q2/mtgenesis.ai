@@ -2096,7 +2096,8 @@ def createCardContent(prompt, card_data=None):
     try:
         # Build enhanced prompt based on card properties
         enhanced_prompt = f"Generate Magic card abilities: {prompt}\n\nOutput format: Only the rules text abilities, no explanations, no card name, no type line."
-        
+        card_type = ''  # read after the card_data branch (type-specific formatting), so bind it up front
+
         if card_data:
             # Analyze mana cost for power level
             cmc = card_data.get('cmc', 0)
@@ -2365,11 +2366,11 @@ def createCardContent(prompt, card_data=None):
             
             # Flying restrictions for ALL creatures (not just legendary)
             creature_flying_guidance = ""
+            # Computed once, unconditionally: the legendary block below reads it even when there is no subtype
+            subtype_lower = (card_data.get('subtype') or '').lower()
             if 'creature' in card_type:
                 subtype = card_data.get('subtype', '')
                 if subtype:
-                    subtype_lower = subtype.lower()
-                    
                     # Define creature types that should rarely have flying
                     flying_restricted_types = [
                         'human', 'dwarf', 'elf', 'orc', 'goblin', 'zombie', 'skeleton', 
@@ -2444,8 +2445,6 @@ def createCardContent(prompt, card_data=None):
                 
                 if subtype:
                     # Add subtype-specific ability suggestions
-                    subtype_lower = subtype.lower()
-                    
                     if 'dragon' in subtype_lower:
                         legendary_guidance += " As a Dragon, consider abilities like flying, dealing damage, treasure generation, or breath weapon effects."
                     elif 'angel' in subtype_lower:
