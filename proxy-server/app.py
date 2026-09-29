@@ -619,12 +619,17 @@ def add_ngrok_headers(response):
 
 @app.after_request
 def after_request(response):
-    """Ensure all responses have CORS headers for HTTPS/ngrok compatibility"""
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,ngrok-skip-browser-warning,Accept,Cache-Control,X-User-Id,X-Admin-Pin')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    response.headers.add('Access-Control-Max-Age', '86400')
-    response.headers.add('ngrok-skip-browser-warning', 'any')
+    """Ensure all responses have CORS headers for HTTPS/ngrok compatibility.
+
+    Assign (not .add) so each header stays single-valued: on exception-handled
+    responses Flask-CORS has already set Access-Control-Allow-Origin, and a
+    second value makes browsers reject the response.
+    """
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,ngrok-skip-browser-warning,Accept,Cache-Control,X-User-Id,X-Admin-Pin'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    response.headers['Access-Control-Max-Age'] = '86400'
+    response.headers['ngrok-skip-browser-warning'] = 'any'
     return response
 
 def createCardImage(prompt, width=408, height=336, card_data=None):
