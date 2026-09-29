@@ -69,9 +69,13 @@
                       [sets]="closedResult.sets"
                       [title]="'Winners · ' + closedResult.name"></app-winners-banner>
 
-  <section class="panel">
+  <section class="panel history-panel">
     <h3 class="section-title">History</h3>
-    <p class="muted" *ngIf="!history.length">No events yet.</p>
+    <div *ngIf="historyError" class="alert alert-error history-error" role="alert">
+      <span class="material-icons">error</span>
+      <span>{{ historyError }}</span>
+    </div>
+    <p class="muted" *ngIf="!historyError && !history.length">No events yet.</p>
     <ul class="history">
       <li *ngFor="let ev of history">
         <a [routerLink]="['/events', ev.id]" class="night-link">{{ ev.name }}</a>

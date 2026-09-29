@@ -56,7 +56,10 @@
   </ng-template>
 </div>
 
-<div class="lightbox" *ngIf="enlarged && view?.cardImageUrl" (click)="close()" role="dialog" aria-label="Enlarged card">
-  <img [src]="view!.cardImageUrl | media | async" [alt]="view!.card?.name || 'Generated card'">
+<!-- Rendered into the CDK overlay container (outside any .panel) by open(). -->
+<ng-template #lightbox>
+<div class="lightbox" (click)="close()" role="dialog" aria-label="Enlarged card">
+  <img [src]="view?.cardImageUrl | media | async" [alt]="view?.card?.name || 'Generated card'">
   <span class="lightbox-hint">Tap anywhere to close</span>
 </div>
+</ng-template>

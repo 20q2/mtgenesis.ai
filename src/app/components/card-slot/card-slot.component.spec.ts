@@ -1,10 +1,20 @@
+import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { OverlayModule } from '@angular/cdk/overlay';
 import { of } from 'rxjs';
 import { CardView } from '../../models/api.model';
 import { MediaPipe } from '../../pipes/media.pipe';
 import { MediaService } from '../../services/media.service';
 import { cardView, doneCard } from '../../testing/fixtures';
 import { CardSlotComponent } from './card-slot.component';
+
+/** Mirrors real usage: every card slot sits inside a .panel (whose backdrop-filter traps position: fixed). */
+@Component({
+  template: '<div class="panel" style="backdrop-filter: blur(6px)"><app-card-slot [view]="view"></app-card-slot></div>'
+})
+class PanelHostComponent {
+  view: CardView | null = null;
+}
 
 describe('CardSlotComponent', () => {
   let fixture: ComponentFixture<CardSlotComponent>;
@@ -14,7 +24,8 @@ describe('CardSlotComponent', () => {
     const media = jasmine.createSpyObj<MediaService>('MediaService', ['src']);
     media.src.and.callFake((u: string | null | undefined) => of(u ? `resolved:${u}` : null));
     TestBed.configureTestingModule({
-      declarations: [CardSlotComponent, MediaPipe],
+      imports: [OverlayModule],
+      declarations: [CardSlotComponent, MediaPipe, PanelHostComponent],
       providers: [{ provide: MediaService, useValue: media }]
     });
     fixture = TestBed.createComponent(CardSlotComponent);
@@ -57,19 +68,10 @@ describe('CardSlotComponent', () => {
     expect(text(el)).toContain('Failed: Ollama unreachable');
   });
 
-  it('shows the finished card image and enlarges it on tap', () => {
+  it('shows the finished card image', () => {
     const el = render(doneCard({ id: 'x' }));
     const img = el.querySelector('img.slot-image') as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('resolved:/api/v1/media/cards/x.png');
-    expect(el.querySelector('.lightbox')).toBeNull();
-
-    img.click();
-    fixture.detectChanges();
-    expect(el.querySelector('.lightbox img')).not.toBeNull();
-
-    (el.querySelector('.lightbox') as HTMLElement).click();
-    fixture.detectChanges();
-    expect(el.querySelector('.lightbox')).toBeNull();
   });
 
   it('emits reroll when allowed, and disables the button otherwise', () => {
@@ -88,5 +90,59 @@ describe('CardSlotComponent', () => {
     component.showReroll = false;
     const el = render(doneCard());
     expect(el.querySelector('button.reroll')).toBeNull();
+  });
+
+  describe('tap to enlarge', () => {
+    let host: ComponentFixture<PanelHostComponent>;
+
+    beforeEach(() => {
+      host = TestBed.createComponent(PanelHostComponent);
+      host.componentInstance.view = doneCard({ id: 'big' });
+      host.detectChanges();
+    });
+
+    afterEach(() => host.destroy());
+
+    const lightbox = () => document.querySelector('.lightbox') as HTMLElement | null;
+
+    it('opens the enlarged card in an overlay outside any .panel, covering the viewport', () => {
+      const panel = host.nativeElement.querySelector('.panel') as HTMLElement;
+      expect(lightbox()).toBeNull();
+
+      (panel.querySelector('img.slot-image') as HTMLImageElement).click();
+      host.detectChanges();
+
+      const box = lightbox();
+      expect(box).not.toBeNull();
+      expect(panel.contains(box)).toBeFalse();
+      expect(box!.closest('.panel')).toBeNull();
+      expect(box!.closest('.cdk-overlay-container')).not.toBeNull();
+      expect(box!.querySelector('img')!.getAttribute('src')).toBe('resolved:/api/v1/media/cards/big.png');
+
+      const rect = box!.getBoundingClientRect();
+      expect(rect.width).toBeCloseTo(document.documentElement.clientWidth, -1);
+      expect(rect.height).toBeCloseTo(document.documentElement.clientHeight, -1);
+    });
+
+    it('closes on tap and on Escape, and removes the overlay when the slot is destroyed', () => {
+      const img = host.nativeElement.querySelector('img.slot-image') as HTMLImageElement;
+      img.click();
+      host.detectChanges();
+      lightbox()!.click();
+      host.detectChanges();
+      expect(lightbox()).toBeNull();
+
+      img.click();
+      host.detectChanges();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      host.detectChanges();
+      expect(lightbox()).toBeNull();
+
+      img.click();
+      host.detectChanges();
+      expect(lightbox()).not.toBeNull();
+      host.destroy();
+      expect(lightbox()).toBeNull();
+    });
   });
 });

@@ -10,6 +10,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatToolbarModule } from '@angular/material/toolbar';
+import { OverlayModule } from '@angular/cdk/overlay';
 
 import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
@@ -60,7 +61,8 @@ import { WinnersBannerComponent } from './components/winners-banner/winners-bann
     MatButtonModule,
     MatIconModule,
     MatProgressSpinnerModule,
-    MatToolbarModule
+    MatToolbarModule,
+    OverlayModule
   ],
   providers: [
     CardService,

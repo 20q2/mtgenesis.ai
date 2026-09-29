@@ -22,6 +22,8 @@ export class AdminPageComponent implements OnInit, OnDestroy {
 
   current: EventView | null = null;
   history: EventSummary[] = [];
+  /** Set when GET /events fails, so the page never claims "No events yet." on an error. */
+  historyError: string | null = null;
   /** The event just closed from this page, with its winners. */
   closedResult: EventView | null = null;
 
@@ -118,8 +120,11 @@ export class AdminPageComponent implements OnInit, OnDestroy {
 
   private loadHistory(): void {
     this.events.list().subscribe({
-      next: list => (this.history = list),
-      error: () => undefined
+      next: list => {
+        this.history = list;
+        this.historyError = null;
+      },
+      error: err => (this.historyError = apiErrorMessage(err, 'Could not load the event history.'))
     });
   }
 

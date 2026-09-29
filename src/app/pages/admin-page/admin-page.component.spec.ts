@@ -156,6 +156,48 @@ describe('AdminPageComponent', () => {
     expect(component.error).toBe('Enter the host PIN.');
   });
 
+  it('shows the error instead of "No events yet." when the history fails to load', () => {
+    const media = jasmine.createSpyObj<MediaService>('MediaService', ['src']);
+    media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
+      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe],
+      providers: [{ provide: MediaService, useValue: media }]
+    });
+    http = TestBed.inject(HttpTestingController);
+    fixture = TestBed.createComponent(AdminPageComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    http.expectOne(`${base}/events/current`).flush(null);
+    http.expectOne(`${base}/events`)
+      .flush({ error: 'database is locked' }, { status: 500, statusText: 'Server Error' });
+    fixture.detectChanges();
+
+    const history = (fixture.nativeElement as HTMLElement).querySelector('.history-panel') as HTMLElement;
+    expect(history.textContent).toContain('database is locked');
+    expect(history.textContent).not.toContain('No events yet.');
+  });
+
+  it('shows a generic message when the history request fails without a body', () => {
+    const media = jasmine.createSpyObj<MediaService>('MediaService', ['src']);
+    media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
+      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe],
+      providers: [{ provide: MediaService, useValue: media }]
+    });
+    http = TestBed.inject(HttpTestingController);
+    fixture = TestBed.createComponent(AdminPageComponent);
+    fixture.detectChanges();
+    http.expectOne(`${base}/events/current`).flush(null);
+    http.expectOne(`${base}/events`).error(new ProgressEvent('error'), { status: 0 });
+    fixture.detectChanges();
+
+    const history = (fixture.nativeElement as HTMLElement).querySelector('.history-panel') as HTMLElement;
+    expect(history.textContent).toContain('Cannot reach the server');
+    expect(history.textContent).not.toContain('No events yet.');
+  });
+
   it('lists event history with links', () => {
     setup(null);
     const links = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.history a'))
