@@ -37,7 +37,7 @@ describe('AppComponent (shell)', () => {
 
   it('shows the nav links and the username when logged in', () => {
     const el: HTMLElement = fixture.nativeElement;
-    const links = Array.from(el.querySelectorAll('nav a')).map(a => a.textContent!.trim());
+    const links = Array.from(el.querySelectorAll('nav.nav-links a')).map(a => a.textContent!.trim());
     expect(links).toEqual(['Create', 'Commander Set', 'Gallery', 'Vote']);
     expect(el.querySelector('.username')!.textContent).toContain('Alice');
   });
@@ -49,7 +49,8 @@ describe('AppComponent (shell)', () => {
   it('hides the nav when logged out', () => {
     user$.next(null);
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('nav')).toBeNull();
+    expect(fixture.nativeElement.querySelector('nav.nav-links')).toBeNull();
+    expect(fixture.nativeElement.querySelector('nav.footer-links')).toBeNull();
   });
 
   it('Log out clears the user and goes to /login', () => {

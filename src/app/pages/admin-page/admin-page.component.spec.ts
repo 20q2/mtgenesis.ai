@@ -1,0 +1,153 @@
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { ReactiveFormsModule } from '@angular/forms';
+import { RouterTestingModule } from '@angular/router/testing';
+import { of } from 'rxjs';
+import { environment } from '../../../environments/environment';
+import { EventSummary } from '../../models/api.model';
+import { WinnersBannerComponent } from '../../components/winners-banner/winners-banner.component';
+import { MediaPipe } from '../../pipes/media.pipe';
+import { MediaService } from '../../services/media.service';
+import { eventView, setCard, setView } from '../../testing/fixtures';
+import { ADMIN_PIN_STORAGE_KEY, AdminPageComponent } from './admin-page.component';
+
+describe('AdminPageComponent', () => {
+  let fixture: ComponentFixture<AdminPageComponent>;
+  let component: AdminPageComponent;
+  let http: HttpTestingController;
+  const base = `${environment.apiUrl}/api/v1`;
+  const history: EventSummary[] = [
+    { id: 'e-2', name: 'AI Night #2', status: 'open', createdAt: '2026-09-28T19:00:00+00:00', closedAt: null },
+    { id: 'e-1', name: 'AI Night #1', status: 'closed', createdAt: '2026-09-21T19:00:00+00:00', closedAt: '2026-09-21T23:00:00+00:00' }
+  ];
+
+  function setup(current: ReturnType<typeof eventView> | null, events: EventSummary[] = history) {
+    const media = jasmine.createSpyObj<MediaService>('MediaService', ['src']);
+    media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
+      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe],
+      providers: [{ provide: MediaService, useValue: media }]
+    });
+    http = TestBed.inject(HttpTestingController);
+    fixture = TestBed.createComponent(AdminPageComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    http.expectOne(`${base}/events/current`).flush(current);
+    http.expectOne(`${base}/events`).flush(events);
+    fixture.detectChanges();
+  }
+
+  beforeEach(() => sessionStorage.removeItem(ADMIN_PIN_STORAGE_KEY));
+  afterEach(() => {
+    http.verify();
+    sessionStorage.removeItem(ADMIN_PIN_STORAGE_KEY);
+  });
+
+  const text = () => (fixture.nativeElement as HTMLElement).textContent!;
+
+  it('keeps the PIN in sessionStorage', () => {
+    setup(null);
+    component.pin.setValue('4242');
+    expect(sessionStorage.getItem(ADMIN_PIN_STORAGE_KEY)).toBe('4242');
+  });
+
+  it('restores the PIN from sessionStorage', () => {
+    sessionStorage.setItem(ADMIN_PIN_STORAGE_KEY, '9999');
+    setup(null);
+    expect(component.pin.value).toBe('9999');
+  });
+
+  it('sends X-Admin-Pin when creating an event', () => {
+    setup(null, []);
+    component.pin.setValue('4242');
+    component.eventName.setValue('  AI Night #3  ');
+    component.createEvent();
+
+    const req = http.expectOne(`${base}/admin/events`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.headers.get('X-Admin-Pin')).toBe('4242');
+    expect(req.request.body).toEqual({ name: 'AI Night #3' });
+    req.flush(eventView({ id: 'e-3', name: 'AI Night #3', sets: [] }));
+    http.expectOne(`${base}/events`).flush(history);
+    fixture.detectChanges();
+
+    expect(component.current?.id).toBe('e-3');
+    expect(text()).toContain('AI Night #3');
+  });
+
+  it('shows "Wrong PIN" on a 403', () => {
+    setup(null, []);
+    component.pin.setValue('0000');
+    component.eventName.setValue('AI Night #3');
+    component.createEvent();
+    http.expectOne(`${base}/admin/events`).flush({ error: 'Forbidden' }, { status: 403, statusText: 'Forbidden' });
+    fixture.detectChanges();
+    expect(text()).toContain('Wrong PIN');
+  });
+
+  it('shows the server text on a 409 (an event is already open)', () => {
+    setup(null, []);
+    component.pin.setValue('4242');
+    component.eventName.setValue('AI Night #3');
+    component.createEvent();
+    http.expectOne(`${base}/admin/events`)
+      .flush({ error: 'An event is already open' }, { status: 409, statusText: 'Conflict' });
+    // The page resyncs the current event and history after a conflict.
+    http.expectOne(`${base}/events/current`).flush(eventView({ id: 'e-9', name: 'Night by someone else' }));
+    http.expectOne(`${base}/events`).flush(history);
+    fixture.detectChanges();
+    expect(text()).toContain('An event is already open');
+    expect(component.current?.id).toBe('e-9');
+  });
+
+  it('closes the current event after confirming, sending X-Admin-Pin, and shows the winners', () => {
+    setup(eventView({ id: 'e-2', name: 'AI Night #2' }));
+    component.pin.setValue('4242');
+    const confirmSpy = spyOn(window, 'confirm').and.returnValue(false);
+
+    component.closeCurrent();
+    expect(confirmSpy).toHaveBeenCalled();
+    http.expectNone(`${base}/admin/events/e-2/close`);
+
+    confirmSpy.and.returnValue(true);
+    component.closeCurrent();
+    const req = http.expectOne(`${base}/admin/events/e-2/close`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.headers.get('X-Admin-Pin')).toBe('4242');
+    req.flush(eventView({
+      id: 'e-2', name: 'AI Night #2', status: 'closed',
+      sets: [setView({ commanderName: 'Grimbold', cards: [setCard({ slot: 1, leader: true, votes: 2 }), setCard({ slot: 2 }), setCard({ slot: 3 })] })]
+    }));
+    http.expectOne(`${base}/events`).flush(history);
+    fixture.detectChanges();
+
+    expect(component.current).toBeNull();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.winners-banner')!.textContent).toContain('Grimbold');
+  });
+
+  it('shows "Wrong PIN" when closing with a bad PIN', () => {
+    setup(eventView({ id: 'e-2' }));
+    component.pin.setValue('1');
+    spyOn(window, 'confirm').and.returnValue(true);
+    component.closeCurrent();
+    http.expectOne(`${base}/admin/events/e-2/close`).flush({ error: 'Forbidden' }, { status: 403, statusText: 'Forbidden' });
+    fixture.detectChanges();
+    expect(text()).toContain('Wrong PIN');
+  });
+
+  it('asks for the PIN before calling the server', () => {
+    setup(null, []);
+    component.eventName.setValue('AI Night #3');
+    component.createEvent();
+    http.expectNone(`${base}/admin/events`);
+    expect(component.error).toBe('Enter the host PIN.');
+  });
+
+  it('lists event history with links', () => {
+    setup(null);
+    const links = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.history a'))
+      .map(a => a.getAttribute('href'));
+    expect(links).toEqual(['/events/e-2', '/events/e-1']);
+  });
+});

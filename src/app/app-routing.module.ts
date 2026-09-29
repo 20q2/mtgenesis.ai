@@ -17,6 +17,7 @@ export const routes: Routes = [
   { path: 'set', component: SetBuilderPageComponent, canActivate: [authGuard], title: 'Commander Set · MTGenesis.AI' },
   { path: 'gallery', component: GalleryPageComponent, canActivate: [authGuard], title: 'Gallery · MTGenesis.AI' },
   { path: 'vote', component: VotePageComponent, canActivate: [authGuard], title: 'Vote · MTGenesis.AI' },
+  { path: 'events', component: EventHistoryPageComponent, canActivate: [authGuard], title: 'Past Events · MTGenesis.AI' },
   { path: 'events/:id', component: EventHistoryPageComponent, canActivate: [authGuard], title: 'Event · MTGenesis.AI' },
   { path: 'admin', component: AdminPageComponent, canActivate: [authGuard], title: 'Host · MTGenesis.AI' },
   { path: '**', redirectTo: 'create' }

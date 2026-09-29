@@ -183,6 +183,21 @@
     font-size: 0.9rem;
     font-family: 'Beleren', 'Palatino', serif;
   }
+
+  .footer-links {
+    display: flex;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+
+    a {
+      color: rgba(243, 233, 210, 0.8);
+      text-decoration: underline;
+
+      &:hover {
+        color: #f5d77a;
+      }
+    }
+  }
 }
 
 @media (max-width: 768px) {

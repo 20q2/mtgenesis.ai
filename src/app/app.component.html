@@ -32,5 +32,10 @@
   <div class="footer-content">
     <img src="assets/site_logo.png" alt="MTGenesis.AI Logo" class="footer-logo">
     <p>&copy; 2025 MTGenesis.AI - Create custom Magic: The Gathering cards</p>
+    <nav class="footer-links" *ngIf="user$ | async">
+      <a routerLink="/events">Past events</a>
+      <span aria-hidden="true">·</span>
+      <a routerLink="/admin">Host tools</a>
+    </nav>
   </div>
 </footer>

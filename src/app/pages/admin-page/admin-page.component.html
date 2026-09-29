@@ -1,5 +1,85 @@
-<div class="page">
+<div class="page admin-page">
   <section class="panel">
     <h2 class="page-title">Host Tools</h2>
+    <p class="muted">Open tonight's event, then close it when everyone has voted. One event can be open at a time.</p>
+
+    <div class="pin-row">
+      <label for="adminPin" class="section-title">Host PIN</label>
+      <input id="adminPin"
+             class="night-input pin-input"
+             type="password"
+             inputmode="numeric"
+             autocomplete="off"
+             [formControl]="pin"
+             placeholder="PIN">
+      <span class="muted">Kept for this browser tab only.</span>
+    </div>
+  </section>
+
+  <div *ngIf="error" class="alert alert-error" role="alert">
+    <span class="material-icons">error</span>
+    <span>{{ error }}</span>
+    <button type="button" class="alert-close" (click)="clearMessages()" aria-label="Dismiss">×</button>
+  </div>
+  <div *ngIf="success" class="alert alert-success" role="status">
+    <span class="material-icons">check_circle</span>
+    <span>{{ success }}</span>
+    <button type="button" class="alert-close" (click)="clearMessages()" aria-label="Dismiss">×</button>
+  </div>
+
+  <section class="panel">
+    <h3 class="section-title">Current event</h3>
+    <p class="muted" *ngIf="loading">Loading…</p>
+
+    <ng-container *ngIf="!loading">
+      <div *ngIf="current as ev; else noEvent" class="current-event">
+        <div>
+          <strong class="event-name">{{ ev.name }}</strong>
+          <span class="badge badge-gold">Open</span>
+          <p class="muted">
+            {{ ev.sets.length }} {{ ev.sets.length === 1 ? 'set' : 'sets' }} locked in ·
+            opened {{ ev.createdAt | date:'short' }} ·
+            <a routerLink="/vote" class="night-link">vote page</a>
+          </p>
+        </div>
+        <button type="button" class="btn btn-danger close-event" [disabled]="closing" (click)="closeCurrent()">
+          <span class="material-icons">gavel</span>
+          {{ closing ? 'Closing…' : 'Close event' }}
+        </button>
+      </div>
+
+      <ng-template #noEvent>
+        <p class="muted">No event is open.</p>
+        <form class="create-row" (ngSubmit)="createEvent()">
+          <input class="night-input"
+                 type="text"
+                 [formControl]="eventName"
+                 maxlength="80"
+                 placeholder="Event name, e.g. AI Night #3">
+          <button type="submit" class="btn btn-gold create-event" [disabled]="creating">
+            <span class="material-icons">celebration</span>
+            {{ creating ? 'Creating…' : 'Create event' }}
+          </button>
+        </form>
+      </ng-template>
+    </ng-container>
+  </section>
+
+  <app-winners-banner *ngIf="closedResult"
+                      [sets]="closedResult.sets"
+                      [title]="'Winners · ' + closedResult.name"></app-winners-banner>
+
+  <section class="panel">
+    <h3 class="section-title">History</h3>
+    <p class="muted" *ngIf="!history.length">No events yet.</p>
+    <ul class="history">
+      <li *ngFor="let ev of history">
+        <a [routerLink]="['/events', ev.id]" class="night-link">{{ ev.name }}</a>
+        <span class="badge" [class.badge-gold]="ev.status === 'open'" [class.badge-muted]="ev.status === 'closed'">
+          {{ ev.status === 'open' ? 'Open' : 'Closed' }}
+        </span>
+        <span class="muted">{{ ev.createdAt | date:'mediumDate' }}</span>
+      </li>
+    </ul>
   </section>
 </div>

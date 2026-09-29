@@ -21,6 +21,11 @@ export class GenerationService {
     return this.http.post<CardView>(api(`/cards/${encodeURIComponent(cardId)}/reroll`), {});
   }
 
+  /** All my cards, newest first, replaced (rerolled) ones included. */
+  myCards(): Observable<CardView[]> {
+    return this.http.get<CardView[]>(api('/me/cards'));
+  }
+
   getCard(cardId: string): Observable<CardView> {
     return this.http.get<CardView>(api(`/cards/${encodeURIComponent(cardId)}`));
   }
