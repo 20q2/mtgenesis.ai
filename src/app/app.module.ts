@@ -27,6 +27,8 @@ import { AdminPageComponent } from './pages/admin-page/admin-page.component';
 import { QueueBadgeComponent } from './components/queue-badge/queue-badge.component';
 import { MediaPipe } from './pipes/media.pipe';
 import { CardSlotComponent } from './components/card-slot/card-slot.component';
+import { SetRowComponent } from './components/set-row/set-row.component';
+import { WinnersBannerComponent } from './components/winners-banner/winners-banner.component';
 
 @NgModule({
   declarations: [
@@ -42,6 +44,8 @@ import { CardSlotComponent } from './components/card-slot/card-slot.component';
     AdminPageComponent,
     QueueBadgeComponent,
     CardSlotComponent,
+    SetRowComponent,
+    WinnersBannerComponent,
     MediaPipe
   ],
   imports: [

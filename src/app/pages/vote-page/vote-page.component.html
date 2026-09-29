@@ -1,5 +1,55 @@
-<div class="page">
-  <section class="panel">
-    <h2 class="page-title">Vote</h2>
+<div class="page vote-page">
+  <p *ngIf="event === undefined && !loadError" class="muted loading">Loading the vote…</p>
+
+  <div *ngIf="loadError" class="alert alert-error" role="alert">
+    <span class="material-icons">cloud_off</span>
+    <span>{{ loadError }}</span>
+  </div>
+
+  <!-- No open event -->
+  <section *ngIf="event === null" class="panel empty-state">
+    <h2 class="page-title">No event open</h2>
+    <p class="muted">Voting starts when the host opens tonight's event.</p>
+    <p><a routerLink="/events" class="night-link">See past events</a></p>
   </section>
+
+  <ng-container *ngIf="event as ev">
+    <section class="panel vote-header">
+      <div>
+        <h2 class="page-title">{{ ev.name }}</h2>
+        <p class="muted" *ngIf="!isClosed">
+          One vote per set &mdash; your own set included. You can change your vote until the host closes the event.
+        </p>
+        <p class="muted" *ngIf="isClosed">This event is closed. Votes are final.</p>
+      </div>
+      <span class="badge" [class.badge-gold]="!isClosed" [class.badge-muted]="isClosed">
+        {{ isClosed ? 'Closed' : 'Voting open' }}
+      </span>
+    </section>
+
+    <app-winners-banner *ngIf="isClosed" [sets]="ev.sets"></app-winners-banner>
+
+    <div *ngIf="error" class="alert alert-error" role="alert">
+      <span class="material-icons">error</span>
+      <span>{{ error }}</span>
+      <button type="button" class="alert-close" (click)="clearError()" aria-label="Dismiss">×</button>
+    </div>
+
+    <section *ngIf="!ev.sets.length" class="panel">
+      <p class="muted">
+        No sets locked in yet.
+        <a routerLink="/set" class="night-link">Build and lock in your commander set</a>.
+      </p>
+    </section>
+
+    <app-set-row *ngFor="let set of ev.sets; trackBy: trackSet"
+                 [set]="set"
+                 [final]="isClosed"
+                 [disabled]="isClosed || voting.has(set.id)"
+                 (vote)="vote(set, $event)"></app-set-row>
+
+    <p class="muted history-link">
+      <a routerLink="/events" class="night-link">Past events</a>
+    </p>
+  </ng-container>
 </div>
