@@ -9,10 +9,11 @@ from pathlib import Path
 USE_CUDA = True
 
 # ===== MODEL SELECTION =====
-# "heavy"       - IMAGE_MODEL_ID below (SDXL fine-tune; needs a good GPU)
-# "medium"      - runwayml/stable-diffusion-v1-5 (balanced quality/performance)
-# "light"       - CompVis/stable-diffusion-v1-4 (lighter, works better on CPU)
-# "placeholder" - disable image generation entirely (for testing/debugging)
+# "placeholder" - disable image generation entirely: solid gray art, torch is never loaded
+#                 (for testing/debugging)
+# anything else - IMAGE_MODEL_ID below (SDXL fine-tune; needs a good GPU). "heavy" is the
+#                 normal value; "medium" and "light" are legacy names that now behave
+#                 exactly like "heavy" (the old SD 1.5 / SD 1.4 options were removed).
 MODEL_SIZE = "heavy"
 
 # ===== IMAGE GENERATION =====
@@ -21,6 +22,14 @@ IMAGE_STEPS = 6
 IMAGE_GUIDANCE = 2.0
 IMAGE_GEN_SIZE = (1088, 896)   # SDXL render size; same 1.214 aspect ratio as the art box
 ART_BOX_SIZE = (408, 336)      # size of the art window on the rendered card
+# fp16-safe SDXL VAE: decodes in fp16 instead of upcasting to fp32 (8.3s -> 1.9s per image,
+# ~1.5 GB less VRAM, visually identical). None = use the model's own VAE.
+IMAGE_VAE_ID = "madebyollin/sdxl-vae-fp16-fix"
+# Keep each SDXL component in RAM and move it to the GPU only while it runs (peak ~5.6 GB
+# instead of ~9.4 GB). Needed on a 12 GB card while Ollama keeps Mistral (~5 GB) resident:
+# without it the driver spills to system RAM and one image takes ~280s instead of ~4s.
+# Set False on a 16 GB+ GPU (or with no LLM on the GPU) for ~2s instead of ~4s per image.
+IMAGE_CPU_OFFLOAD = True
 
 # ===== AI NIGHT =====
 ADMIN_PIN = "1234"             # change before the event; required for /admin actions
