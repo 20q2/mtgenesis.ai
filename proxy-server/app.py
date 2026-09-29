@@ -1,4 +1,8 @@
 import os
+import sys
+# Logs use emoji; Windows defaults to cp1252 when output is redirected, which crashes print()
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 # Disable xformers to avoid version conflicts - MUST be set before importing diffusers
 os.environ['XFORMERS_DISABLED'] = '1'
 os.environ['DISABLE_XFORMERS'] = '1'
