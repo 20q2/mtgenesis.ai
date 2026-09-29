@@ -22,8 +22,10 @@ MAX_PROMPT_TOKENS = 75       # CLIP's 77 minus the start/end tokens
 SUBJECT_MIN_TOKENS = 30      # the subject always keeps at least this much room
 
 STYLE_SUFFIX = "painterly Magic: The Gathering fantasy illustration, dramatic lighting, highly detailed"
+# Spec §6 list, plus nsfw/nudity: SDXL has no safety checker and DreamShaper drifts toward
+# nudity on humanoid subjects (seen on a sphinx in the comparison run).
 NEGATIVE_PROMPT = ("text, letters, watermark, signature, border, frame, card, UI, "
-                   "blurry, lowres, deformed, extra limbs")
+                   "blurry, lowres, deformed, extra limbs, nsfw, nudity")
 GENERIC_CONTEXT = "magical fantasy scene"
 
 WUBRG = "WUBRG"

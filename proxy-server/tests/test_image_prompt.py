@@ -13,7 +13,7 @@ def test_subject_first_and_style():
 
 def test_negative_prompt():
     _, negative = build_art_prompt("a goblin shaman", {"colors": ["R"], "type": "Creature"})
-    for word in ("text", "watermark", "border", "frame", "blurry"):
+    for word in ("text", "watermark", "border", "frame", "blurry", "nsfw", "nudity"):
         assert word in negative
 
 
