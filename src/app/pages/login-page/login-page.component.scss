@@ -8,13 +8,13 @@
   width: 100%;
   max-width: 460px;
   text-align: center;
-  padding: 2rem 1.75rem 1.75rem;
+  padding: 1.5rem 1.5rem 1.35rem;
 }
 
 .login-logo {
   display: block;
-  width: 88px;
-  height: 88px;
+  width: 72px;
+  height: 72px;
   margin: -0.5rem auto 0.75rem;
   object-fit: contain;
   filter: drop-shadow(0 6px 18px rgba(95, 176, 230, 0.45));
@@ -35,7 +35,7 @@
 .login-form {
   display: flex;
   gap: 0.5rem;
-  margin-top: 1.25rem;
+  margin-top: 1rem;
 
   .night-input {
     flex: 1;

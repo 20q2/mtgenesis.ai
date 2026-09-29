@@ -1,5 +1,5 @@
 <div class="card-preview-wrapper">
-  <article class="mtg-card" [style.--frame]="getCardBackground()" aria-label="Card preview">
+  <article class="mtg-card" appTilt [style.--frame]="getCardBackground()" aria-label="Card preview">
     <div class="frame">
       <header class="title-bar">
         <span class="card-name" [class.placeholder]="!card.name">{{ card.name || 'Card Name' }}</span>

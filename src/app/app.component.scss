@@ -3,10 +3,8 @@
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  /* The painted swirl stays, dimmed so panels and text read cleanly on top of it. */
+  /* The painted swirl, at full brightness behind the light panels */
   background:
-    radial-gradient(ellipse at 50% -10%, rgba(14, 12, 24, 0.2), rgba(14, 12, 24, 0.75) 70%),
-    linear-gradient(rgba(14, 12, 24, 0.45), rgba(14, 12, 24, 0.45)),
     url('../assets/site_background.png') center / cover fixed no-repeat,
     var(--bg);
 }
@@ -21,10 +19,11 @@
   gap: 1.5rem;
   min-height: var(--topbar-h);
   padding: 0.5rem 1.25rem;
-  background: rgba(14, 12, 24, 0.82);
+  color: var(--chrome-text);
+  background: var(--chrome);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--chrome-line);
   box-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.8);
 }
 
@@ -37,8 +36,8 @@
   border-radius: var(--r-sm);
 
   .brand-logo {
-    width: 40px;
-    height: 40px;
+    width: 34px;
+    height: 34px;
     object-fit: contain;
     filter: drop-shadow(0 2px 6px rgba(95, 176, 230, 0.35));
     transition: transform var(--dur) var(--ease-out);
@@ -50,10 +49,10 @@
 
   .brand-name {
     font-family: var(--font-display);
-    font-size: 1.45rem;
+    font-size: 1.3rem;
     font-weight: 700;
     line-height: 1;
-    color: var(--text);
+    color: var(--chrome-text);
     letter-spacing: 0.01em;
   }
 
@@ -71,17 +70,17 @@
     position: relative;
     display: inline-flex;
     align-items: center;
-    min-height: 40px;
-    padding: 0 0.85rem;
+    min-height: 34px;
+    padding: 0 0.75rem;
     border-radius: var(--r-pill);
     font-family: var(--font-caps);
-    font-size: 1.02rem;
-    color: var(--text-muted);
+    font-size: 0.95rem;
+    color: var(--chrome-muted);
     text-decoration: none;
     transition: color var(--dur-fast) ease, background-color var(--dur-fast) ease;
 
     &:hover {
-      color: var(--text);
+      color: var(--chrome-text);
       background: rgba(255, 255, 255, 0.06);
     }
 
@@ -94,7 +93,7 @@
         content: '';
         position: absolute;
         left: 50%;
-        bottom: -9px;
+        bottom: -8px;
         width: 7px;
         height: 7px;
         background: var(--gold);
@@ -124,8 +123,8 @@
   .avatar {
     display: inline-grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     background: linear-gradient(150deg, var(--gold-bright), var(--gold-deep));
     color: var(--text-on-gold);
@@ -152,7 +151,7 @@
     border-radius: var(--r-pill);
     border: none;
     background: transparent;
-    color: var(--text-muted);
+    color: var(--chrome-muted);
     font-size: 0.88rem;
     cursor: pointer;
     transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
@@ -163,7 +162,7 @@
 
     &:hover {
       background: rgba(255, 255, 255, 0.08);
-      color: var(--text);
+      color: var(--chrome-text);
     }
   }
 }
@@ -182,9 +181,9 @@
   flex-wrap: wrap;
   gap: 0.5rem 1rem;
   padding: 1.1rem 1rem;
-  border-top: 1px solid var(--line);
-  background: rgba(14, 12, 24, 0.85);
-  color: var(--text-faint);
+  border-top: 1px solid var(--chrome-line);
+  background: var(--chrome);
+  color: var(--chrome-faint);
   font-size: 0.9rem;
   text-align: center;
 
@@ -204,7 +203,7 @@
       display: inline-flex;
       align-items: center;
       min-height: 36px;
-      color: var(--text-muted);
+      color: var(--chrome-muted);
 
       &:hover {
         color: var(--gold-bright);
@@ -284,7 +283,7 @@
     background: rgba(14, 12, 24, 0.94);
     backdrop-filter: blur(14px) saturate(140%);
     -webkit-backdrop-filter: blur(14px) saturate(140%);
-    border-top: 1px solid var(--line);
+    border-top: 1px solid var(--chrome-line);
 
     a {
       position: relative;
@@ -293,7 +292,7 @@
       align-items: center;
       justify-content: center;
       gap: 0.1rem;
-      color: var(--text-faint);
+      color: var(--chrome-faint);
       text-decoration: none;
       font-size: 0.72rem;
       font-weight: 700;

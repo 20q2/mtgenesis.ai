@@ -26,7 +26,7 @@
   margin-bottom: 0;
 
   .intro {
-    margin-bottom: 1.4rem;
+    margin-bottom: 1rem;
     max-width: 60ch;
   }
 }
@@ -61,7 +61,7 @@
 .stage-card {
   position: relative;
   width: 100%;
-  max-width: 360px;
+  max-width: 330px;
   display: flex;
   justify-content: center;
 
@@ -76,7 +76,8 @@
 
 .complete-card-display {
   width: 100%;
-  animation: card-arrive 700ms var(--ease-out) both;
+  /* backwards, not both: a held end state would override the tilt transform */
+  animation: card-arrive 700ms var(--ease-out) backwards;
 
   &.card-exit-animation {
     animation: card-leave 500ms var(--ease-out) forwards;
@@ -88,7 +89,7 @@
   width: 100%;
   height: auto;
   border-radius: 4.5% / 3.2%;
-  box-shadow: var(--shadow-2), 0 0 0 1px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 16px 34px -16px rgba(20, 16, 40, 0.65), 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
 
 @keyframes card-arrive {
@@ -130,9 +131,9 @@
   animation: fadeIn 300ms ease both;
 
   .progress-icon .material-icons {
-    font-size: 3rem;
-    color: var(--gold-bright);
-    filter: drop-shadow(0 0 14px rgba(245, 215, 122, 0.7));
+    font-size: 2.5rem;
+    color: var(--accent);
+    filter: drop-shadow(0 0 12px rgba(245, 215, 122, 0.9));
     animation: sparkle 2.4s var(--ease-out) infinite;
   }
 
@@ -141,7 +142,7 @@
     display: flex;
     align-items: center;
     font-family: var(--font-display);
-    font-size: 1.35rem;
+    font-size: 1.2rem;
     line-height: 1.2;
     color: var(--text);
     text-wrap: balance;
@@ -154,7 +155,7 @@
 
   .job-line {
     font-weight: 700;
-    color: var(--gold-bright);
+    color: var(--accent-text);
     margin-bottom: 0.4rem;
   }
 

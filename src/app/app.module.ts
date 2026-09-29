@@ -21,6 +21,7 @@ import { EventHistoryPageComponent } from './pages/event-history-page/event-hist
 import { AdminPageComponent } from './pages/admin-page/admin-page.component';
 import { QueueBadgeComponent } from './components/queue-badge/queue-badge.component';
 import { MediaPipe } from './pipes/media.pipe';
+import { TiltDirective } from './directives/tilt.directive';
 import { CardSlotComponent } from './components/card-slot/card-slot.component';
 import { SetRowComponent } from './components/set-row/set-row.component';
 import { WinnersBannerComponent } from './components/winners-banner/winners-banner.component';
@@ -41,7 +42,8 @@ import { WinnersBannerComponent } from './components/winners-banner/winners-bann
     CardSlotComponent,
     SetRowComponent,
     WinnersBannerComponent,
-    MediaPipe
+    MediaPipe,
+    TiltDirective
   ],
   imports: [
     BrowserModule,

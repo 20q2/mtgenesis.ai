@@ -28,9 +28,9 @@
 
   .tile-name {
     font-family: var(--font-display);
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     font-weight: 700;
-    color: var(--gold-bright);
+    color: var(--text);
     word-break: break-word;
   }
 
@@ -50,7 +50,7 @@
     flex: 1;
 
     .material-icons {
-      color: var(--gold-bright);
+      color: var(--accent-text);
     }
   }
 }

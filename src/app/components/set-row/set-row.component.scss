@@ -11,8 +11,8 @@
 
   .commander {
     font-family: var(--font-display);
-    font-size: 1.35rem;
-    color: var(--gold-bright);
+    font-size: 1.2rem;
+    color: var(--text);
     word-break: break-word;
   }
 }
@@ -46,7 +46,7 @@
   padding: 0.6rem;
   border-radius: 16px;
   border: 2px solid transparent;
-  background: rgba(10, 10, 20, 0.35);
+  background: var(--surface-tint);
   transition: box-shadow 0.3s ease, border-color 0.3s ease;
 
   &.mine {
@@ -110,14 +110,14 @@
 }
 
 .flag-tied {
-  background: rgba(192, 192, 210, 0.25);
-  color: #e5e7eb;
-  border: 1px solid rgba(192, 192, 210, 0.6);
+  background: var(--surface-tint);
+  color: var(--text-muted);
+  border: 1px solid var(--line-strong);
 }
 
 .flag-mine {
   background: rgba(96, 165, 250, 0.2);
-  color: #bfdbfe;
+  color: var(--you);
   border: 1px solid rgba(96, 165, 250, 0.6);
 }
 

@@ -3,7 +3,7 @@
     <ng-container [ngSwitch]="v.status">
       <!-- Finished card: tap to enlarge -->
       <ng-container *ngSwitchCase="'done'">
-        <img class="slot-image"
+        <img class="slot-image" appTilt="8"
              [src]="v.cardImageUrl | media | async"
              [alt]="v.card?.name || 'Generated card'"
              (click)="open()"

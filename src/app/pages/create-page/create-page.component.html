@@ -17,7 +17,7 @@
       <div class="stage-card" [class.is-generating]="isGenerating">
         <app-card-preview [card]="currentCard" *ngIf="!currentCard.cardImageUrl"></app-card-preview>
 
-        <div class="complete-card-display"
+        <div class="complete-card-display" appTilt
              *ngIf="currentCard.cardImageUrl || cardExiting"
              [class.card-exit-animation]="cardExiting">
           <img [src]="currentCard.cardImageUrl | media | async"
