@@ -1,0 +1,29 @@
+<div class="page login-page">
+  <section class="panel login-panel">
+    <h2 class="page-title">Welcome, Planeswalker</h2>
+    <p class="muted">Pick a username to join AI Night. No password &mdash; just your name.</p>
+
+    <form (ngSubmit)="submit()" class="login-form">
+      <label for="username" class="sr-only">Username</label>
+      <input id="username"
+             class="night-input"
+             type="text"
+             [formControl]="username"
+             maxlength="24"
+             autocomplete="nickname"
+             autocapitalize="off"
+             placeholder="Your username"
+             [attr.aria-invalid]="!!error"
+             autofocus>
+      <button type="submit" class="btn btn-gold" [disabled]="submitting">
+        <span class="material-icons">login</span>
+        {{ submitting ? 'Entering…' : 'Enter' }}
+      </button>
+    </form>
+
+    <div *ngIf="error" class="alert alert-error" role="alert">
+      <span class="material-icons">error</span>
+      <span>{{ error }}</span>
+    </div>
+  </section>
+</div>
