@@ -20,7 +20,7 @@ MODEL_SIZE = "heavy"
 # ===== IMAGE GENERATION =====
 IMAGE_MODEL_ID = "Lykon/dreamshaper-xl-lightning"
 IMAGE_STEPS = 6
-IMAGE_GUIDANCE = 2.0
+IMAGE_GUIDANCE = 1.5           # higher pushes Lightning models toward harsh contrast and blown whites
 IMAGE_GEN_SIZE = (1088, 896)   # SDXL render size; same 1.214 aspect ratio as the art box
 ART_BOX_SIZE = (408, 336)      # size of the art window on the rendered card
 # fp16-safe SDXL VAE: decodes in fp16 instead of upcasting to fp32 (8.3s -> 1.9s per image,

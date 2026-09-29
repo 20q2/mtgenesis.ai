@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {
-  CardParams, PoolColorRule, PoolSlotSpec, PoolSummary, PoolTypeRule, PoolView
+  CardParams, Medal, PoolColorRule, PoolSlotSpec, PoolSummary, PoolTypeRule, PoolView
 } from '../models/api.model';
 import { api } from './api.util';
 
@@ -33,13 +33,22 @@ export class PoolService {
     return this.http.post<PoolView>(api(`/pools/entries/${encodeURIComponent(entryId)}/withdraw`), {});
   }
 
-  /** One vote per slot; voting again moves it. You can't vote for your own card. */
-  vote(slotId: string, entryId: string): Observable<PoolView> {
-    return this.http.post<PoolView>(api('/pools/votes'), { slotId, entryId });
+  /** Gold/silver/bronze a card (moves that medal off any other card in the slot). Not your own card. */
+  medal(entryId: string, medal: Medal): Observable<PoolView> {
+    return this.http.post<PoolView>(api('/pools/medals'), { entryId, medal });
   }
 
-  clearVote(slotId: string): Observable<PoolView> {
-    return this.http.post<PoolView>(api('/pools/votes/clear'), { slotId });
+  clearMedal(entryId: string): Observable<PoolView> {
+    return this.http.post<PoolView>(api('/pools/medals/clear'), { entryId });
+  }
+
+  /** Spend one of your bans on a card; banThreshold bans disqualify it at close. */
+  ban(entryId: string): Observable<PoolView> {
+    return this.http.post<PoolView>(api('/pools/bans'), { entryId });
+  }
+
+  unban(entryId: string): Observable<PoolView> {
+    return this.http.post<PoolView>(api('/pools/bans/clear'), { entryId });
   }
 
   createPool(name: string, maxEntriesPerUser: number, slots: PoolSlotSpec[], pin: string): Observable<PoolView> {

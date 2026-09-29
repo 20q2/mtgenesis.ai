@@ -102,7 +102,7 @@ export class PoolAdminComponent implements OnInit {
         this.current = pool;
         this.closedResult = null;
         this.form.controls.name.setValue('');
-        this.success = `"${pool.name}" is open with ${pool.slots.length} slots. Players can submit and vote on /pool.`;
+        this.success = `"${pool.name}" is open with ${pool.slots.length} slots. Players can submit and hand out medals on /pool.`;
       },
       error: err => this.handleError(err, 'Could not open the pool.')
     });

@@ -28,8 +28,8 @@ describe('PoolPageComponent', () => {
         poolSlot({
           id: 'red', position: 1,
           entries: [
-            poolEntry({ id: 'e1', slotId: 'red', votes: 3, leader: true, card: redCard('c1') }),
-            poolEntry({ id: 'e2', slotId: 'red', votes: 1, mine: true, username: 'Me', card: redCard('c2') })
+            poolEntry({ id: 'e1', slotId: 'red', gold: 2, silver: 1, points: 8, leader: true, card: redCard('c1') }),
+            poolEntry({ id: 'e2', slotId: 'red', bronze: 1, points: 1, mine: true, username: 'Me', card: redCard('c2') })
           ],
           myEntryId: 'e2'
         }),
@@ -49,7 +49,7 @@ describe('PoolPageComponent', () => {
 
   function setup(current: PoolView | null) {
     pools = jasmine.createSpyObj<PoolService>('PoolService',
-      ['current', 'get', 'list', 'submit', 'withdraw', 'vote', 'clearVote']);
+      ['current', 'get', 'list', 'submit', 'withdraw', 'medal', 'clearMedal', 'ban', 'unban']);
     pools.current.and.returnValue(of(current));
     pools.list.and.returnValue(of([]));
     generation = jasmine.createSpyObj<GenerationService>('GenerationService', ['myCards']);
@@ -87,15 +87,17 @@ describe('PoolPageComponent', () => {
     expect(el().textContent).toContain('1 / 2 submitted');
     expect(entry('e1').classList).toContain('leader');
     expect(entry('e1').textContent).toContain('Leading');
-    expect(entry('e1').textContent).toContain('3 votes');
+    expect(entry('e1').textContent).toContain('8 pts');
+    expect(el().textContent).toContain('2 / 2 bans left');
   });
 
-  it('has no vote button on my own card, only Withdraw', () => {
+  it('has no medal or ban buttons on my own card, only Withdraw', () => {
     setup(contested());
-    expect(button(entry('e2'), '.vote-button')).toBeNull();
+    expect(entry('e2').querySelectorAll('.medal-button').length).toBe(0);
+    expect(button(entry('e2'), '.ban-button')).toBeNull();
     expect(button(entry('e2'), '.withdraw-button')).not.toBeNull();
     expect(entry('e2').textContent).toContain('Your card');
-    expect(button(entry('e1'), '.vote-button')).not.toBeNull();
+    expect(entry('e1').querySelectorAll('.medal-button').length).toBe(3);
   });
 
   it('flags an over-the-curve card', () => {
@@ -105,31 +107,50 @@ describe('PoolPageComponent', () => {
     expect(power.textContent).toContain('Over the curve');
   });
 
-  it('votes, and a second click on my pick clears the vote', () => {
-    setup(contested());
-    const voted = contested();
-    voted.slots[0].myVoteEntryId = 'e1';
-    pools.vote.and.returnValue(of(voted));
-    button(entry('e1'), '.vote-button')!.click();
-    fixture.detectChanges();
-    expect(pools.vote).toHaveBeenCalledOnceWith('red', 'e1');
-    expect(entry('e1').classList).toContain('pick');
+  const medalButton = (id: string, medal: string) =>
+    entry(id).querySelector(`.medal-button.${medal}`) as HTMLButtonElement;
 
-    pools.clearVote.and.returnValue(of(contested()));
-    button(entry('e1'), '.vote-button')!.click();
+  it('gives a medal, and clicking my medal again takes it back', () => {
+    setup(contested());
+    const given = contested();
+    given.slots[0].entries[0].myMedal = 'gold';
+    given.slots[0].myMedals.gold = 'e1';
+    pools.medal.and.returnValue(of(given));
+    medalButton('e1', 'gold').click();
     fixture.detectChanges();
-    expect(pools.clearVote).toHaveBeenCalledOnceWith('red');
-    expect(entry('e1').classList).not.toContain('pick');
+    expect(pools.medal).toHaveBeenCalledOnceWith('e1', 'gold');
+    expect(medalButton('e1', 'gold').classList).toContain('on');
+    expect(entry('e1').textContent).toContain('Your gold');
+
+    pools.clearMedal.and.returnValue(of(contested()));
+    medalButton('e1', 'gold').click();
+    fixture.detectChanges();
+    expect(pools.clearMedal).toHaveBeenCalledOnceWith('e1');
+    expect(medalButton('e1', 'gold').classList).not.toContain('on');
   });
 
-  it('shows the server error when a vote is rejected', () => {
+  it('bans after confirming, and disables Ban when none are left', () => {
     setup(contested());
-    pools.vote.and.returnValue(throwError(() => new HttpErrorResponse({
-      status: 403, error: { error: "You can't vote for your own card" }
-    })));
-    button(entry('e1'), '.vote-button')!.click();
+    spyOn(window, 'confirm').and.returnValue(true);
+    const banned = contested({ myBansLeft: 0 });
+    banned.slots[1].entries[0].bannedByMe = true;
+    pools.ban.and.returnValue(of(banned));
+    button(entry('pot'), '.ban-button')!.click();
     fixture.detectChanges();
-    expect(el().querySelector('.alert-error')!.textContent).toContain("You can't vote for your own card");
+    expect(pools.ban).toHaveBeenCalledOnceWith('pot');
+    expect(entry('pot').textContent).toContain('You banned');
+    expect(button(entry('pot'), '.ban-button')!.disabled).toBeFalse();   // can still lift it
+    expect(button(entry('e1'), '.ban-button')!.disabled).toBeTrue();     // no bans left
+  });
+
+  it('shows the server error when a medal is rejected', () => {
+    setup(contested());
+    pools.medal.and.returnValue(throwError(() => new HttpErrorResponse({
+      status: 403, error: { error: "You can't give a medal to your own card" }
+    })));
+    medalButton('e1', 'silver').click();
+    fixture.detectChanges();
+    expect(el().querySelector('.alert-error')!.textContent).toContain("You can't give a medal to your own card");
   });
 
   it('the picker offers only my finished cards that fit the slot and are not in the pool', () => {
@@ -164,12 +185,18 @@ describe('PoolPageComponent', () => {
   it('a closed pool lists the legal cards with their submitters and hides voting', () => {
     const closed = contested({ status: 'closed', closedAt: '2026-10-10T23:00:00+00:00' });
     closed.slots[0].entries[0].username = 'Alice';
+    Object.assign(closed.slots[1].entries[0], { disqualified: true, bans: 4, points: 6, username: 'Bob' });
     setup(closed);
     const results = el().querySelector('.results') as HTMLElement;
     expect(results.textContent).toContain('Legal cards');
     expect(results.textContent).toContain('Red creature');
     expect(results.textContent).toContain('by Alice');
-    expect(el().querySelectorAll('.vote-button').length).toBe(0);
+    expect(results.textContent).toContain('Banned by the table');
+    expect(results.textContent).toContain('Pot of Green');
+    expect(results.textContent).toContain('4 bans');
+    expect(entry('pot').classList).toContain('disqualified');
+    expect(entry('pot').textContent).toContain('Banned out');
+    expect(el().querySelectorAll('.medal-button, .ban-button').length).toBe(0);
     expect(el().querySelector('.submit-tile')).toBeNull();
     expect(entry('e1').textContent).toContain('Legal');
   });

@@ -16,7 +16,7 @@ describe('PoolService', () => {
 
   afterEach(() => http.verify());
 
-  it('submits, withdraws, votes and clears votes', () => {
+  it('submits, withdraws, gives and takes back medals, bans and unbans', () => {
     service.submit('s1', 'c1').subscribe();
     let req = http.expectOne(`${base}/pools/entries`);
     expect(req.request.method).toBe('POST');
@@ -26,15 +26,23 @@ describe('PoolService', () => {
     service.withdraw('e1').subscribe();
     http.expectOne(`${base}/pools/entries/e1/withdraw`).flush({});
 
-    service.vote('s1', 'e2').subscribe();
-    req = http.expectOne(`${base}/pools/votes`);
-    expect(req.request.body).toEqual({ slotId: 's1', entryId: 'e2' });
+    service.medal('e2', 'silver').subscribe();
+    req = http.expectOne(`${base}/pools/medals`);
+    expect(req.request.body).toEqual({ entryId: 'e2', medal: 'silver' });
     req.flush({});
 
-    service.clearVote('s1').subscribe();
-    req = http.expectOne(`${base}/pools/votes/clear`);
-    expect(req.request.body).toEqual({ slotId: 's1' });
+    service.clearMedal('e2').subscribe();
+    req = http.expectOne(`${base}/pools/medals/clear`);
+    expect(req.request.body).toEqual({ entryId: 'e2' });
     req.flush({});
+
+    service.ban('e3').subscribe();
+    req = http.expectOne(`${base}/pools/bans`);
+    expect(req.request.body).toEqual({ entryId: 'e3' });
+    req.flush({});
+
+    service.unban('e3').subscribe();
+    http.expectOne(`${base}/pools/bans/clear`).flush({});
   });
 
   it('sends X-Admin-Pin for host actions', () => {

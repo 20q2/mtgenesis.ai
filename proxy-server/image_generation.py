@@ -21,79 +21,83 @@ import config
 MAX_PROMPT_TOKENS = 75       # CLIP's 77 minus the start/end tokens
 SUBJECT_MIN_TOKENS = 30      # the subject always keeps at least this much room
 
-# DreamShaper leans photoreal, and at IMAGE_GUIDANCE 2.0 style words only steer weakly, so
-# the style sits right after the subject (CLIP weights early tokens most) and names a
-# painted/digital-art look. No "highly detailed": it pulls toward photographic realism.
-ART_STYLE = "digital fantasy painting, painterly concept art, Magic: The Gathering card art, dramatic lighting"
-# Spec §6 list, plus nsfw/nudity: SDXL has no safety checker and DreamShaper drifts toward
-# nudity on humanoid subjects (seen on a sphinx in the comparison run). The photo terms push
-# away from hyperrealism; "render" is deliberately absent, since digital renders look right.
-NEGATIVE_PROMPT = ("photograph, photorealistic, hyperrealistic, text, letters, watermark, signature, "
-                   "border, frame, card, UI, blurry, lowres, deformed, extra limbs, nsfw, nudity")
-GENERIC_CONTEXT = "magical fantasy scene"
+# DreamShaper leans toward glossy, high-contrast digital art. MTG art reads as traditional
+# painting: visible brushwork, muted earthy palettes, soft atmospheric light, no pure whites.
+# The style sits right after the subject (CLIP weights early tokens most). No "highly
+# detailed" or "dramatic lighting": they pull toward photoreal HDR with blown highlights.
+ART_STYLE = ("oil painting, Magic: The Gathering card art, painterly brushstrokes, "
+             "rich earthy colors, soft atmospheric light")
+# Photo/3D terms push away from realism and the glossy CG look; the exposure terms stop the
+# blown-white skies and halos; nsfw/nudity because SDXL has no safety checker and
+# DreamShaper drifts toward nudity on humanoid subjects.
+NEGATIVE_PROMPT = ("photograph, photorealistic, 3d render, cgi, overexposed, blown highlights, "
+                   "harsh contrast, oversaturated, oversharpened, glowing halo, text, watermark, "
+                   "signature, border, frame, card, UI, blurry, lowres, deformed, extra limbs, nsfw, nudity")
+GENERIC_CONTEXT = "fantasy scene"
 
 WUBRG = "WUBRG"
 _COLOR_NAMES = {"white": "W", "blue": "U", "black": "B", "red": "R", "green": "G", "colorless": "C"}
 
-# Mood hints per color (spec §6). Mono-colored cards get both words; multicolor cards
-# get the first word of each color so the hint stays short.
+# Mood hints per color. Mono-colored cards get both words; multicolor cards get the first
+# word of each color so the hint stays short. Nothing about light or radiance: those words
+# make every white card a glowing, overexposed halo.
 COLOR_MOODS = {
-    "W": "radiant, ordered",
-    "U": "arcane, ocean",
-    "B": "shadow, decay",
-    "R": "fiery, embers",
+    "W": "noble, hallowed",
+    "U": "arcane, mysterious",
+    "B": "ominous, decay",
+    "R": "fiery, wild",
     "G": "verdant, primal",
 }
 
-# Color palettes keyed by the set of WUBRG colors (moved from app.createCardImage).
+# Color palettes keyed by the set of WUBRG colors. Painted, mid-value colors: "pure white"
+# or "electric" hues render as clipped highlights.
 COLOR_PALETTES = {
-    frozenset(): "metallic silver, steel gray",
+    frozenset(): "weathered bronze, stone gray",
     # mono
-    frozenset("W"): "pure white, warm gold",
-    frozenset("U"): "sapphire blue, silver",
-    frozenset("B"): "void black, dark purple",
-    frozenset("R"): "burning red, molten orange",
-    frozenset("G"): "forest green, earth brown",
+    frozenset("W"): "warm ivory, pale gold, soft sky blue",
+    frozenset("U"): "deep blue, slate gray, silver",
+    frozenset("B"): "dark violet, charcoal, bone",
+    frozenset("R"): "crimson, ember orange, smoky brown",
+    frozenset("G"): "moss green, earthy brown",
     # guilds
-    frozenset("WU"): "pristine white, sapphire blue",
-    frozenset("WB"): "pure white, deep black",
-    frozenset("WR"): "ivory white, burning red",
-    frozenset("WG"): "marble white, forest green",
-    frozenset("UB"): "midnight blue, void black",
-    frozenset("UR"): "electric blue, molten red",
-    frozenset("UG"): "ocean blue, living green",
-    frozenset("BR"): "shadow black, blood red",
-    frozenset("BG"): "decay black, wild green",
-    frozenset("RG"): "flame red, primal green",
+    frozenset("WU"): "ivory, slate blue",
+    frozenset("WB"): "ivory, charcoal",
+    frozenset("WR"): "ivory, crimson",
+    frozenset("WG"): "ivory, moss green",
+    frozenset("UB"): "deep blue, charcoal",
+    frozenset("UR"): "deep blue, crimson",
+    frozenset("UG"): "teal, moss green",
+    frozenset("BR"): "charcoal, crimson",
+    frozenset("BG"): "charcoal, moss green",
+    frozenset("RG"): "crimson, moss green",
     # shards and wedges
-    frozenset("WUG"): "white marble, blue sapphire, green emerald",   # Bant
-    frozenset("UBR"): "dark blues, void black, burning red",          # Grixis
-    frozenset("BRG"): "shadow black, flame red, wild green",          # Jund
-    frozenset("RGW"): "burning red, emerald green, pure white",       # Naya
-    frozenset("WBG"): "ivory white, deep black, forest green",        # Abzan
-    frozenset("URW"): "sapphire blue, flame red, pure white",         # Jeskai
-    frozenset("BGU"): "shadow black, wild green, deep blue",          # Sultai
-    frozenset("RWB"): "burning red, bone white, void black",          # Mardu
-    frozenset("GUR"): "emerald green, ocean blue, molten red",        # Temur
+    frozenset("WUG"): "ivory, slate blue, moss green",       # Bant
+    frozenset("UBR"): "deep blue, charcoal, crimson",        # Grixis
+    frozenset("BRG"): "charcoal, crimson, moss green",       # Jund
+    frozenset("RGW"): "crimson, moss green, ivory",          # Naya
+    frozenset("WBG"): "ivory, charcoal, moss green",         # Abzan
+    frozenset("URW"): "slate blue, crimson, ivory",          # Jeskai
+    frozenset("BGU"): "charcoal, moss green, deep blue",     # Sultai
+    frozenset("RWB"): "crimson, ivory, charcoal",            # Mardu
+    frozenset("GUR"): "moss green, deep blue, crimson",      # Temur
     # all five
-    frozenset(WUBRG): "rainbow prismatic, all five mana colors",
+    frozenset(WUBRG): "rich jewel tones",
 }
 _PALETTE_FALLBACK_BY_COUNT = {
-    3: "three-color blend, rich jewel tones",
-    4: "four-color convergence, rich jewel tones",
+    3: "rich jewel tones",
+    4: "rich jewel tones",
 }
 
-# Type contexts (moved from app.createCardImage). Checked in order, so an
-# "Artifact Creature" gets the creature context.
+# Type contexts. Checked in order, so an "Artifact Creature" gets the creature context.
 TYPE_CONTEXTS = {
-    "creature": "detailed creature portrait, living being, character focus",
-    "instant": "magical effect in progress, spell energy, dynamic action",
-    "sorcery": "grand magical ritual, powerful spell effect",
-    "artifact": "detailed artifact object, ancient relic, object focus",
-    "enchantment": "magical aura, enchanted environment, mystical atmosphere",
-    "land": "sweeping landscape view, terrain, natural environment",
-    "planeswalker": "powerful planeswalker character, magical being, character focus",
-    "battle": "epic battle scene, warfare, dramatic confrontation",
+    "creature": "creature portrait, full figure",
+    "instant": "spell in motion, dynamic action",
+    "sorcery": "powerful spell being cast",
+    "artifact": "ornate artifact, object focus",
+    "enchantment": "enchanted scene, mystical atmosphere",
+    "land": "sweeping landscape, atmospheric perspective",
+    "planeswalker": "powerful planeswalker, character focus",
+    "battle": "epic battle scene, warfare",
 }
 
 
@@ -190,20 +194,23 @@ def _color_part(card_data: dict | None) -> str:
     return f"{mood}, {palette} palette" if palette else mood
 
 
-def _trim_to_tokens(text: str, max_tokens: int) -> str:
+def _trim_to_tokens(text: str, max_tokens: int, count_tokens=estimate_tokens) -> str:
     """Keep the leading words of text that fit in max_tokens."""
-    if estimate_tokens(text) <= max_tokens:
+    if count_tokens(text) <= max_tokens:
         return text
     kept: list[str] = []
     for word in text.split():
-        if estimate_tokens(" ".join(kept + [word])) > max_tokens:
+        if count_tokens(" ".join(kept + [word])) > max_tokens:
             break
         kept.append(word)
     return " ".join(kept).rstrip(" ,;:.-")
 
 
-def build_art_prompt(prompt: str, card_data: dict | None) -> tuple[str, str]:
+def build_art_prompt(prompt: str, card_data: dict | None, count_tokens=estimate_tokens) -> tuple[str, str]:
     """(positive prompt of at most 75 CLIP tokens, subject first; negative prompt).
+
+    count_tokens defaults to the rough estimate_tokens, which undercounts rare words and
+    names; generate_art passes the pipeline's real CLIP tokenizer so the tail isn't cut off.
 
     The positive prompt is ordered: subject, art style, type context, color mood and
     palette. When the budget is tight the subject is trimmed (keeping its first words,
@@ -219,13 +226,14 @@ def build_art_prompt(prompt: str, card_data: dict | None) -> tuple[str, str]:
     tail = [p for p in (ART_STYLE, type_context, color_part) if p]
 
     def tail_tokens(parts: list[str]) -> int:
-        return sum(estimate_tokens(p) + 1 for p in parts)  # +1 for the joining comma
+        return sum(count_tokens(p) + 1 for p in parts)  # +1 for the joining comma
 
-    subject = _trim_to_tokens(subject, max(MAX_PROMPT_TOKENS - tail_tokens(tail), SUBJECT_MIN_TOKENS))
+    subject = _trim_to_tokens(subject, max(MAX_PROMPT_TOKENS - tail_tokens(tail), SUBJECT_MIN_TOKENS),
+                              count_tokens)
 
     # Drop lowest-priority tail parts until everything fits.
     for part in [p for p in (color_part, type_context, ART_STYLE) if p]:
-        if estimate_tokens(subject) + tail_tokens(tail) <= MAX_PROMPT_TOKENS:
+        if count_tokens(subject) + tail_tokens(tail) <= MAX_PROMPT_TOKENS:
             break
         tail.remove(part)
 
@@ -255,7 +263,7 @@ def _get_pipeline():
             return _pipeline
 
         import torch
-        from diffusers import AutoencoderKL, DPMSolverMultistepScheduler, StableDiffusionXLPipeline
+        from diffusers import AutoencoderKL, EulerAncestralDiscreteScheduler, StableDiffusionXLPipeline
 
         use_cuda = config.USE_CUDA and torch.cuda.is_available()
         device = "cuda" if use_cuda else "cpu"
@@ -278,8 +286,10 @@ def _get_pipeline():
         if pipe is None:
             pipe = StableDiffusionXLPipeline.from_pretrained(config.IMAGE_MODEL_ID, torch_dtype=dtype, **extra)
 
-        pipe.scheduler = DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", use_karras_sigmas=True)
+        # Lightning models are distilled on trailing timesteps. Euler ancestral paints softer
+        # edges and gradients than DPM++ 2M SDE Karras, which looked crunchy and over-sharpened.
+        pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(
+            pipe.scheduler.config, timestep_spacing="trailing")
         if use_cuda and config.IMAGE_CPU_OFFLOAD:
             # Must replace .to("cuda"); see config.IMAGE_CPU_OFFLOAD for why.
             pipe.enable_model_cpu_offload()
@@ -308,10 +318,14 @@ def generate_art(prompt: str, card_data: dict | None) -> str:
     if config.MODEL_SIZE == "placeholder":
         return _png_base64(Image.new("RGB", tuple(config.ART_BOX_SIZE), color=(50, 50, 50)))
 
-    positive, negative = build_art_prompt(prompt, card_data)
     pipe = _get_pipeline()
+
+    def count_tokens(text: str) -> int:
+        return len(pipe.tokenizer(text).input_ids) - 2  # minus the start/end tokens
+
+    positive, negative = build_art_prompt(prompt, card_data, count_tokens)
     width, height = config.IMAGE_GEN_SIZE
-    print(f"🎨 Generating art ({estimate_tokens(positive)} tokens): {positive}")
+    print(f"🎨 Generating art ({count_tokens(positive)} tokens): {positive}")
 
     with _inference_lock:
         start = time.perf_counter()

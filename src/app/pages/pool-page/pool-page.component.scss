@@ -1,3 +1,12 @@
+:host {
+  --medal-gold: #c9a227;
+  --medal-gold-bg: #fbf1d3;
+  --medal-silver: #8a939e;
+  --medal-silver-bg: #eef1f4;
+  --medal-bronze: #b0703a;
+  --medal-bronze-bg: #f7e8dc;
+}
+
 .loading {
   text-align: center;
   padding: 2rem;
@@ -52,6 +61,10 @@
   strong {
     color: var(--text);
   }
+
+  .medal-word.gold { color: var(--medal-gold); }
+  .medal-word.silver { color: var(--medal-silver); }
+  .medal-word.bronze { color: var(--medal-bronze); }
 }
 
 .stats {
@@ -238,11 +251,6 @@
   background: var(--surface-tint);
   transition: box-shadow 0.3s ease, border-color 0.3s ease;
 
-  &.pick {
-    border-color: var(--you);
-    box-shadow: 0 0 0 1px rgba(124, 192, 242, 0.4);
-  }
-
   &.leader {
     border-color: var(--gold);
     box-shadow: 0 0 16px 3px rgba(212, 175, 55, 0.45);
@@ -253,10 +261,14 @@
     border-style: dashed;
   }
 
-  &.leader.pick,
-  &.tied.pick {
-    outline: 2px solid var(--you);
-    outline-offset: 3px;
+  &.disqualified {
+    border-color: rgba(180, 35, 24, 0.45);
+    border-style: dashed;
+
+    app-card-slot {
+      opacity: 0.55;
+      filter: grayscale(0.6);
+    }
   }
 }
 
@@ -292,10 +304,21 @@
   border: 1px solid var(--line-strong);
 }
 
-.flag-pick {
-  background: rgba(96, 165, 250, 0.2);
-  color: var(--you);
-  border: 1px solid rgba(96, 165, 250, 0.6);
+.flag-medal {
+  &.gold { background: var(--medal-gold-bg); color: #7a5c0c; border: 1px solid var(--medal-gold); }
+  &.silver { background: var(--medal-silver-bg); color: #4a525c; border: 1px solid var(--medal-silver); }
+  &.bronze { background: var(--medal-bronze-bg); color: #7a4418; border: 1px solid var(--medal-bronze); }
+}
+
+.flag-banned {
+  background: var(--danger);
+  color: #fff;
+}
+
+.flag-my-ban {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid rgba(180, 35, 24, 0.35);
 }
 
 .flag-mine {
@@ -348,16 +371,131 @@
   font-size: 0.85rem;
 }
 
-.vote-bar {
+/* Points and the medal tally */
+.tally {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-top: auto;
+  gap: 0.4rem;
 
-  .count {
+  .points {
     font-weight: 700;
     color: var(--text);
+    margin-right: auto;
+  }
+}
+
+.medal-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 0.3rem;
+  border-radius: var(--r-pill);
+  font-size: 0.75rem;
+  font-weight: 700;
+
+  &.gold { background: var(--medal-gold-bg); color: #7a5c0c; box-shadow: inset 0 0 0 1px var(--medal-gold); }
+  &.silver { background: var(--medal-silver-bg); color: #4a525c; box-shadow: inset 0 0 0 1px var(--medal-silver); }
+  &.bronze { background: var(--medal-bronze-bg); color: #7a4418; box-shadow: inset 0 0 0 1px var(--medal-bronze); }
+}
+
+.ban-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 0.8rem;
+
+  .material-icons {
+    font-size: 0.95rem;
+  }
+}
+
+/* Medal buttons + ban */
+.actions {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+  margin-top: auto;
+
+  .withdraw-button {
+    margin-left: auto;
+  }
+}
+
+.medal-buttons {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.medal-button,
+.ban-button {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-height: 44px;
+  padding: 0.2rem 0.25rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease,
+              color var(--dur-fast) ease, transform var(--dur-fast) var(--ease-out);
+
+  .material-icons {
+    font-size: 1.2rem;
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+}
+
+.medal-button {
+  &.gold .material-icons { color: var(--medal-gold); }
+  &.silver .material-icons { color: var(--medal-silver); }
+  &.bronze .material-icons { color: var(--medal-bronze); }
+
+  &:hover:not(:disabled) { border-color: currentColor; color: var(--text); }
+
+  &.on {
+    color: var(--text);
+
+    .material-icons { color: #fff; }
+  }
+
+  &.on.gold { background: var(--medal-gold); border-color: var(--medal-gold); color: var(--text-on-gold); }
+  &.on.silver { background: var(--medal-silver); border-color: var(--medal-silver); color: #fff; }
+  &.on.bronze { background: var(--medal-bronze); border-color: var(--medal-bronze); color: #fff; }
+}
+
+.ban-button {
+  flex: 0 0 52px;
+
+  &:hover:not(:disabled) {
+    border-color: rgba(180, 35, 24, 0.5);
+    color: var(--danger);
+  }
+
+  &.on {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
   }
 }
 
@@ -505,6 +643,33 @@
   }
 }
 
+.banned-title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 1.25rem;
+  color: var(--danger);
+}
+
+.banned-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+
+  li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.25rem 0.6rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--line);
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+}
+
 /* ===== Past pools ===== */
 .history {
   list-style: none;
@@ -526,7 +691,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .picker-card:hover:not(:disabled) {
+  .picker-card:hover:not(:disabled),
+  .medal-button:active:not(:disabled),
+  .ban-button:active:not(:disabled) {
     transform: none;
   }
 }

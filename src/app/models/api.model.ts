@@ -138,6 +138,9 @@ export interface GenerationResponse { setId: string | null; cards: CardView[]; }
 export type PoolColorRule = 'any' | 'W' | 'U' | 'B' | 'R' | 'G' | 'multicolor' | 'colorless';
 export type PoolTypeRule = 'any' | 'creature' | 'noncreature' | 'land';
 
+/** Per-slot ranking: gold 3 points, silver 2, bronze 1. */
+export type Medal = 'gold' | 'silver' | 'bronze';
+
 /** Advisory power estimate: rules-text value vs. what the card's cost and rarity usually buy. */
 export interface PowerCheck {
   estimate: number;
@@ -155,9 +158,20 @@ export interface PoolEntryView {
   username: string | null;
   card: CardView;
   power: PowerCheck | null;
-  votes: number;
+  /** Medal counts from all voters, and the points they add up to. */
+  gold: number;
+  silver: number;
+  bronze: number;
+  points: number;
+  /** Best points (golds break ties) in the slot; while open, bans are not counted yet. */
   leader: boolean;
   tied: boolean;
+  /** Closed pools only: banned by banThreshold+ players, so it can't win. */
+  disqualified: boolean;
+  /** Closed pools only (null while open: bans are secret). */
+  bans: number | null;
+  myMedal: Medal | null;
+  bannedByMe: boolean;
   createdAt: string;
 }
 
@@ -170,7 +184,8 @@ export interface PoolSlotView {
   /** e.g. "Blue creature", "Any card" */
   ruleText: string;
   entries: PoolEntryView[];
-  myVoteEntryId: string | null;
+  /** The entry id each of my medals in this slot is on. */
+  myMedals: Record<Medal, string | null>;
   myEntryId: string | null;
 }
 
@@ -185,6 +200,10 @@ export interface PoolSummary {
 
 export interface PoolView extends PoolSummary {
   myEntryCount: number;
+  bansPerPlayer: number;
+  /** Bans that disqualify a card at close. */
+  banThreshold: number;
+  myBansLeft: number;
   slots: PoolSlotView[];
 }
 

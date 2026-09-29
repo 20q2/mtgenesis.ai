@@ -30,8 +30,9 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request, send_file
 
 from generation_queue import GenerationQueue
-from storage import (PENDING_STATUSES, Storage, StorageError, clean_commander_name,
-                     leader_flags, slot_rule_text)
+from storage import (MEDAL_POINTS, PENDING_STATUSES, POOL_BAN_THRESHOLD, POOL_BANS_PER_PLAYER,
+                     Storage, StorageError, clean_commander_name, leader_flags, pool_standings,
+                     slot_rule_text)
 
 try:  # the power heuristic is advisory: pools still work without it
     import power_level
@@ -206,11 +207,14 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
                 "createdAt": row["created_at"], "closedAt": row["closed_at"]}
 
     def pool_view(row: dict, viewer_id: str | None) -> dict:
-        """The whole pool as `viewer_id` sees it: submitters stay anonymous until close."""
+        """The whole pool as `viewer_id` sees it. Submitters and ban counts stay hidden until
+        close (the viewer only sees their own bans), so "leader" counts medals only while open."""
         closed = row["status"] == "closed"
         entries = storage.pool_entries(row["id"])
-        tally = storage.pool_vote_tally(row["id"])
-        my_votes = storage.my_pool_votes(viewer_id, row["id"]) if viewer_id else {}
+        medals = storage.pool_medal_counts(row["id"])
+        bans = storage.pool_ban_counts(row["id"])
+        my_medals = storage.my_pool_medals(viewer_id, row["id"]) if viewer_id else {}
+        my_bans = storage.my_pool_bans(viewer_id, row["id"]) if viewer_id else set()
         usernames: dict[str, str] = {}
 
         def username(user_id: str) -> str:
@@ -222,7 +226,8 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         slot_views = []
         for slot in storage.pool_slots(row["id"]):
             slot_entries = [e for e in entries if e["slot_id"] == slot["id"]]
-            flags = leader_flags(tally, [e["id"] for e in slot_entries])
+            standings = pool_standings([e["id"] for e in slot_entries], medals, bans,
+                                       apply_bans=closed)
             entry_views = []
             for e in slot_entries:
                 card = storage.get_card(e["card_id"])
@@ -239,7 +244,10 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
                     "card": view,
                     "power": power_check(view["card"]),
                     "createdAt": e["created_at"],
-                    **flags[e["id"]],
+                    "myMedal": my_medals.get(e["id"]),
+                    "bannedByMe": e["id"] in my_bans,
+                    "bans": bans.get(e["id"], 0) if closed else None,
+                    **standings[e["id"]],
                 })
             slot_views.append({
                 "id": slot["id"],
@@ -249,12 +257,17 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
                 "typeRule": slot["type_rule"],
                 "ruleText": slot_rule_text(slot["color_rule"], slot["type_rule"]),
                 "entries": entry_views,
-                "myVoteEntryId": my_votes.get(slot["id"]),
+                "myMedals": {m: next((e["id"] for e in slot_entries
+                                      if my_medals.get(e["id"]) == m), None)
+                             for m in MEDAL_POINTS},
                 "myEntryId": next(
                     (e["id"] for e in slot_entries if e["user_id"] == viewer_id), None),
             })
         return {**pool_summary(row),
                 "myEntryCount": sum(1 for e in entries if e["user_id"] == viewer_id),
+                "bansPerPlayer": POOL_BANS_PER_PLAYER,
+                "banThreshold": POOL_BAN_THRESHOLD,
+                "myBansLeft": POOL_BANS_PER_PLAYER - len(my_bans),
                 "slots": slot_views}
 
     def pool_or_404(pool_id: str) -> dict:
@@ -421,23 +434,38 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         pool_id = storage.withdraw_pool_entry(entry_id, user["id"])
         return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
 
-    @bp.post("/pools/votes")
-    def pool_vote():
+    def entry_id_from_body() -> str:
+        entry_id = required_body().get("entryId")
+        if not isinstance(entry_id, str):
+            raise StorageError(400, "entryId is required")
+        return entry_id
+
+    @bp.post("/pools/medals")
+    def award_pool_medal():
         user = require_user()
         data = required_body()
-        slot_id, entry_id = data.get("slotId"), data.get("entryId")
-        if not isinstance(slot_id, str) or not isinstance(entry_id, str):
-            raise StorageError(400, "slotId and entryId are required")
-        pool_id = storage.cast_pool_vote(user["id"], slot_id, entry_id)
+        entry_id, medal = data.get("entryId"), data.get("medal")
+        if not isinstance(entry_id, str) or not isinstance(medal, str):
+            raise StorageError(400, "entryId and medal are required")
+        pool_id = storage.award_pool_medal(user["id"], entry_id, medal)
         return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
 
-    @bp.post("/pools/votes/clear")
-    def clear_pool_vote():
+    @bp.post("/pools/medals/clear")
+    def clear_pool_medal():
         user = require_user()
-        slot_id = required_body().get("slotId")
-        if not isinstance(slot_id, str):
-            raise StorageError(400, "slotId is required")
-        pool_id = storage.clear_pool_vote(user["id"], slot_id)
+        pool_id = storage.clear_pool_medal(user["id"], entry_id_from_body())
+        return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
+
+    @bp.post("/pools/bans")
+    def ban_pool_entry():
+        user = require_user()
+        pool_id = storage.ban_pool_entry(user["id"], entry_id_from_body())
+        return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
+
+    @bp.post("/pools/bans/clear")
+    def unban_pool_entry():
+        user = require_user()
+        pool_id = storage.unban_pool_entry(user["id"], entry_id_from_body())
         return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
 
     @bp.get("/queue_status")

@@ -70,8 +70,12 @@ Every service and component imports from `src/app/models/` (`card.model.ts`, `ap
 Shared custom cards for the paper event: `/pool` in the app. The spec is `docs/superpowers/specs/2026-09-29-knowledge-pool-design.md`.
 
 - The host opens a pool from `/admin` (`PoolAdminComponent`). It has a per-player submission cap and a list of slots, each with a color rule and a type rule; the default is 16 slots for 8 players.
-- Players submit finished gallery cards into slots and vote once per slot (never for their own card). Submitters stay anonymous until close. The top card in each slot becomes legal.
-- Storage: the `pools` / `pool_slots` / `pool_entries` / `pool_votes` tables and methods in `storage.py`. `card_fits_slot` is mirrored by `cardFitsSlot` in `pool.service.ts`, so keep the two in sync.
+- Players submit finished gallery cards into slots.
+- Voting uses medals: in each slot a player gives gold, silver and bronze (3 / 2 / 1 points), never to their own card. Only gold is required.
+- Each player also has 2 secret bans (`POOL_BANS_PER_PLAYER`). At close, a card with `POOL_BAN_THRESHOLD` (3) bans is disqualified.
+- The most points wins a slot; more golds breaks a tie (`pool_standings`).
+- Submitters and ban counts stay hidden until close.
+- Storage: the `pools` / `pool_slots` / `pool_entries` / `pool_medals` / `pool_bans` tables and methods in `storage.py`. `card_fits_slot` is mirrored by `cardFitsSlot` in `pool.service.ts`, so keep the two in sync.
 - Routes: `/pools/*` and `/admin/pools*` in `api_routes.py`. Each entry carries an advisory `power` check from `power_level.assess`.
 - Tests: `tests/test_pool.py`.
 

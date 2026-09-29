@@ -80,9 +80,16 @@ export function poolEntry(overrides: Partial<PoolEntryView> = {}): PoolEntryView
     username: null,
     card: doneCard({ id: `${id}-card` }),
     power: { estimate: 1, budget: 1.25, verdict: 'fair' },
-    votes: 0,
+    gold: 0,
+    silver: 0,
+    bronze: 0,
+    points: 0,
     leader: false,
     tied: false,
+    disqualified: false,
+    bans: null,
+    myMedal: null,
+    bannedByMe: false,
     createdAt: '2026-09-29T19:00:00+00:00',
     ...overrides
   };
@@ -97,7 +104,7 @@ export function poolSlot(overrides: Partial<PoolSlotView> = {}): PoolSlotView {
     typeRule: 'creature',
     ruleText: 'Red creature',
     entries: [],
-    myVoteEntryId: null,
+    myMedals: { gold: null, silver: null, bronze: null },
     myEntryId: null,
     ...overrides
   };
@@ -112,6 +119,9 @@ export function poolView(overrides: Partial<PoolView> = {}): PoolView {
     createdAt: '2026-09-29T18:00:00+00:00',
     closedAt: null,
     myEntryCount: 0,
+    bansPerPlayer: 2,
+    banThreshold: 3,
+    myBansLeft: 2,
     slots: [poolSlot()],
     ...overrides
   };

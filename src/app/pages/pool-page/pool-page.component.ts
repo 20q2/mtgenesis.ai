@@ -4,7 +4,7 @@ import {
   EMPTY, Observable, Subject, Subscription, catchError, finalize, of, startWith, switchMap
 } from 'rxjs';
 import {
-  CardView, PoolColorRule, PoolEntryView, PoolSlotView, PoolSummary, PoolView, PowerCheck
+  CardView, Medal, PoolColorRule, PoolEntryView, PoolSlotView, PoolSummary, PoolView, PowerCheck
 } from '../../models/api.model';
 import { apiErrorMessage, safeFileName } from '../../services/api.util';
 import { GenerationService } from '../../services/generation.service';
@@ -14,6 +14,12 @@ import { PoolService, cardFitsSlot } from '../../services/pool.service';
 
 export const POOL_POLL_MS = 10000;
 
+export const MEDALS: { medal: Medal; label: string; points: number }[] = [
+  { medal: 'gold', label: 'Gold', points: 3 },
+  { medal: 'silver', label: 'Silver', points: 2 },
+  { medal: 'bronze', label: 'Bronze', points: 1 }
+];
+
 /** A slot's final result: its winner, or the tied cards the host picks from. */
 export interface PoolResult {
   slot: PoolSlotView;
@@ -22,8 +28,9 @@ export interface PoolResult {
 }
 
 /**
- * /pool: the open Knowledge Pool. Players submit finished cards into slots, then vote
- * once per slot (never for their own card); the top card of each slot becomes legal.
+ * /pool: the open Knowledge Pool. Players submit finished cards into slots, then rank
+ * each slot with gold/silver/bronze (3/2/1 points, never their own card) and may spend a
+ * couple of secret bans; the top card of each slot that isn't banned out becomes legal.
  * /pool/:id shows a pool read-only (past pools). Polls every 10s while visible.
  */
 @Component({
@@ -39,6 +46,7 @@ export class PoolPageComponent implements OnInit, OnDestroy {
   error: string | null = null;
   /** Slots with a request in flight (guards double clicks). */
   readonly busy = new Set<string>();
+  readonly medals = MEDALS;
 
   /** The slot whose card picker is open. */
   pickerSlotId: string | null = null;
@@ -92,11 +100,18 @@ export class PoolPageComponent implements OnInit, OnDestroy {
     return this.pool?.slots.filter(s => s.entries.some(e => e.leader)).length ?? 0;
   }
 
-  get votesLeft(): number {
-    return this.pool?.slots.filter(s => this.canVoteIn(s) && !s.myVoteEntryId).length ?? 0;
+  /** Slots with someone else's card where I haven't given my gold yet. */
+  get goldsLeft(): number {
+    return this.pool?.slots.filter(s => this.canVoteIn(s) && !s.myMedals.gold).length ?? 0;
   }
 
-  /** Winners (and tied groups) in slot order; slots nobody voted in are left out. */
+  /** Closed pools: cards the table banned out, in slot order. */
+  get bannedOut(): { slot: PoolSlotView; entry: PoolEntryView }[] {
+    return (this.pool?.slots ?? []).flatMap(slot =>
+      slot.entries.filter(e => e.disqualified).map(entry => ({ slot, entry })));
+  }
+
+  /** Winners (and tied groups) in slot order; slots with no medals are left out. */
   get results(): PoolResult[] {
     return (this.pool?.slots ?? []).flatMap(slot => {
       const winners = slot.entries.filter(e => e.leader || e.tied);
@@ -109,7 +124,7 @@ export class PoolPageComponent implements OnInit, OnDestroy {
   }
 
   // ----- slot state -----
-  /** Someone else's card is in the slot, so there's something to vote on. */
+  /** Someone else's card is in the slot, so there is something to give medals to. */
   canVoteIn(slot: PoolSlotView): boolean {
     return slot.entries.some(e => !e.mine);
   }
@@ -132,21 +147,37 @@ export class PoolPageComponent implements OnInit, OnDestroy {
     return slot.entries.find(e => e.leader);
   }
 
-  isMyPick(slot: PoolSlotView, entry: PoolEntryView): boolean {
-    return slot.myVoteEntryId === entry.id;
-  }
 
   scrollTo(slot: PoolSlotView): void {
     document.getElementById(`pool-slot-${slot.position}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   // ----- actions -----
-  vote(slot: PoolSlotView, entry: PoolEntryView): void {
-    if (this.isMyPick(slot, entry)) {
-      this.run(slot, this.pools.clearVote(slot.id), 'Could not clear your vote.');
+  /** Give the card this medal, or take it back when the card already has it from me. */
+  award(slot: PoolSlotView, entry: PoolEntryView, medal: Medal): void {
+    if (entry.myMedal === medal) {
+      this.run(slot, this.pools.clearMedal(entry.id), 'Could not take your medal back.');
     } else {
-      this.run(slot, this.pools.vote(slot.id, entry.id), 'Your vote did not go through. Please try again.');
+      this.run(slot, this.pools.medal(entry.id, medal), 'Your medal did not go through. Please try again.');
     }
+  }
+
+  toggleBan(slot: PoolSlotView, entry: PoolEntryView): void {
+    if (entry.bannedByMe) {
+      this.run(slot, this.pools.unban(entry.id), 'Could not lift your ban.');
+      return;
+    }
+    const name = entry.card.card?.name || 'this card';
+    const left = this.pool?.myBansLeft ?? 0;
+    if (!window.confirm(`Ban "${name}"? You have ${left} of ${this.pool?.bansPerPlayer} bans left. ` +
+      `Bans are secret until the pool closes; ${this.pool?.banThreshold} bans knock a card out.`)) {
+      return;
+    }
+    this.run(slot, this.pools.ban(entry.id), 'Your ban did not go through.');
+  }
+
+  canBan(entry: PoolEntryView): boolean {
+    return entry.bannedByMe || (this.pool?.myBansLeft ?? 0) > 0;
   }
 
   withdraw(slot: PoolSlotView, entry: PoolEntryView): void {

@@ -1,11 +1,12 @@
-"""Knowledge Pool: slot rules, submissions, votes and the API views.
+"""Knowledge Pool: slot rules, submissions, medals, bans and the API views.
 
 Spec: docs/superpowers/specs/2026-09-29-knowledge-pool-design.md.
 """
 import pytest
 
 from api_routes import power_check
-from storage import StorageError, card_fits_slot, clean_pool_slots, slot_rule_text
+from storage import (POOL_BAN_THRESHOLD, StorageError, card_fits_slot, clean_pool_slots,
+                     pool_standings, slot_rule_text)
 from test_api import ADMIN, H, client, login, queue  # noqa: F401  (fixtures)
 
 SLOTS = [
@@ -129,44 +130,97 @@ def test_submit_rules(tmp_storage, pool):
     fails(409, alice, wild, done_card(tmp_storage, alice, RED_CREATURE))  # cap of 2 reached
 
 
-def test_withdraw_removes_votes_and_frees_the_slot(tmp_storage, pool):
+def test_withdraw_removes_medals_bans_and_frees_the_slot(tmp_storage, pool):
     red = slot_ids(tmp_storage, pool)[0]
     alice, bob = user(tmp_storage, "alice"), user(tmp_storage, "bob")
     entry = tmp_storage.submit_pool_entry(alice, red, done_card(tmp_storage, alice, RED_CREATURE))
-    tmp_storage.cast_pool_vote(bob, red, entry["id"])
+    tmp_storage.award_pool_medal(bob, entry["id"], "gold")
+    tmp_storage.ban_pool_entry(bob, entry["id"])
     with pytest.raises(StorageError) as err:
         tmp_storage.withdraw_pool_entry(entry["id"], bob)
     assert err.value.status == 403
     assert tmp_storage.withdraw_pool_entry(entry["id"], alice) == pool["id"]
     assert tmp_storage.pool_entries(pool["id"]) == []
-    assert tmp_storage.pool_vote_tally(pool["id"]) == {}
+    assert tmp_storage.pool_medal_counts(pool["id"]) == {}
+    assert tmp_storage.pool_ban_counts(pool["id"]) == {}          # Bob's ban is refunded
     tmp_storage.submit_pool_entry(alice, red, done_card(tmp_storage, alice, RED_CREATURE))
 
 
-# ----- votes -----
-def test_votes_one_per_slot_no_self_votes(tmp_storage, pool):
-    red, colorless, _ = slot_ids(tmp_storage, pool)
-    alice, bob, cara = (user(tmp_storage, n) for n in ("alice", "bob", "cara"))
-    a = tmp_storage.submit_pool_entry(alice, red, done_card(tmp_storage, alice, RED_CREATURE))
-    b = tmp_storage.submit_pool_entry(bob, red, done_card(tmp_storage, bob, RED_CREATURE))
-    pot = tmp_storage.submit_pool_entry(alice, colorless,
-                                        done_card(tmp_storage, alice, POT_OF_GREEN))
+def slot_with_entries(storage, pool, n):
+    """n players each submit a red creature to the first slot; returns (players, entries)."""
+    red = slot_ids(storage, pool)[0]
+    players = [user(storage, f"p{i}") for i in range(n)]
+    entries = [storage.submit_pool_entry(pid, red, done_card(storage, pid, RED_CREATURE))["id"]
+               for pid in players]
+    return players, entries
 
+
+# ----- medals -----
+def test_medals_move_and_never_go_to_your_own_card(tmp_storage, pool):
+    (a, b, c), (ea, eb, ec) = slot_with_entries(tmp_storage, pool, 3)
     with pytest.raises(StorageError) as err:
-        tmp_storage.cast_pool_vote(alice, red, a["id"])
+        tmp_storage.award_pool_medal(a, ea, "gold")
     assert err.value.status == 403
     with pytest.raises(StorageError) as err:
-        tmp_storage.cast_pool_vote(bob, red, pot["id"])   # entry from another slot
+        tmp_storage.award_pool_medal(a, eb, "platinum")
     assert err.value.status == 400
 
-    tmp_storage.cast_pool_vote(cara, red, a["id"])
-    tmp_storage.cast_pool_vote(cara, red, b["id"])        # moves the vote
-    tmp_storage.cast_pool_vote(alice, red, b["id"])
-    tmp_storage.cast_pool_vote(bob, red, a["id"])
-    assert tmp_storage.pool_vote_tally(pool["id"]) == {a["id"]: 1, b["id"]: 2}
-    assert tmp_storage.my_pool_votes(cara, pool["id"]) == {red: b["id"]}
-    tmp_storage.clear_pool_vote(cara, red)
-    assert tmp_storage.pool_vote_tally(pool["id"]) == {a["id"]: 1, b["id"]: 1}
+    tmp_storage.award_pool_medal(a, eb, "gold")
+    tmp_storage.award_pool_medal(a, ec, "silver")
+    assert tmp_storage.my_pool_medals(a, pool["id"]) == {eb: "gold", ec: "silver"}
+    tmp_storage.award_pool_medal(a, ec, "gold")      # gold moves to C, C's silver is replaced
+    assert tmp_storage.my_pool_medals(a, pool["id"]) == {ec: "gold"}
+    tmp_storage.award_pool_medal(a, eb, "bronze")
+    tmp_storage.clear_pool_medal(a, ec)
+    assert tmp_storage.my_pool_medals(a, pool["id"]) == {eb: "bronze"}
+    assert tmp_storage.pool_medal_counts(pool["id"]) == {
+        eb: {"gold": 0, "silver": 0, "bronze": 1}}
+
+
+def test_standings_points_gold_tiebreak_and_ties():
+    medals = {"x": {"gold": 1, "silver": 0, "bronze": 1},   # 4 points, 1 gold
+              "y": {"gold": 0, "silver": 2, "bronze": 0},   # 4 points, 0 golds
+              "z": {"gold": 0, "silver": 0, "bronze": 1}}
+    table = pool_standings(["x", "y", "z", "w"], medals, {}, apply_bans=False)
+    assert table["x"]["points"] == 4 and table["x"]["leader"] and not table["y"]["leader"]
+    assert table["w"] == {"gold": 0, "silver": 0, "bronze": 0, "points": 0,
+                          "disqualified": False, "leader": False, "tied": False}
+
+    medals["y"] = {"gold": 1, "silver": 0, "bronze": 1}
+    table = pool_standings(["x", "y", "z"], medals, {}, apply_bans=False)
+    assert table["x"]["tied"] and table["y"]["tied"] and not table["x"]["leader"]
+
+    assert not any(r["leader"] or r["tied"]
+                   for r in pool_standings(["x"], {}, {}, apply_bans=False).values())
+
+
+def test_standings_bans_only_count_once_closed():
+    medals = {"pot": {"gold": 3, "silver": 0, "bronze": 0},
+              "fair": {"gold": 0, "silver": 1, "bronze": 0}}
+    bans = {"pot": POOL_BAN_THRESHOLD, "fair": POOL_BAN_THRESHOLD - 1}
+    open_ = pool_standings(["pot", "fair"], medals, bans, apply_bans=False)
+    assert open_["pot"]["leader"] and not open_["pot"]["disqualified"]
+    closed = pool_standings(["pot", "fair"], medals, bans, apply_bans=True)
+    assert closed["pot"]["disqualified"] and not closed["pot"]["leader"]
+    assert closed["fair"]["leader"] and not closed["fair"]["disqualified"]
+
+
+# ----- bans -----
+def test_bans_two_per_player(tmp_storage, pool):
+    (a, *_), (ea, eb, ec, ed) = slot_with_entries(tmp_storage, pool, 4)
+    with pytest.raises(StorageError) as err:
+        tmp_storage.ban_pool_entry(a, ea)
+    assert err.value.status == 403
+    tmp_storage.ban_pool_entry(a, eb)
+    tmp_storage.ban_pool_entry(a, eb)                # idempotent: still one ban used
+    tmp_storage.ban_pool_entry(a, ec)
+    with pytest.raises(StorageError) as err:
+        tmp_storage.ban_pool_entry(a, ed)
+    assert err.value.status == 409
+    tmp_storage.unban_pool_entry(a, eb)
+    tmp_storage.ban_pool_entry(a, ed)
+    assert tmp_storage.my_pool_bans(a, pool["id"]) == {ec, ed}
+    assert tmp_storage.pool_ban_counts(pool["id"]) == {ec: 1, ed: 1}
 
 
 def test_closed_pool_is_frozen(tmp_storage, pool):
@@ -174,8 +228,10 @@ def test_closed_pool_is_frozen(tmp_storage, pool):
     alice, bob = user(tmp_storage, "alice"), user(tmp_storage, "bob")
     a = tmp_storage.submit_pool_entry(alice, red, done_card(tmp_storage, alice, RED_CREATURE))
     tmp_storage.close_pool(pool["id"])
-    for call in (lambda: tmp_storage.cast_pool_vote(bob, red, a["id"]),
-                 lambda: tmp_storage.clear_pool_vote(bob, red),
+    for call in (lambda: tmp_storage.award_pool_medal(bob, a["id"], "gold"),
+                 lambda: tmp_storage.clear_pool_medal(bob, a["id"]),
+                 lambda: tmp_storage.ban_pool_entry(bob, a["id"]),
+                 lambda: tmp_storage.unban_pool_entry(bob, a["id"]),
                  lambda: tmp_storage.withdraw_pool_entry(a["id"], alice),
                  lambda: tmp_storage.submit_pool_entry(
                      bob, red, done_card(tmp_storage, bob, RED_CREATURE))):
@@ -240,33 +296,57 @@ def test_api_full_flow(client, tmp_storage):
     seen = bob_view["slots"][0]["entries"][0]
     assert seen["mine"] is False and seen["username"] is None
 
-    res = client.post("/api/v1/pools/votes", headers=H(alice),
-                      json={"slotId": colorless_slot, "entryId": pot_entry["id"]})
+    res = client.post("/api/v1/pools/medals", headers=H(alice),
+                      json={"entryId": pot_entry["id"], "medal": "gold"})
     assert res.status_code == 200
-    assert res.get_json()["slots"][1]["myVoteEntryId"] == pot_entry["id"]
-    res = client.post("/api/v1/pools/votes", headers=H(bob),
-                      json={"slotId": colorless_slot, "entryId": pot_entry["id"]})
+    view = res.get_json()
+    assert view["slots"][1]["myMedals"] == {"gold": pot_entry["id"], "silver": None, "bronze": None}
+    assert view["slots"][1]["entries"][0]["myMedal"] == "gold"
+    res = client.post("/api/v1/pools/medals", headers=H(bob),
+                      json={"entryId": pot_entry["id"], "medal": "gold"})
     assert res.status_code == 403
-    res = client.post("/api/v1/pools/votes", headers=H(bob),
-                      json={"slotId": red_slot, "entryId": entry["id"]})
-    assert res.get_json()["slots"][0]["entries"][0]["leader"] is True
-    res = client.post("/api/v1/pools/votes/clear", headers=H(alice),
-                      json={"slotId": colorless_slot})
-    assert res.get_json()["slots"][1]["myVoteEntryId"] is None
+    res = client.post("/api/v1/pools/medals", headers=H(bob),
+                      json={"entryId": entry["id"], "medal": "silver"})
+    red_view = res.get_json()["slots"][0]["entries"][0]
+    assert red_view["leader"] is True and red_view["points"] == 2 and red_view["silver"] == 1
+
+    # Bans: only your own are visible while open, and they don't change the leader yet.
+    res = client.post("/api/v1/pools/bans", headers=H(alice), json={"entryId": pot_entry["id"]})
+    view = res.get_json()
+    assert view["myBansLeft"] == 1 and view["bansPerPlayer"] == 2 and view["banThreshold"] == 3
+    banned = view["slots"][1]["entries"][0]
+    assert banned["bannedByMe"] is True and banned["bans"] is None and banned["leader"] is True
+    carl, dana = login(client, "Carl"), login(client, "Dana")
+    for voter in (carl, dana):
+        assert client.post("/api/v1/pools/bans", headers=H(voter),
+                           json={"entryId": pot_entry["id"]}).status_code == 200
+    bob_view = client.get("/api/v1/pools/current", headers=H(bob)).get_json()
+    assert bob_view["slots"][1]["entries"][0]["bannedByMe"] is False
+    assert bob_view["slots"][1]["entries"][0]["bans"] is None
+    res = client.post("/api/v1/pools/medals/clear", headers=H(bob), json={"entryId": entry["id"]})
+    assert res.get_json()["slots"][0]["entries"][0]["points"] == 0
+    client.post("/api/v1/pools/medals", headers=H(bob),
+                json={"entryId": entry["id"], "medal": "bronze"})
+    res = client.post("/api/v1/pools/bans/clear", headers=H(carl), json={"entryId": pot_entry["id"]})
+    assert res.get_json()["myBansLeft"] == 2
+    client.post("/api/v1/pools/bans", headers=H(carl), json={"entryId": pot_entry["id"]})
 
     closed = client.post(f"/api/v1/admin/pools/{pool['id']}/close", headers=ADMIN).get_json()
     assert closed["status"] == "closed"
     red = closed["slots"][0]["entries"][0]
-    assert red["leader"] is True and red["votes"] == 1 and red["username"] == "Alice"
-    assert closed["slots"][1]["entries"][0]["leader"] is False  # no votes -> slot stays empty
+    assert red["leader"] is True and red["points"] == 1 and red["username"] == "Alice"
+    pot_final = closed["slots"][1]["entries"][0]
+    # Pot of Green had the only gold in its slot, but 3 bans knock it out at close.
+    assert pot_final["bans"] == 3 and pot_final["disqualified"] is True
+    assert pot_final["leader"] is False and pot_final["username"] == "Bob"
 
     assert client.get("/api/v1/pools/current").get_json() is None
     listed = client.get("/api/v1/pools").get_json()
     assert [p["id"] for p in listed] == [pool["id"]]
     past = client.get(f"/api/v1/pools/{pool['id']}", headers=H(bob)).get_json()
     assert past["slots"][0]["entries"][0]["username"] == "Alice"
-    res = client.post("/api/v1/pools/votes", headers=H(bob),
-                      json={"slotId": red_slot, "entryId": entry["id"]})
+    res = client.post("/api/v1/pools/medals", headers=H(bob),
+                      json={"entryId": entry["id"], "medal": "gold"})
     assert res.status_code == 409
 
 
@@ -285,7 +365,8 @@ def test_api_withdraw_and_auth(client, tmp_storage):
     res = client.post(f"/api/v1/pools/entries/{entry_id}/withdraw", headers=H(alice))
     assert res.status_code == 200 and res.get_json()["slots"][0]["entries"] == []
     assert client.get("/api/v1/pools/nope").status_code == 404
-    assert client.post("/api/v1/pools/votes", headers=H(bob), json={}).status_code == 400
+    assert client.post("/api/v1/pools/medals", headers=H(bob), json={}).status_code == 400
+    assert client.post("/api/v1/pools/bans", headers=H(bob), json={}).status_code == 400
 
 
 def test_api_pool_current_etag(client):

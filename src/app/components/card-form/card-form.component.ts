@@ -315,116 +315,37 @@ export class CardFormComponent implements OnInit {
     this.cardForm.get('rarity')?.markAsDirty();
   }
 
+  /**
+   * The art subject: name, type and a size hint. The server adds the painting style, color
+   * mood and palette (proxy-server/image_generation.py), so they aren't repeated here; words
+   * like "divine light" and "detailed digital art" made the art glossy and overexposed.
+   */
   generateArtPromptText(): string {
     const name = this.cardForm.get('name')?.value || '';
     const supertype = this.cardForm.get('supertype')?.value || '';
     const type = this.cardForm.get('type')?.value || '';
     const subtype = this.cardForm.get('subtype')?.value || '';
-    const colors = this.cardForm.get('colors')?.value || [];
-    const rarity = this.cardForm.get('rarity')?.value || 'common';
-    const power = this.cardForm.get('power')?.value || '';
-    const toughness = this.cardForm.get('toughness')?.value || '';
-    const description = this.cardForm.get('description')?.value || '';
-    
-    let prompt = 'Fantasy art of ';
-    
-    // Add name if available
-    if (name) {
-      prompt += name + ', ';
-    }
-    
-    // Build type description
-    let typeDescription = '';
-    if (supertype) {
-      typeDescription += supertype.toLowerCase() + ' ';
-    }
-    if (type) {
-      typeDescription += type.toLowerCase();
-    }
-    if (subtype) {
-      typeDescription += ' ' + subtype.toLowerCase();
-    }
-    
-    if (typeDescription) {
-      prompt += 'a ' + typeDescription + ', ';
-    }
-    
-    // Add color-based atmospheric descriptions
-    if (colors && colors.length > 0) {
-      const colorDescriptions = [];
-      if (colors.includes('W')) colorDescriptions.push('divine light and order');
-      if (colors.includes('U')) colorDescriptions.push('arcane knowledge and control');
-      if (colors.includes('B')) colorDescriptions.push('shadow and corruption');
-      if (colors.includes('R')) colorDescriptions.push('chaotic fire and passion');
-      if (colors.includes('G')) colorDescriptions.push('primal nature and growth');
-      
-      if (colorDescriptions.length > 0) {
-        prompt += 'infused with ' + colorDescriptions.join(' and ') + ', ';
-      }
-    }
-    
-    // Add rarity-based grandeur
-    if (rarity === 'mythic') {
-      prompt += 'epic and legendary appearance, ';
-    } else if (rarity === 'rare') {
-      prompt += 'impressive and unique design, ';
-    } else if (rarity === 'uncommon') {
-      prompt += 'notable and interesting features, ';
-    }
-    
-    // Add CMC-based scale hints for creatures
-    if (type && type.toLowerCase().includes('creature')) {
-      const cmc = this.cardForm.get('cmc')?.value || 0;
-      
-      if (cmc <= 1) {
-        prompt += 'small scale, ';
-      } else if (cmc <= 2) {
-        prompt += 'modest size, ';
-      } else if (cmc <= 4) {
-        prompt += 'medium scale, ';
-      } else if (cmc <= 6) {
-        prompt += 'large and imposing, ';
-      } else if (cmc <= 8) {
-        prompt += 'massive scale, ';
-      } else {
-        prompt += 'colossal and overwhelming, ';
-      }
-    }
-    
-    // Add power level indication for creatures
-    if (type && type.toLowerCase().includes('creature') && power && toughness) {
-      const p = parseInt(power) || 0;
-      const t = parseInt(toughness) || 0;
-      const total = p + t;
-      
-      if (total >= 8) {
-        prompt += 'massive and imposing, ';
-      } else if (total >= 5) {
-        prompt += 'strong and formidable, ';
-      } else if (total >= 3) {
-        prompt += 'agile and capable, ';
-      } else {
-        prompt += 'small but determined, ';
-      }
-    }
-    
-    // Extract key visual elements from description
-    if (description) {
-      const keyWords = description.split(' ').filter((word: string) =>
-        word.length > 5 && 
-        !['target', 'creature', 'player', 'opponent', 'enters', 'battlefield', 'combat'].includes(word.toLowerCase()) &&
-        !word.includes('{') && !word.includes('}')
-      ).slice(0, 2);
-      
-      if (keyWords.length > 0) {
-        prompt += 'with elements of ' + keyWords.join(' and ') + ', ';
-      }
-    }
-    
-    // Add final artistic direction
-    prompt += 'detailed digital art, Magic: The Gathering style';
-    
-    return prompt;
+    const isCreature = type.toLowerCase().includes('creature');
+
+    // "Legendary Creature - Dragon" reads best to the image model as "a legendary dragon",
+    // "Artifact - Equipment" as "an equipment artifact".
+    const noun = subtype ? (isCreature ? subtype : `${subtype} ${type}`) : type;
+    const typeDescription = [supertype, noun].filter(Boolean).join(' ').toLowerCase();
+
+    const parts: string[] = [];
+    if (name) parts.push(name);
+    if (typeDescription) parts.push(`${/^[aeiou]/.test(typeDescription) ? 'an' : 'a'} ${typeDescription}`);
+    if (isCreature) parts.push(this.creatureScale(Number(this.cardForm.get('cmc')?.value) || 0));
+    return parts.join(', ') || 'a fantasy scene';
+  }
+
+  private creatureScale(cmc: number): string {
+    if (cmc <= 1) return 'small';
+    if (cmc <= 2) return 'modest size';
+    if (cmc <= 4) return 'medium scale';
+    if (cmc <= 6) return 'large and imposing';
+    if (cmc <= 8) return 'massive';
+    return 'colossal';
   }
 
   onColorChange(event: any, color: string): void {
