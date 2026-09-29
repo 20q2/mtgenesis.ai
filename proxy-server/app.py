@@ -223,6 +223,146 @@ request_queue = RequestQueue(max_concurrent=2)  # Allow max 2 concurrent card ge
 # Global state tracking for first job completion (for dynamic loading times)
 first_job_completed = False
 
+def finalize_card(card_params, generated_text, art_b64, force_name=None):
+    """
+    Post-process generated rules text and render the complete card.
+
+    Shared by the legacy process_card_generation route and the AI Night
+    GenerationQueue, which uses it as its RenderFn.
+
+    Steps:
+    - parse the LLM text (JSON with name/description/flavorText, or plain rules text)
+    - apply force_name, so a set's commander name overrides any name the LLM chose
+    - replace ~ with the card name, fix bullet points and periods
+    - generate missing creature P/T and Vehicle crew cost
+    - render with card_renderer.generate_card_image
+
+    Returns (final card dict, rendered card as raw base64 PNG or None).
+    card_params is not mutated. Rendering errors propagate to the caller.
+    """
+    import time
+
+    # Step 1: Text processing and parsing
+    text_processing_start = time.time()
+    print("  📝 Step 1: Processing text data...")
+    updated_card_data = card_params.copy()
+    print(f"🔍 Original card data keys: {list(card_params.keys())}")
+    print(f"🔍 Original description: {repr(card_params.get('description', 'NO DESCRIPTION'))}")
+    if generated_text:
+        try:
+            # Try to parse structured card data
+            parsed_text = json.loads(generated_text)
+            if isinstance(parsed_text, dict):
+                # Update with parsed structured data
+                if 'description' in parsed_text:
+                    updated_card_data['description'] = parsed_text['description']
+                if 'name' in parsed_text and parsed_text['name']:
+                    updated_card_data['name'] = parsed_text['name']
+                if 'flavorText' in parsed_text:
+                    updated_card_data['flavorText'] = parsed_text['flavorText']
+                print(f"Updated card data with parsed structured content")
+            else:
+                # If it's a JSON string, use the string content
+                updated_card_data['description'] = str(parsed_text)
+                print(f"Updated card data with JSON string content")
+        except json.JSONDecodeError:
+            # If not JSON, treat as plain description text
+            updated_card_data['description'] = generated_text
+            print(f"Updated card data with plain text content")
+
+    # A forced name (a set's commander name) wins over any LLM-chosen name, and is
+    # applied before ~ replacement so the rules text and the render both use it
+    if force_name:
+        updated_card_data['name'] = force_name
+
+    if generated_text:
+        # Apply text processing and ability reordering to the description
+        if 'description' in updated_card_data and updated_card_data['description']:
+            original_text = updated_card_data['description']
+
+            # Apply the text processing steps that were missing
+            processed_text = original_text
+            print(f"🔍 Step 0 - Original: {repr(processed_text)}")
+
+            # Step 1: Clean up text formatting
+            processed_text = processed_text.replace('\n\n', '\n')  # Double newlines to single
+            processed_text = processed_text.replace(' ~ ', f' {updated_card_data.get("name", "~")} ')  # Replace ~ with card name
+            processed_text = processed_text.replace('~', updated_card_data.get("name", "~"))  # Replace any remaining ~
+            print(f"🔍 Step 1 - After cleanup: {repr(processed_text)}")
+
+            # Step 1.5: Fix markdown bullet points (convert "* item" to "item")
+            processed_text = fix_markdown_bullet_points(processed_text)
+            print(f"🔍 Step 1.5 - After bullet fix: {repr(processed_text)}")
+
+            # Step 2: Skip ability reordering - already done in createCardContent()
+            # processed_text = reorder_abilities_properly(processed_text, updated_card_data)
+
+            # Step 3: Ensure periods on abilities
+            processed_text = ensure_periods_on_abilities(processed_text)
+            print(f"🔍 Step 3 - After period fix: {repr(processed_text)}")
+
+            updated_card_data['description'] = processed_text
+            print(f"🔧 Content model parsed output: {repr(processed_text)}")
+    else:
+        print("No card text found, using original description")
+        if 'description' not in updated_card_data:
+            updated_card_data['description'] = "Generated card rules text"
+
+    text_processing_time = time.time() - text_processing_start
+    print(f"   📝 Text processing: {text_processing_time:.2f}s")
+    print(f"🔍 Final updated_card_data keys: {list(updated_card_data.keys())}")
+    print(f"🔍 Final description: {repr(updated_card_data.get('description', 'NO DESCRIPTION'))}")
+    print(f"🔍 Final name: {repr(updated_card_data.get('name', 'NO NAME'))}")
+    print(f"🔍 Final flavorText: {repr(updated_card_data.get('flavorText', 'NO FLAVOR'))}")
+
+    # Step 2: Stats generation if needed
+    stats_generation_start = time.time()
+    stats_generated = False
+    if (updated_card_data.get('type', '').lower().find('creature') != -1 and
+        (not updated_card_data.get('power') or not updated_card_data.get('toughness'))):
+        print("🎯 Creature missing power/toughness - generating stats...")
+        generated_stats = generate_creature_stats(updated_card_data)
+        if generated_stats:
+            updated_card_data['power'] = generated_stats['power']
+            updated_card_data['toughness'] = generated_stats['toughness']
+            print(f"✅ Generated creature stats: {generated_stats['power']}/{generated_stats['toughness']}")
+            stats_generated = True
+
+    # Step 2.5: Vehicle crew cost generation
+    vehicle_crew_generated = False
+    type_line = updated_card_data.get('typeLine', '').lower()
+    if 'vehicle' in type_line and 'artifact' in type_line:
+        existing_description = updated_card_data.get('description', '')
+        if not existing_description or 'crew' not in existing_description.lower():
+            print("🚗 Vehicle missing crew cost - generating crew ability...")
+            crew_cost = generate_vehicle_crew_cost(updated_card_data)
+            if crew_cost:
+                # Add crew cost to bottom of description (with other active abilities)
+                crew_text = f"Crew {crew_cost}"
+                if existing_description:
+                    updated_card_data['description'] = f"{existing_description}\n{crew_text}"
+                else:
+                    updated_card_data['description'] = crew_text
+                print(f"✅ Generated vehicle crew cost: Crew {crew_cost}")
+                vehicle_crew_generated = True
+
+    stats_generation_time = time.time() - stats_generation_start
+    if stats_generated or vehicle_crew_generated:
+        generated_items = []
+        if stats_generated:
+            generated_items.append("creature P/T")
+        if vehicle_crew_generated:
+            generated_items.append("vehicle crew cost")
+        print(f"   📊 Stats generation: {stats_generation_time:.2f}s ({', '.join(generated_items)})")
+
+    # Step 3: Card image rendering
+    rendering_start = time.time()
+    card_image_data = card_renderer.generate_card_image(updated_card_data, art_b64)
+    rendering_time = time.time() - rendering_start
+    print(f"   🎨 Card rendering: {rendering_time:.2f}s")
+
+    return updated_card_data, card_image_data
+
 def process_card_generation(prompt, width, height, original_card_data):
     """
     Process a card generation request - wrapper function for the queue
@@ -314,122 +454,10 @@ def process_card_generation(prompt, width, height, original_card_data):
         cleanup_start_time = time.time()
         try:
             print("🖼️ Starting cleanup and card rendering...")
-            
-            # Step 1: Text processing and parsing
-            text_processing_start = time.time()
-            print("  📝 Step 1: Processing text data...")
-            updated_card_data = original_card_data.copy()
-            print(f"🔍 Original card data keys: {list(original_card_data.keys())}")
-            print(f"🔍 Original description: {repr(original_card_data.get('description', 'NO DESCRIPTION'))}")
-            if generated_card_text:
-                try:
-                    # Try to parse structured card data
-                    parsed_text = json.loads(generated_card_text)
-                    if isinstance(parsed_text, dict):
-                        # Update with parsed structured data
-                        if 'description' in parsed_text:
-                            updated_card_data['description'] = parsed_text['description']
-                        if 'name' in parsed_text and parsed_text['name']:
-                            updated_card_data['name'] = parsed_text['name']
-                        if 'flavorText' in parsed_text:
-                            updated_card_data['flavorText'] = parsed_text['flavorText']
-                        print(f"Updated card data with parsed structured content")
-                    else:
-                        # If it's a JSON string, use the string content
-                        updated_card_data['description'] = str(parsed_text)
-                        print(f"Updated card data with JSON string content")
-                except json.JSONDecodeError:
-                    # If not JSON, treat as plain description text
-                    updated_card_data['description'] = generated_card_text
-                    print(f"Updated card data with plain text content")
-                
-                # Apply text processing and ability reordering to the description
-                if 'description' in updated_card_data and updated_card_data['description']:
-                    original_text = updated_card_data['description']
-                    
-                    # Apply the text processing steps that were missing
-                    processed_text = original_text
-                    print(f"🔍 Step 0 - Original: {repr(processed_text)}")
-                    
-                    # Step 1: Clean up text formatting
-                    processed_text = processed_text.replace('\n\n', '\n')  # Double newlines to single
-                    processed_text = processed_text.replace(' ~ ', f' {updated_card_data.get("name", "~")} ')  # Replace ~ with card name
-                    processed_text = processed_text.replace('~', updated_card_data.get("name", "~"))  # Replace any remaining ~
-                    print(f"🔍 Step 1 - After cleanup: {repr(processed_text)}")
-                    
-                    # Step 1.5: Fix markdown bullet points (convert "* item" to "item")
-                    processed_text = fix_markdown_bullet_points(processed_text)
-                    print(f"🔍 Step 1.5 - After bullet fix: {repr(processed_text)}")
-                    
-                    # Step 2: Skip ability reordering - already done in createCardContent()
-                    # processed_text = reorder_abilities_properly(processed_text, updated_card_data)
-                    
-                    # Step 3: Ensure periods on abilities
-                    processed_text = ensure_periods_on_abilities(processed_text)
-                    print(f"🔍 Step 3 - After period fix: {repr(processed_text)}")
-                    
-                    updated_card_data['description'] = processed_text
-                    print(f"🔧 Content model parsed output: {repr(processed_text)}")
-            else:
-                print("No card text found, using original description")
-                if 'description' not in updated_card_data:
-                    updated_card_data['description'] = "Generated card rules text"
-            
-            text_processing_time = time.time() - text_processing_start
-            print(f"   📝 Text processing: {text_processing_time:.2f}s")
-            print(f"🔍 Final updated_card_data keys: {list(updated_card_data.keys())}")
-            print(f"🔍 Final description: {repr(updated_card_data.get('description', 'NO DESCRIPTION'))}")
-            print(f"🔍 Final name: {repr(updated_card_data.get('name', 'NO NAME'))}")
-            print(f"🔍 Final flavorText: {repr(updated_card_data.get('flavorText', 'NO FLAVOR'))}")
-            
-            # Step 2: Stats generation if needed
-            stats_generation_start = time.time()
-            stats_generated = False
-            if (updated_card_data.get('type', '').lower().find('creature') != -1 and 
-                (not updated_card_data.get('power') or not updated_card_data.get('toughness'))):
-                print("🎯 Creature missing power/toughness - generating stats...")
-                generated_stats = generate_creature_stats(updated_card_data)
-                if generated_stats:
-                    updated_card_data['power'] = generated_stats['power']
-                    updated_card_data['toughness'] = generated_stats['toughness']
-                    print(f"✅ Generated creature stats: {generated_stats['power']}/{generated_stats['toughness']}")
-                    stats_generated = True
-            
-            # Step 2.5: Vehicle crew cost generation
-            vehicle_crew_generated = False
-            type_line = updated_card_data.get('typeLine', '').lower()
-            if 'vehicle' in type_line and 'artifact' in type_line:
-                existing_description = updated_card_data.get('description', '')
-                if not existing_description or 'crew' not in existing_description.lower():
-                    print("🚗 Vehicle missing crew cost - generating crew ability...")
-                    crew_cost = generate_vehicle_crew_cost(updated_card_data)
-                    if crew_cost:
-                        # Add crew cost to bottom of description (with other active abilities)
-                        crew_text = f"Crew {crew_cost}"
-                        if existing_description:
-                            updated_card_data['description'] = f"{existing_description}\n{crew_text}"
-                        else:
-                            updated_card_data['description'] = crew_text
-                        print(f"✅ Generated vehicle crew cost: Crew {crew_cost}")
-                        vehicle_crew_generated = True
-            
-            stats_generation_time = time.time() - stats_generation_start
-            if stats_generated or vehicle_crew_generated:
-                generated_items = []
-                if stats_generated:
-                    generated_items.append("creature P/T")
-                if vehicle_crew_generated:
-                    generated_items.append("vehicle crew cost")
-                print(f"   📊 Stats generation: {stats_generation_time:.2f}s ({', '.join(generated_items)})")
-            
-            # Step 3: Card image rendering
-            rendering_start = time.time()
-            card_image_data = card_renderer.generate_card_image(updated_card_data, image_data)
-            rendering_time = time.time() - rendering_start
-            print(f"   🎨 Card rendering: {rendering_time:.2f}s")
+            _, card_image_data = finalize_card(original_card_data, generated_card_text, image_data)
             cleanup_end_time = time.time()
             cleanup_time = cleanup_end_time - cleanup_start_time
-            
+
             if card_image_data:
                 print(f"✅ Complete card image generated successfully in {cleanup_time:.2f} seconds")
             else:
@@ -438,7 +466,6 @@ def process_card_generation(prompt, width, height, original_card_data):
             cleanup_end_time = time.time()
             cleanup_time = cleanup_end_time - cleanup_start_time
             print(f"❌ Error generating complete card image after {cleanup_time:.2f} seconds: {e}")
-        
         # Build response with detailed timing
         end_time = time.time()
         total_generation_time = end_time - start_time
