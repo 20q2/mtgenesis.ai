@@ -9,14 +9,19 @@ so pending cards already show their name and type.
 
 Auth: user-scoped routes require X-User-Id (401 if missing or unknown). Read-only
 event/card routes accept it optionally (for myVoteCardId) but still reject an unknown
-id with 401 so a stale browser login is detected. Admin routes require X-Admin-Pin (403).
+id with 401 so a stale browser login is detected. Admin routes require X-Admin-Pin (403);
+after ADMIN_MAX_WRONG_PINS wrong PINs within ADMIN_LOCKOUT_SECONDS every admin request gets
+429 for ADMIN_LOCKOUT_SECONDS (right PIN included), so the PIN can't be brute-forced.
+GET /events/current and /events/<id> carry an ETag and answer If-None-Match with 304.
 Media is public because <img> tags cannot send headers.
 CORS/ngrok headers and OPTIONS answers come from app.py's global hooks and Flask.
 """
 from __future__ import annotations
 
+import collections
 import hmac
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -27,18 +32,41 @@ from storage import (PENDING_STATUSES, Storage, StorageError, clean_commander_na
                      leader_flags)
 
 MAX_PENDING_PER_USER = 3
+MAX_PROMPT_CHARS = 1000  # the form's auto art prompt can reach ~450 chars (5 colours, long types)
+ADMIN_MAX_WRONG_PINS = 5
+ADMIN_LOCKOUT_SECONDS = 300  # also the window the wrong PINs are counted in
+ADMIN_LOCKOUT_MESSAGE = "Too many wrong PINs - wait a few minutes"
+DEFAULT_ADMIN_PIN = "1234"
 MEDIA_KINDS = ("cards", "art")
 API_PREFIX = "/api/v1"
 
 
+def admin_pin_warning(admin_pin) -> str | None:
+    """A startup warning when ADMIN_PIN is empty or still the default, else None."""
+    pin = str(admin_pin or "").strip()
+    if not pin:
+        return "ADMIN_PIN is empty - set a strong ADMIN_PIN in config.py before the event!"
+    if pin == DEFAULT_ADMIN_PIN:
+        return (f"ADMIN_PIN is still the default '{DEFAULT_ADMIN_PIN}' - anyone can close the "
+                "event. Set a random ADMIN_PIN (8+ characters) in config.py before the event!")
+    return None
+
+
 def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir: Path,
-                         admin_pin: str) -> Blueprint:
-    """All spec §4 endpoints; app.py registers the result with url_prefix="/api/v1"."""
+                         admin_pin: str, clock=time.monotonic) -> Blueprint:
+    """All spec §4 endpoints; app.py registers the result with url_prefix="/api/v1".
+
+    `clock` (seconds, monotonic) is injectable so tests can expire the admin lockout.
+    """
     bp = Blueprint("ai_night_api", __name__)
     data_dir = Path(data_dir)
     # Serializes "check the pending cap, then create cards" so a double-submit cannot
     # slip two batches past the per-user cap (single-process server).
     create_lock = threading.Lock()
+    # Wrong admin PIN bookkeeping (global, not per client: ngrok hides client IPs).
+    admin_lock = threading.Lock()
+    wrong_pin_times: collections.deque = collections.deque()
+    locked_until = [0.0]
 
     # ----- errors and request helpers -----
     @bp.errorhandler(StorageError)
@@ -76,8 +104,19 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
 
     def require_admin() -> None:
         pin = request.headers.get("X-Admin-Pin") or ""
-        if not hmac.compare_digest(pin.encode("utf-8"), str(admin_pin).encode("utf-8")):
-            raise StorageError(403, "Wrong admin PIN")
+        with admin_lock:
+            now = clock()
+            if now < locked_until[0]:
+                raise StorageError(429, ADMIN_LOCKOUT_MESSAGE)
+            if hmac.compare_digest(pin.encode("utf-8"), str(admin_pin).encode("utf-8")):
+                return
+            while wrong_pin_times and wrong_pin_times[0] <= now - ADMIN_LOCKOUT_SECONDS:
+                wrong_pin_times.popleft()
+            wrong_pin_times.append(now)
+            if len(wrong_pin_times) >= ADMIN_MAX_WRONG_PINS:
+                wrong_pin_times.clear()
+                locked_until[0] = now + ADMIN_LOCKOUT_SECONDS
+        raise StorageError(403, "Wrong admin PIN")
 
     def check_pending_cap(user_id: str, adding: int) -> None:
         pending = storage.count_pending(user_id)
@@ -139,6 +178,17 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         user = optional_user()
         return user["id"] if user else None
 
+    def conditional_json(payload):
+        """JSON with an ETag over the body; If-None-Match on it gets an empty 304.
+
+        no-cache makes the browser store the body but revalidate on every poll, so
+        the unchanged event views most polls return cost a few hundred bytes.
+        """
+        resp = jsonify(payload)
+        resp.add_etag()
+        resp.cache_control.no_cache = True
+        return resp.make_conditional(request)
+
     # ----- users -----
     @bp.post("/users/login")
     def login():
@@ -164,6 +214,8 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         if not isinstance(prompt, str) or not prompt.strip():
             raise StorageError(400, "No prompt provided")
         prompt = prompt.strip()
+        if len(prompt) > MAX_PROMPT_CHARS:
+            raise StorageError(400, f"Prompt is too long (max {MAX_PROMPT_CHARS} characters)")
         card_data = data.get("cardData")
         if not isinstance(card_data, dict):
             raise StorageError(400, "cardData must be an object")
@@ -228,7 +280,7 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     def current_event():
         voter = voter_id()
         row = storage.current_event()
-        return jsonify(event_view(row, voter) if row else None)
+        return conditional_json(event_view(row, voter) if row else None)
 
     @bp.get("/events")
     def list_events():
@@ -240,7 +292,7 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         row = storage.get_event(event_id)
         if row is None:
             raise StorageError(404, "Event not found")
-        return jsonify(event_view(row, voter))
+        return conditional_json(event_view(row, voter))
 
     @bp.post("/votes")
     def vote():

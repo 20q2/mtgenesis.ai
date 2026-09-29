@@ -463,3 +463,127 @@ def test_options_preflight(client):
                                   "Access-Control-Request-Headers": "x-user-id"})
     assert res.status_code == 200
     assert client.options("/api/v1/votes").status_code == 200
+
+
+# ----- final-review fixes: prompt cap (M-3), admin lockout (I-1), conditional GETs (I-2) -----
+
+def test_generations_prompt_cap(client, queue):
+    from api_routes import MAX_PROMPT_CHARS
+    uid = login(client, "Andrew")
+    url = "/api/v1/generations"
+    too_long = "x" * (MAX_PROMPT_CHARS + 1)
+    res = client.post(url, headers=H(uid),
+                      json={"prompt": too_long, "cardData": CARD_DATA, "count": 1})
+    assert res.status_code == 400
+    assert str(MAX_PROMPT_CHARS) in res.get_json()["error"]
+    res = client.post(url, headers=H(uid), json={"prompt": too_long, "cardData": CARD_DATA,
+                                                 "count": 3, "commanderName": "Zur"})
+    assert res.status_code == 400
+    assert queue.enqueued == []
+    # Exactly the cap (after trimming) is fine.
+    res = client.post(url, headers=H(uid), json={
+        "prompt": "  " + "z" * MAX_PROMPT_CHARS + "  ", "cardData": CARD_DATA, "count": 1})
+    assert res.status_code == 200
+
+
+def test_prompt_cap_leaves_room_for_the_forms_longest_art_prompt():
+    from api_routes import MAX_PROMPT_CHARS
+    # card-form's generateArtPromptText with a 30-char name, 50-char type, all five colours,
+    # mythic, big creature and two description keywords is ~450 characters.
+    assert MAX_PROMPT_CHARS >= 600
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+def clock():
+    return FakeClock()
+
+
+@pytest.fixture
+def clocked_client(tmp_storage, queue, tmp_path, clock):
+    app = Flask(__name__)
+    app.register_blueprint(create_api_blueprint(tmp_storage, queue, tmp_path, PIN, clock=clock),
+                           url_prefix="/api/v1")
+    return app.test_client()
+
+
+def _admin_create(client, pin, name="Night"):
+    return client.post("/api/v1/admin/events", json={"name": name}, headers={"X-Admin-Pin": pin})
+
+
+def test_admin_lockout_after_five_wrong_pins(clocked_client, clock):
+    for _ in range(5):
+        assert _admin_create(clocked_client, "0000").status_code == 403
+        clock.now += 10
+    res = _admin_create(clocked_client, "0000")
+    assert res.status_code == 429
+    assert res.get_json() == {"error": "Too many wrong PINs - wait a few minutes"}
+    # The right PIN is refused too while locked out, on every admin route.
+    assert _admin_create(clocked_client, PIN).status_code == 429
+    assert clocked_client.post(f"/api/v1/admin/events/{uuid.uuid4()}/close",
+                               headers=ADMIN).status_code == 429
+    # Non-admin routes are unaffected.
+    assert clocked_client.get("/api/v1/events").status_code == 200
+
+
+def test_admin_lockout_expires(clocked_client, clock):
+    for _ in range(5):
+        _admin_create(clocked_client, "0000")
+    assert _admin_create(clocked_client, PIN).status_code == 429
+    clock.now += 299
+    assert _admin_create(clocked_client, PIN).status_code == 429
+    clock.now += 2
+    assert _admin_create(clocked_client, PIN).status_code == 200
+    # The counter starts over after the lockout: one wrong PIN is a plain 403.
+    assert _admin_create(clocked_client, "0000").status_code == 403
+
+
+def test_wrong_pins_outside_the_window_do_not_lock_out(clocked_client, clock):
+    for _ in range(4):
+        assert _admin_create(clocked_client, "0000").status_code == 403
+    clock.now += 301  # those four fall out of the 5-minute window
+    for _ in range(4):
+        assert _admin_create(clocked_client, "0000").status_code == 403
+    assert _admin_create(clocked_client, PIN).status_code == 200
+
+
+def test_admin_pin_warning():
+    from api_routes import admin_pin_warning
+    assert admin_pin_warning("") and admin_pin_warning("   ")
+    assert admin_pin_warning("1234") and admin_pin_warning(None)
+    assert admin_pin_warning("k7#Qm2vX9p") is None
+
+
+@pytest.mark.parametrize("which", ["current", "by-id"])
+def test_event_views_support_conditional_get(client, queue, tmp_storage, which):
+    event = client.post("/api/v1/admin/events", json={"name": "Night"}, headers=ADMIN).get_json()
+    owner, voter = login(client, "Andrew"), login(client, "Beth")
+    body = done_set(client, tmp_storage, owner)
+    assert client.post(f"/api/v1/sets/{body['setId']}/lock", headers=H(owner),
+                       json={"commanderName": "Zur the Ashen"}).status_code == 200
+    url = "/api/v1/events/current" if which == "current" else f"/api/v1/events/{event['id']}"
+
+    first = client.get(url, headers=H(voter))
+    assert first.status_code == 200
+    etag = first.headers.get("ETag")
+    assert etag
+    assert "no-cache" in first.headers.get("Cache-Control", "")
+
+    again = client.get(url, headers={**H(voter), "If-None-Match": etag})
+    assert again.status_code == 304
+    assert again.data == b""
+
+    res = client.post("/api/v1/votes", headers=H(voter),
+                      json={"setId": body["setId"], "cardId": body["cards"][1]["id"]})
+    assert res.status_code == 200
+    after = client.get(url, headers={**H(voter), "If-None-Match": etag})
+    assert after.status_code == 200
+    assert after.headers["ETag"] != etag
+    assert after.get_json()["sets"][0]["myVoteCardId"] == body["cards"][1]["id"]

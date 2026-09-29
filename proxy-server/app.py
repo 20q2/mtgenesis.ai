@@ -28,6 +28,12 @@ from PIL import Image, ImageDraw
 import tempfile
 import ollama
 import image_generation
+
+# The ollama module-level client has no timeout: a stalled Ollama (hung model load,
+# driver hiccup) would block the single AI Night text worker forever. With a timeout
+# the generate call raises, createCardContent returns None and the card fails.
+OLLAMA_TIMEOUT_SECONDS = 120
+ollama_client = ollama.Client(timeout=OLLAMA_TIMEOUT_SECONDS)
 print(f"🔍 Python executable: {sys.executable}")
 print(f"🔍 Python version: {sys.version}")
 print(f"🔍 Python path: {sys.path[:3]}...")  # Show first 3 paths
@@ -602,6 +608,9 @@ def truncate_prompt_smartly(prompt: str, max_tokens: int = 75) -> str:
     return final_prompt
 
 app = Flask(__name__)
+# Bounds every request body (413 beyond it): AI Night JSON bodies are a few KB, and an
+# unbounded prompt on a locked set would be re-downloaded by every voter on every poll.
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024
 CORS(app, 
      origins=["*"],  # Allow all origins for ngrok + S3
      methods=["GET", "POST", "OPTIONS"],
@@ -2560,7 +2569,7 @@ def createCardContent(prompt, card_data=None):
         card_text = ""
         
         for attempt in range(max_attempts):
-            response = ollama.generate(
+            response = ollama_client.generate(
                 model='mistral:latest',
                 prompt=enhanced_prompt,
                 keep_alive="30m"  # keep Mistral in VRAM between cards on AI Night
@@ -2586,9 +2595,12 @@ def createCardContent(prompt, card_data=None):
                     print(f"⚠️  Max validation attempts reached, using last generated text")
                     break
         
-        # Remove surrounding quotes if present
-        if (card_text.startswith('"') and card_text.endswith('"')) or \
-           (card_text.startswith("'") and card_text.endswith("'")):
+        # Remove surrounding quotes only when the whole reply is ONE quoted section.
+        # A multi-quoted reply ('"Flying." "When ~ enters, draw a card."', or one
+        # quoted ability per line) must keep its inner quotes: stripping just the
+        # outermost pair leaves 'Flying." "When ...' which the parser reduces to ''.
+        if (card_text.startswith('"') and card_text.endswith('"') and card_text.count('"') == 2) or \
+           (card_text.startswith("'") and card_text.endswith("'") and card_text.count("'") == 2):
             card_text = card_text[1:-1].strip()
         
         # Fix common formatting issues
@@ -3039,6 +3051,16 @@ def instant_response():
     # Return immediately without processing
     return jsonify({'status': 'instant-success', 'timestamp': str(request.args)}), 200
 
+def warn_about_admin_pin(pin):
+    """Print a loud startup banner when ADMIN_PIN is empty or still the default."""
+    from api_routes import admin_pin_warning
+
+    warning = admin_pin_warning(pin)
+    if warning:
+        bar = "!" * 78
+        print(f"\n{bar}\n!!! WARNING: {warning}\n{bar}\n")
+
+
 def init_ai_night(app):
     """
     Set up AI Night: data folders, SQLite storage, the two-stage generation queue
@@ -3058,6 +3080,7 @@ def init_ai_night(app):
     (data_dir / "art").mkdir(parents=True, exist_ok=True)
     (data_dir / "cards").mkdir(parents=True, exist_ok=True)
 
+    warn_about_admin_pin(ADMIN_PIN)
     storage = Storage(data_dir / "mtgenesis.db")
     gen_queue = GenerationQueue(storage, data_dir, createCardContent,
                                 image_generation.generate_art, finalize_card)
