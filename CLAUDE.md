@@ -56,8 +56,24 @@ Every service and component imports from `src/app/models/` (`card.model.ts`, `ap
   - The model answers in JSON (`{"abilities": [...]}` via Ollama's `format` schema), one ability per item, with `think=False` and `num_ctx` 2560. **Keep the context small**: at 4096 the 8B model grows enough that SDXL spills out of the 12 GB GPU and art goes from ~5 s to ~120 s.
   - `clean_abilities` turns that list into legal, legible templating (symbols, modern wording, self-references, keyword line in rules order, card-type rules, */* definitions, rarity cap). `lint_rules_text` scores the result; up to `TEXT_ATTEMPTS` replies are tried and the one with the fewest lint errors wins.
   - Most "bad card text" bugs are a new fixer in `_fix_templating`/`clean_abilities` or a new lint rule. Add a case to `tests/test_rules_text.py` (they're real model outputs) and re-run `tools/e2e_rules_text.py`.
+  - **Power level (`proxy-server/power_level.py`)** keeps cheap cards from being mega strong:
+    - `creature_stats` is the stat curve. The prompt states the body up front ("2/2 (fixed)") and `finalize_card` prints the same stats.
+    - `budget` is mana value plus a rarity bonus, minus the body's worth. `describe_budget` turns it into a concrete prompt line ("one small bonus, like ...").
+    - `estimate` prices rules text in mana using Limited rates. Repeating triggers and free {T} abilities cost 2–3× a one-shot effect.
+    - Generation retries anything more than `WARN_OVER` above its budget and keeps the weakest valid attempt. As a last resort, `trim_to_budget` drops the priciest ability. `FORBIDDEN` patterns in rules_text.py (repeating removal, free spells, filler mana) are never printed.
+    - To make cards stronger or weaker overall, tune `RARITY_BONUS`, `STAT_TOTAL` or the rates in `ability_value`, then compare `over_budget_*` in e2e reports.
   - `finalize_card` still replaces `~`, fixes bullets and periods (keyword lines get no period), and generates missing creature/Vehicle P/T and Vehicle crew. Stats are a deterministic curve by mana value and rarity; `*` P/T only comes from the request.
 - **CORS/ngrok headers:** every response goes through `add_ngrok_headers`. New routes should do the same and handle `OPTIONS`.
+
+### Knowledge Pool
+
+Shared custom cards for the paper event: `/pool` in the app. The spec is `docs/superpowers/specs/2026-09-29-knowledge-pool-design.md`.
+
+- The host opens a pool from `/admin` (`PoolAdminComponent`). It has a per-player submission cap and a list of slots, each with a color rule and a type rule; the default is 16 slots for 8 players.
+- Players submit finished gallery cards into slots and vote once per slot (never for their own card). Submitters stay anonymous until close. The top card in each slot becomes legal.
+- Storage: the `pools` / `pool_slots` / `pool_entries` / `pool_votes` tables and methods in `storage.py`. `card_fits_slot` is mirrored by `cardFitsSlot` in `pool.service.ts`, so keep the two in sync.
+- Routes: `/pools/*` and `/admin/pools*` in `api_routes.py`. Each entry carries an advisory `power` check from `power_level.assess`.
+- Tests: `tests/test_pool.py`.
 
 ### Card renderer (`proxy-server/card_renderer.py`)
 

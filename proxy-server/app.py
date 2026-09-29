@@ -29,6 +29,7 @@ import tempfile
 import ollama
 import image_generation
 import rules_text
+import power_level
 
 # The ollama module-level client has no timeout: a stalled Ollama (hung model load,
 # driver hiccup) would block the single AI Night text worker forever. With a timeout
@@ -706,78 +707,14 @@ def fix_markdown_bullet_points(card_text):
 
 def generate_creature_stats(card_data: dict) -> dict:
     """
-    Generate power/toughness for creatures based on their mana cost, abilities, and rarity
-    Enhanced to include asterisk (*) power/toughness with thematic definitions
+    Power/toughness for a creature or Vehicle that arrived without them. Uses the same
+    deterministic curve (mana value + rarity) the rules-text prompt announced to the model,
+    so the abilities were designed for exactly this body. Variable (*) stats only come
+    from the request itself.
     """
-    try:
-        # Extract mana cost and calculate CMC
-        mana_cost = card_data.get('manaCost', '')
-        cmc = card_data.get('cmc', 0)
-        rarity = card_data.get('rarity', 'common').lower()
-        abilities_text = card_data.get('description', '')
-        colors = card_data.get('colors', [])
-        card_name = card_data.get('name', '')
-        
-        print(f"🎲 Generating stats for creature with CMC {cmc}, rarity {rarity}, colors {colors}")
-        
-        # Variable (*) power/toughness only comes from the request itself: the rules text
-        # is written before stats, so a * rolled here would never be defined on the card.
-        
-        # Base stats calculation from CMC
-        if cmc == 0:
-            base_total = 2  # 0-cost creatures like 1/1 or 2/0
-        elif cmc == 1:
-            base_total = 3  # 1-cost creatures like 2/1, 1/2
-        elif cmc == 2:
-            base_total = 4  # 2-cost creatures like 2/2, 3/1
-        elif cmc == 3:
-            base_total = 5  # 3-cost creatures like 3/2, 2/3
-        elif cmc == 4:
-            base_total = 6  # 4-cost creatures like 3/3, 4/2
-        elif cmc == 5:
-            base_total = 7  # 5-cost creatures like 4/3, 3/4
-        elif cmc == 6:
-            base_total = 8  # 6-cost creatures like 4/4, 5/3
-        else:
-            base_total = min(cmc + 2, 12)  # Higher cost creatures, cap at 12
-        
-        # Adjust for abilities complexity (more abilities = lower stats)
-        ability_count = len([line for line in abilities_text.split('\n') if line.strip()])
-        if ability_count >= 5:
-            base_total -= 2  # Very complex creatures get -2 total stats
-        elif ability_count >= 3:
-            base_total -= 1  # Complex creatures get -1 total stats
-        
-        # Adjust for rarity (higher rarity can be slightly more efficient)
-        if rarity == 'rare':
-            base_total += 1
-        elif rarity == 'mythic':
-            base_total += 2
-        
-        # Ensure minimum viable stats
-        base_total = max(base_total, 1)
-        
-        # PERFORMANCE FIX: Skip Ollama call, use fast fallback logic directly
-        print(f"🎲 Using fast fallback stat generation (skipping Ollama for performance)")
-        
-        # Fallback: Simple balanced distribution
-        if base_total <= 2:
-            power, toughness = 1, max(1, base_total - 1)
-        else:
-            # Slightly favor toughness for survivability
-            power = base_total // 2
-            toughness = base_total - power
-            if toughness < 1:
-                toughness = 1
-                power = base_total - 1
-        
-        print(f"🎲 Fallback generated stats: {power}/{toughness}")
-        return {'power': str(power), 'toughness': str(toughness)}
-        
-    except Exception as e:
-        print(f"❌ Error generating creature stats: {e}")
-        # Ultimate fallback: 2/2
-        return {'power': '2', 'toughness': '2'}
+    power, toughness = power_level.creature_stats(card_data)
+    print(f"🎲 Stats for mana value {card_data.get('cmc', 0)} {card_data.get('rarity', 'common')}: {power}/{toughness}")
+    return {'power': str(power), 'toughness': str(toughness)}
 
 def calculate_card_power_level(card_data: dict) -> float:
     """
@@ -827,15 +764,15 @@ def calculate_card_power_level(card_data: dict) -> float:
                 power_focus_bonus = 1.0
         
         # Calculate final power level
-        power_level = base_power + efficiency_bonus + color_bonus + power_focus_bonus
+        level = base_power + efficiency_bonus + color_bonus + power_focus_bonus
         
         # Normalize to 0-10 scale and cap
-        power_level = max(0.0, min(power_level, 10.0))
+        level = max(0.0, min(level, 10.0))
         
         print(f"💪 Power level calculation: P/T {power}/{toughness}, CMC {cmc}, Colored pips: {colored_pips:.1f}")
-        print(f"💪 Components: Base {base_power:.1f} + Efficiency {efficiency_bonus:.1f} + Color {color_bonus:.1f} + Power focus {power_focus_bonus:.1f} = {power_level:.2f}")
+        print(f"💪 Components: Base {base_power:.1f} + Efficiency {efficiency_bonus:.1f} + Color {color_bonus:.1f} + Power focus {power_focus_bonus:.1f} = {level:.2f}")
         
-        return power_level
+        return level
         
     except Exception as e:
         print(f"❌ Error calculating power level: {e}")
@@ -849,23 +786,23 @@ def generate_vehicle_crew_cost(card_data: dict) -> int:
     """
     try:
         # Calculate comprehensive power level
-        power_level = calculate_card_power_level(card_data)
+        level = calculate_card_power_level(card_data)
         
         # Extract basic stats for logging
         power = int(card_data.get('power', 0)) if card_data.get('power', '').isdigit() else 0
         toughness = int(card_data.get('toughness', 0)) if card_data.get('toughness', '').isdigit() else 0
         cmc = card_data.get('cmc', 0)
         
-        print(f"🚗 Vehicle analysis: P/T {power}/{toughness}, CMC {cmc}, Power level: {power_level:.2f}")
+        print(f"🚗 Vehicle analysis: P/T {power}/{toughness}, CMC {cmc}, Power level: {level:.2f}")
         
         # Base crew cost on comprehensive power level
-        if power_level <= 2.0:
+        if level <= 2.0:
             crew_cost = 1  # Weak vehicles
-        elif power_level <= 3.5:
+        elif level <= 3.5:
             crew_cost = 2  # Moderate vehicles
-        elif power_level <= 5.0:
+        elif level <= 5.0:
             crew_cost = 3  # Strong vehicles
-        elif power_level <= 7.0:
+        elif level <= 7.0:
             crew_cost = 4  # Very strong vehicles
         else:
             crew_cost = 5  # Extremely powerful vehicles
@@ -873,7 +810,7 @@ def generate_vehicle_crew_cost(card_data: dict) -> int:
         # Ensure minimum crew 1, maximum crew 5
         crew_cost = max(1, min(crew_cost, 5))
         
-        print(f"🚗 Generated crew cost: {crew_cost} (based on power level {power_level:.2f})")
+        print(f"🚗 Generated crew cost: {crew_cost} (based on power level {level:.2f})")
         return crew_cost
         
     except Exception as e:
@@ -1257,6 +1194,9 @@ if __name__ == '__main__':
     print("  GET  /api/v1/queue_status - Generation queue status and ETA")
     print("  GET  /api/v1/media/cards/<id>.png | /media/art/<id>.png - Rendered card and artwork")
     print("  POST /api/v1/admin/events | /admin/events/<id>/close - Host event controls")
+    print("  GET  /api/v1/pools/current | /pools | /pools/<id> - Knowledge Pool")
+    print("  POST /api/v1/pools/entries | /pools/entries/<id>/withdraw | /pools/votes[/clear] - Pool submissions and votes")
+    print("  POST /api/v1/admin/pools | /admin/pools/<id>/close - Host Knowledge Pool controls")
     print("\n📋 Queue Configuration:")
     print(f"  - Max concurrent requests: {request_queue.max_concurrent}")
     print("  - All endpoints use queue internally to prevent model overload")

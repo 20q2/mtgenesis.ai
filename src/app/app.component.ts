@@ -19,7 +19,8 @@ export class AppComponent {
     { path: '/create', label: 'Create', short: 'Create', icon: 'auto_awesome' },
     { path: '/set', label: 'Commander Set', short: 'Commander', icon: 'style' },
     { path: '/gallery', label: 'Gallery', short: 'Gallery', icon: 'collections' },
-    { path: '/vote', label: 'Vote', short: 'Vote', icon: 'how_to_vote' }
+    { path: '/vote', label: 'Vote', short: 'Vote', icon: 'how_to_vote' },
+    { path: '/pool', label: 'Knowledge Pool', short: 'Pool', icon: 'auto_stories' }
   ];
 
   constructor(private users: UserService, private router: Router) {

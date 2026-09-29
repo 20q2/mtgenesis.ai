@@ -1,4 +1,6 @@
-import { CardStatus, CardView, EventView, SetCardView, SetView } from '../models/api.model';
+import {
+  CardStatus, CardView, EventView, PoolEntryView, PoolSlotView, PoolView, SetCardView, SetView
+} from '../models/api.model';
 
 /** Test-only builders for API view objects. */
 export function cardView(overrides: Partial<CardView> = {}): CardView {
@@ -64,6 +66,53 @@ export function eventView(overrides: Partial<EventView> = {}): EventView {
     createdAt: '2026-09-28T19:00:00+00:00',
     closedAt: null,
     sets: [setView()],
+    ...overrides
+  };
+}
+
+export function poolEntry(overrides: Partial<PoolEntryView> = {}): PoolEntryView {
+  const id = overrides.id ?? 'pe-1';
+  return {
+    id,
+    slotId: 'ps-1',
+    cardId: `${id}-card`,
+    mine: false,
+    username: null,
+    card: doneCard({ id: `${id}-card` }),
+    power: { estimate: 1, budget: 1.25, verdict: 'fair' },
+    votes: 0,
+    leader: false,
+    tied: false,
+    createdAt: '2026-09-29T19:00:00+00:00',
+    ...overrides
+  };
+}
+
+export function poolSlot(overrides: Partial<PoolSlotView> = {}): PoolSlotView {
+  return {
+    id: 'ps-1',
+    position: 1,
+    label: 'Red creature',
+    colorRule: 'R',
+    typeRule: 'creature',
+    ruleText: 'Red creature',
+    entries: [],
+    myVoteEntryId: null,
+    myEntryId: null,
+    ...overrides
+  };
+}
+
+export function poolView(overrides: Partial<PoolView> = {}): PoolView {
+  return {
+    id: 'p-1',
+    name: 'Knowledge Pool 2026',
+    status: 'open',
+    maxEntriesPerUser: 2,
+    createdAt: '2026-09-29T18:00:00+00:00',
+    closedAt: null,
+    myEntryCount: 0,
+    slots: [poolSlot()],
     ...overrides
   };
 }

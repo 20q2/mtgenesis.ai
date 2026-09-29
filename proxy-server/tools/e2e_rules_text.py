@@ -113,6 +113,7 @@ def main():
 
     import app  # heavy import (torch, diffusers); after env is set
     from rules_text import lint_rules_text
+    import power_level
 
     # Record every raw model reply, whichever Ollama call the pipeline uses.
     raw_log = []
@@ -154,10 +155,13 @@ def main():
                 'rarity': card['rarity'], 'raw': list(raw_log), 'final': desc,
                 'pt': f"{final.get('power', '')}/{final.get('toughness', '')}" if 'creature' in card['type'].lower() else '',
                 'issues': issues, 'seconds': round(gen_s, 1), 'png': fname,
+                'power': dict(zip(('value', 'budget'), power_level.assess(desc, final))),
             })
             e = sum(1 for s, _ in issues if s == 'error')
             w = len(issues) - e
-            print(f'[{args.label}] {i:02d}.{rep} {card["name"]}: {e} errors, {w} warnings, {gen_s:.1f}s')
+            pw = results[-1]['power']
+            print(f'[{args.label}] {i:02d}.{rep} {card["name"]}: {e} errors, {w} warnings, '
+                  f'power {pw["value"]}/{pw["budget"]}, {gen_s:.1f}s')
 
     write_report(out, args, results)
 
@@ -181,6 +185,9 @@ def write_report(out, args, results):
         'cards': len(results), 'clean_cards': clean, 'errors': errors, 'warnings': warns,
         'avg_chars': round(sum(chars) / max(1, len(chars))),
         'avg_seconds': round(sum(secs) / max(1, len(secs)), 1),
+        'over_budget_1': sum(1 for r in results if r['power']['value'] - r['power']['budget'] > 1),
+        'over_budget_2': sum(1 for r in results if r['power']['value'] - r['power']['budget'] > 2),
+        'avg_over': round(sum(r['power']['value'] - r['power']['budget'] for r in results) / max(1, len(results)), 2),
         'most_repeated_openings': openings.most_common(6),
     }
     (out / 'report.json').write_text(json.dumps({'summary': summary, 'results': results}, indent=2, ensure_ascii=False), encoding='utf-8')
@@ -191,6 +198,7 @@ def write_report(out, args, results):
           '', f"Most repeated openings: {summary['most_repeated_openings']}", '']
     for r in results:
         md += [f"## {r['n']:02d}.{r['rep']} {r['name']} ({r['rarity']} {r['type']}) {r['pt']}", '',
+               f"Power: ~{r['power']['value']} of budget {r['power']['budget']}", '',
                f"![card]({r['png']})", '', '**Final text**', '', '```', r['final'], '```', '']
         if r['issues']:
             md += ['**Lint**', ''] + [f"- {s}: {m}" for s, m in r['issues']] + ['']

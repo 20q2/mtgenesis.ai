@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import re
 
+import power_level as power
+
 # ===== Vocabulary =====
 
 # Keyword abilities a card may simply list ("Flying, trample"). Lowercase. Keywords that
@@ -80,6 +82,34 @@ _COST_WORDS = r'(?:\{[^}]*\}|sacrifice|discard|pay|exile|remove|tap|untap|return
 IMPERATIVE_START = re.compile(
     r'^(draw|scry|surveil|exile|destroy|return|create|deal|gain|lose|put|search|counter|tap|'
     r'untap|discard|mill|look|reveal|choose|add|copy|shuffle|investigate|proliferate|fight)\b', re.I)
+
+# Every real ability mentions at least one game object or action; a sentence with none of
+# these ("Vyraxa exhales a molten torrent that scorches the battlefield.") is flavor text.
+RULES_WORDS = re.compile(
+    r"\{|\b(you|your|target|creature|creatures|card|cards|damage|life|counter|counters|token|tokens|"
+    r"mana|gets?|has|have|can't|each|player|opponent|spell|spells|land|lands|draw|turn|control|"
+    r"power|toughness|enters|dies|attacks|blocks|library|graveyard|hand|equipped|enchanted|"
+    r"artifact|enchantment|permanent|sacrifice|exile|destroy|tap|untap|flying|protection|equal|"
+    r"create|scry|surveil|mill|return|counter|search|reveal|discard|fight|copy|cast)\b", re.I)
+
+# Abilities that are never acceptable. The linter flags them (so the model retries), and if
+# every attempt still has one, generation drops that line rather than print it.
+FORBIDDEN = [
+    (re.compile(r'^(At the beginning of|\{T\}:)[^.]*\b(destroy|exile) (target|each|all)\b', re.I),
+     'removal that repeats every turn'),
+    (re.compile(r'\bwithout paying (its|their) mana costs?\b', re.I), 'free spells break any budget'),
+    (re.compile(r'\bextra turn\b', re.I), 'extra turns'),
+    (re.compile(r'\bspells? you (control|cast) gets? [+\-]', re.I), 'spells don\'t get +N/+N or cost changes this way'),
+    (re.compile(r'\byou get (a|an|one|two) (charge|\+1/\+1|-1/-1|land|loyalty) (counter|card)', re.I),
+     'players don\'t get counters or cards like that'),
+    (re.compile(r'\bthis (enchantment|artifact|land) deals combat damage\b', re.I), 'only creatures deal combat damage'),
+    (re.compile(r'\{X\} mana\b|\badd \{X\}', re.I), 'variable mana with no defined X'),
+    (re.compile(r'^(?:Whenever|At the beginning of) [^,]+, (?:you may )?add \{[^}]+\}(?: or \{[^}]+\})?\.$', re.I),
+     'filler: mana as the only reward'),
+    (re.compile(r'\b(exile|destroy|return) any target\b', re.I), '"any target" only works for damage'),
+    (re.compile(r'\bpay \{([WUBRGC])\}\. If you do, add \{\1\}', re.I), 'pointless mana exchange'),
+    (re.compile(r'\bgets? \+\d+/\+\d+ [a-z]+ [A-Za-z ]*tokens?\b'), 'garbled stat change'),
+]
 
 RARITY_ABILITY_CAP = {'common': 2, 'uncommon': 3, 'rare': 4, 'mythic': 5}
 MAX_TEXT_CHARS = 340  # beyond this the renderer's font gets hard to read
@@ -279,6 +309,9 @@ def lint_rules_text(text: str, card: dict | None) -> list[tuple[str, str]]:
                 err(f'effect with no trigger or cost on a permanent: {l!r}')
             if ability_kind(l) == 'static' and re.search(r'\buntil end of turn\b', l) and '"' not in l:
                 err(f'static ability with a duration (needs a trigger or cost): {l!r}')
+            if ability_kind(l) == 'static' and re.search(r'\bdeals? (\d+|X) damage\b', l) and '"' not in l \
+                    and not re.search(r'\bwould\b|\bwhenever\b|\beach time\b', l, re.I):
+                err(f'damage with no trigger or cost on a permanent: {l!r}')
     if 'equipment' not in subtype and any(re.match(r'^equip\b', l, re.I) for l in lines):
         err('Equip on a card that isn\'t Equipment')
     if not is_creature and 'vehicle' not in subtype:
@@ -322,7 +355,7 @@ def lint_rules_text(text: str, card: dict | None) -> list[tuple[str, str]]:
         if re.search(r', [A-Z][a-z]+, (create|draw|put|deal|deals|return|exile|destroy)\b', l):
             err(f'name inserted mid-sentence: {l!r}')
         m = re.search(r'\bthat (creature|player|card|spell|permanent|land|artifact)\b', l)
-        if m and not re.search(r'\b(target|a|an|another|each|enchanted|equipped|blocking|attacking|blocked|dies|cast|one|it)\b', l[:m.start()]):
+        if m and not re.search(r'\b(target|a|an|another|each|enchanted|equipped|blocking|attacking|blocked|dies|cast|one|it|the top)\b', l[:m.start()]):
             err(f'dangling "{m.group(0)}" with nothing it refers to: {l!r}')
         if re.search(r'\b(bounce|tutor|mana pool|counter any target|at the end of the game|if this ability is used|remove [^,.]* from battle)\b', l, re.I):
             err(f'slang or invalid wording: {l!r}')
@@ -336,6 +369,29 @@ def lint_rules_text(text: str, card: dict | None) -> list[tuple[str, str]]:
                 err(f'creates something that isn\'t a token: {l!r}')
             elif not re.search(r"\bcreature tokens?\b|\b(treasure|food|clue|blood|map|powerstone|junk|gold|incubator)\b|\bcopy\b", made, re.I):
                 err(f'undefined token: {l!r}')
+        if re.search(r'\bpay (\{[^}]+\})+ (?:more )?to add\b|\bpay [^.]* to add \{', l, re.I):
+            err(f'pointless mana exchange: {l!r}')
+        if re.search(r'\bdrain\b', l, re.I):
+            err(f'"drain" is not a game action: {l!r}')
+        if re.match(r'^(When|Whenever) (?!you\b)[\w\'’ ]+? (create|draw|put|deal|destroy|exile|return|gain|shuffle|sacrifice)\b', l) or \
+                re.search(r'\bif \w+ (shuffle|create|draw|put|deal)\b', l):
+            err(f'trigger or condition missing its verb: {l!r}')
+        if re.search(r'\bis attacked\b', l):
+            err(f'creatures are never "attacked": {l!r}')
+        for pattern, why in FORBIDDEN:
+            if pattern.search(l):
+                err(f'{why}: {l!r}')
+        if ability_kind(l) == 'activated' and re.match(r'^(?:\{(?:\d+|[WUBRGC])\})+:\s*Add\b[^.]*\.$', l):
+            err(f'pointless mana exchange: {l!r}')
+        if not is_spell and ability_kind(l) == 'static' and re.match(r'^You may\b', l):
+            err(f'optional effect with no trigger or cost on a permanent: {l!r}')
+        if ability_kind(l) == 'static' and not RULES_WORDS.search(l):
+            err(f'reads like flavor text, not an ability: {l!r}')
+        if re.search(r"\bthis (land|enchantment|artifact) can't be blocked\b", l, re.I):
+            err(f'a noncreature permanent can\'t be blocked: {l!r}')
+        if re.search(r'\btokens? (?:on top of|into|in) (?:your|a|its owner\'s) library\b', l, re.I) or \
+                re.search(r'\bactivate this (enchantment|artifact|creature|land)\b', l, re.I):
+            err(f'nonsense game action: {l!r}')
         if re.search(r'\benters with\b(?![^.]*\bcounters?\b)', l, re.I):
             err(f'"enters with" something that isn\'t counters: {l!r}')
         if re.search(r'\+(?=[,.]|\s|$)', l):
@@ -343,6 +399,7 @@ def lint_rules_text(text: str, card: dict | None) -> list[tuple[str, str]]:
         m = re.search(r'\b(?:has|have|gains?) ([a-z ,]+?)(?: until end of turn)?(?:\.|$)', l)
         # "protection from red and white" is one keyword, not two
         granted_text = re.sub(r'protection from [a-z]+(?: and [a-z]+)?', 'protection', m.group(1)) if m else ''
+        granted_text = re.sub(r'\s*(?:,\s*|\band\s+)?loses [a-z ]+$', '', granted_text)  # "and loses trample"
         if m and re.search(r',| and ', granted_text):
             granted = [p.strip() for p in re.split(r',\s*|\s+and\s+', granted_text) if p.strip()]
             if len(granted) > 1:
@@ -378,6 +435,13 @@ def lint_rules_text(text: str, card: dict | None) -> list[tuple[str, str]]:
             if not re.search(r'\b' + stat + r'\b[^.]*\bequal to\b', text, re.I) and \
                     not re.search(r'\bpower and toughness are each\b', text, re.I):
                 err(f'variable {stat} ({v}) never defined')
+
+    # Power: far over what the mana value and rarity can afford
+    value, allowed = power.assess(text, card)
+    if value - allowed > power.ERROR_OVER:
+        err(f'too strong for its cost: worth ~{value} mana of abilities, budget {allowed}')
+    elif value - allowed > power.WARN_OVER:
+        warn(f'strong for its cost: worth ~{value} mana of abilities, budget {allowed}')
 
     # Size and duplicates
     count = sum(len(l.split(',')) if ability_kind(l) == 'keyword' else 1 for l in lines)
@@ -446,7 +510,15 @@ Rare Equipment: {"abilities": ["Equipped creature gets +1/+0 and has \\"Whenever
 Mythic planeswalker: {"abilities": ["+1: Scry 2, then draw a card.", "−2: Return target creature to its owner's hand.", "−7: You get an emblem with \\"Instant and sorcery spells you cast cost {2} less to cast.\\""]}
 Uncommon land: {"abilities": ["This land enters tapped.", "{T}: Add {U} or {R}.", "{2}, {T}, Sacrifice this land: Draw a card."]}
 
-Design: make it feel like a real card from a premier set, balanced for its mana value and rarity. Build every ability around one idea that fits the card's name, colors and concept, and do not copy the examples. Prefer fresh, specific effects over generic filler ("draw a card" or "gain 1 life" alone is boring). Keep it concise: real cards rarely exceed 60 words."""
+Power level (the most common mistake is making cheap cards far too strong):
+- Price effects like a Limited designer. Typical costs: "draw a card" ~1 mana; "draw two cards" ~3; 2 damage to a creature ~1; 3 damage to any target ~2; "destroy target creature" ~4 at common (3 at rare); "counter target spell" ~2; a +2/+2 pump until end of turn ~1; one 1/1 token ~1; flying ~1 on a creature.
+- A creature's body is already paid for: the power/toughness you are given is about what its mana value buys, so its abilities must fit in the stated power budget.
+- An effect that repeats (Whenever..., At the beginning of your upkeep..., {T}: ...) costs about twice a one-time effect (When this creature enters...). A 2-mana card never makes tokens or draws cards every turn.
+- Rarity: commons do one simple thing and are modest; uncommons are a bit stronger or do two related things; rares can be strong and build-around; mythics can be splashy. Protection, hexproof and indestructible are uncommon or higher.
+- Never: extra turns, casting spells without paying their mana cost, "destroy all" below rare, loops, removal that repeats every turn, or more than three tokens from one ability. A repeating ability makes at most one token.
+- Avoid filler: paying mana to add mana, "you may add {U}" on attack, or restating what a keyword already does. Every ability should matter in a game.
+
+Design: make it feel like a real card from a premier set. Build every ability around one idea that fits the card's name, colors and concept, and do not copy the examples. Prefer specific, flavorful effects, but a small effect done well beats a big one: most real cards are simple. Keep it concise: real cards rarely exceed 60 words."""
 
 
 # Design hooks per color. One is suggested at random so similar requests still diverge.
@@ -515,22 +587,36 @@ def build_messages(prompt: str, card: dict | None, rng) -> list[dict]:
     else:
         facts.append(f'Mana cost: {mana_cost or "{0}"} (mana value {mv})')
     facts.append('Colors: ' + (', '.join({'W': 'white', 'U': 'blue', 'B': 'black', 'R': 'red', 'G': 'green'}[c] for c in colors) or 'colorless'))
+    is_body = 'creature' in card_type or 'vehicle' in subtype
     if card.get('power') or card.get('toughness'):
         facts.append(f"Power/toughness: {card.get('power') or '?'}/{card.get('toughness') or '?'}")
+    elif is_body:
+        # The body is fixed before the text (finalize_card prints the same stats), so the
+        # model can spend the budget knowing what the creature already is
+        p, t = power.creature_stats(card)
+        facts.append(f'Power/toughness: {p}/{t} (fixed; design the abilities around this body)')
+    facts.append(power.describe_budget(card))
     concept = re.sub(r',?\s*(detailed digital art|magic: the gathering style|fantasy art of)', '', prompt or '', flags=re.I).strip(' ,')
     if concept:
         facts.append(f'Concept: {concept}')
 
+    # How many abilities: the rarity's range, trimmed to what the power budget can afford
     lo, hi = ABILITY_BUDGET.get(rarity, (2, 3))
-    budget = rng.randint(lo, hi)
+    affordable = power.budget(card)
+    hi = min(hi, 1 if affordable <= 0.75 else 2 if affordable <= 2.5 else hi)
+    lo = min(lo, hi)
+    count = rng.randint(lo, hi)
     musts = []
     if 'planeswalker' in card_type:
-        budget = 4 if rarity == 'mythic' else 3
-        musts.append(f'Write exactly {budget} loyalty abilities.')
+        count = 4 if rarity == 'mythic' else 3
+        musts.append(f'Write exactly {count} loyalty abilities.')
     elif 'instant' in card_type or 'sorcery' in card_type:
         musts.append('Write the spell as one item of one or two sentences.')
+    elif count == 1:
+        musts.append('Write 1 ability: a small triggered or activated ability that shows off the concept '
+                     '(a lone keyword only if it is the most flavorful choice).')
     else:
-        musts.append(f'Write {budget} abilities (a keyword item of up to two keywords counts as one).')
+        musts.append(f'Write {count} abilities (a keyword item of up to two keywords counts as one).')
     if 'aura' in subtype:
         musts.append('Start with "Enchant creature".')
     if 'equipment' in subtype:
@@ -554,7 +640,7 @@ def build_messages(prompt: str, card: dict | None, rng) -> list[dict]:
 
     hooks = [h for c in colors for h in COLOR_HOOKS[c]] or COLORLESS_HOOKS
     hook = rng.choice(hooks)
-    musts.append(f'Design hook to consider: {hook}.')
+    musts.append(f'Design hook to consider, scaled to the power budget: {hook}.')
 
     user = '\n'.join(facts) + '\n\n' + '\n'.join(f'- {m}' for m in musts)
     return [{'role': 'system', 'content': SYSTEM_PROMPT}, {'role': 'user', 'content': user}]
@@ -589,11 +675,18 @@ def _split_run_ons(line: str) -> list[str]:
     """'Flying. {T}: Draw a card. Whenever ...' -> separate abilities."""
     # "Cycling {2}, {T}: ..." -> keyword with its cost, then the activated ability
     line = re.sub(r'^((?:Cycling|Kicker|Flashback|Ward|Equip) (?:\{[^}]+\})+), (?=\{)', r'\1. ', line)
+    # "Flash, {T}: Add {U}{U}." -> keywords, then the activated ability
+    m = re.match(r'^([^:{]+?), (\{[^}]+\}.*:.*)$', line)
+    if m and is_keyword_line(m.group(1)):
+        line = f'{m.group(1)}. {m.group(2)}'
     # "Protection from blue, when this enters, ..." -> keyword, then the trigger
     m = re.match(r'^([^,:.]+), (when(?:ever)?\b.*)$', line, re.I)
     if m and is_keyword_line(m.group(1)):
         line = f'{m.group(1)}. {m.group(2)[0].upper()}{m.group(2)[1:]}'
-    parts = re.split(r'(?<=[.!])\s+(?=' + _TRIGGER_START + r'|\{[^}]+\}(?:[^.:]{0,40}):|Equip\b|Crew \d)', line)
+    # Split after a sentence end (optionally closing a quote) before anything that starts
+    # a new ability: a trigger, a cost ("{2}:", "Pay 2 life:", "Sacrifice ...:"), Equip or Crew
+    parts = re.split(r'(?:(?<=[.!])|(?<=[.!]["”]))\s+(?=' + _TRIGGER_START +
+                     r'|\{[^}]+\}(?:[^.:]{0,40}):|(?:Pay \d+ life|Sacrifice [^:.]{1,40}|Discard [^:.]{1,30}):|Equip\b|Crew \d)', line)
     out = []
     for p in parts:
         # "Flying, trample. When ..." -> keyword head split off
@@ -670,6 +763,23 @@ def _fix_templating(s: str, card: dict) -> str:
                s, flags=re.I)
     s = re.sub(r'\b(treasure|food|clue|blood|map|powerstone|junk) (tokens?)\b', lambda m: m.group(1).capitalize() + ' ' + m.group(2), s)
     s = re.sub(r'\s+(?:to|into) your mana pool\b', '', s, flags=re.I)
+    # A tacked-on "You may pay {B}{G} to add {B} or {G}." sentence does nothing: drop it
+    s = re.sub(r'\s*You may pay (?:\{[^}]+\})+ (?:more )?to add [^.]*\.', '', s).strip()
+    # "you may pay {3} to add {R}. If you do, ..." -> "you may pay {3}. If you do, ..." (the mana is noise)
+    s = re.sub(r'(\bpay (?:\{[^}]+\})+) to add (?:\{[^}]+\})+(?: or (?:\{[^}]+\})+)?(?=\. If you do\b)', r'\1', s)
+    # Runaway repetition from a looping reply: "{C} {C} {C} {C} ..." -> "{C}{C}"
+    s = re.sub(r'((\{[^}]+\})\s*)\2(?:\s*\2){3,}', r'\2\2', s)
+    # An undefined token ("create a storm token") becomes a 1/1 creature token in the card's colors
+    def define_token(m):
+        word = m.group(2)
+        if word.lower() in ('treasure', 'food', 'clue', 'blood', 'map', 'powerstone', 'junk', 'gold', 'incubator', 'creature'):
+            return m.group(0)
+        names = {'W': 'white', 'U': 'blue', 'B': 'black', 'R': 'red', 'G': 'green'}
+        colors = [names[c] for c in (card.get('colors') or []) if c in names]
+        color = ' and '.join(colors[:2]) if colors else 'colorless'
+        plural = m.group(3) == 'tokens'
+        return f"{m.group(1)} 1/1 {color} {word.capitalize()} creature token{'s' if plural else ''}"
+    s = re.sub(r'\b([Cc]reate (?:a|an|one|two|three|X|\d+)) ([A-Za-z]+) (tokens?)\b', define_token, s)
     # Triggers: a card's own entering happens once ("When"); casting spells repeats ("Whenever")
     s = re.sub(r'^Whenever (this \w+|' + re.escape(ref) + r') enters\b', r'When \1 enters', s)
     s = re.sub(r'^When you cast (a|an|another|your|each)\b', r'Whenever you cast \1', s)
@@ -702,6 +812,7 @@ def _fix_templating(s: str, card: dict) -> str:
         s = re.sub(r'(, )' + re.escape(ref) + r', (?=[a-z]+s\b)', r'\1' + ref + ' ', s)
         # "Vyraxa, the dragon queen, can't be blocked" -> "Vyraxa can't be blocked" (anywhere in the line)
         s = re.sub(r'\b' + re.escape(ref) + r', the [^,]+, ', ref + ' ', s)
+        s = re.sub(r'\b' + re.escape(ref) + r', the [A-Z][\w\'-]+\b', ref, s)
     # A permanent's damage has a source: ", deal 2 damage" -> ", this enchantment deals 2 damage"
     if not ref.startswith('this spell'):
         s = re.sub(r'(, (?:you may )?)deal (\d+|X) damage', lambda m: f'{m.group(1)}{ref} deals {m.group(2)} damage'.replace('you may ' + ref + ' deals', 'you may have ' + ref + ' deal'), s)
@@ -722,7 +833,25 @@ def _fix_templating(s: str, card: dict) -> str:
     s = re.sub(r'\b([Pp])rotection from (White|Blue|Black|Red|Green)\b', lambda m: m.group(1) + 'rotection from ' + m.group(2).lower(), s)
     # Invalid or made-up game actions
     s = re.sub(r'\badd (a|an|one|two|three|\d+) ([+\-−]\d+/[+\-−]\d+|[a-z]+) (counters?) on\b', r'put \1 \2 \3 on', s)
-    s = re.sub(r'\bgains? (\d+)/(\d+)\b', r'gets +\1/+\2', s)
+    s = re.sub(r'\bgains? \+?(\d+)/\+?(\d+)\b', r'gets +\1/+\2', s)
+    # A repeating ability makes at most one token ("Whenever a creature you control attacks,
+    # create three 1/1 ..." is the most common way a cheap card breaks)
+    if re.match(r'^(Whenever|At the beginning|\{T\}:)', s):
+        def one_token(m):
+            art = 'an' if re.match(r'[aeiou]', m.group(3), re.I) else 'a'
+            return f'{m.group(1)}reate {art} {m.group(3)}token'
+        s = re.sub(r'\b([Cc])reate (two|three|four|five|X|[2-9]) ([^.]*?)tokens\b', one_token, s)
+    # Truncated or garbled forms of a legendary name: "Vyraxa Sovereign" -> "Vyraxa"
+    full_words = set((card.get('name') or '').replace(',', ' ').split())
+    if ref and not ref.startswith('this ') and len(full_words) > 1:
+        s = re.sub(r'\b' + re.escape(ref) + r'((?: [A-Z][\w\'-]+)+)\b',
+                   lambda m: ref if set(m.group(1).split()) <= full_words else m.group(0), s)
+    # Statics say "have": "Artifacts you control gain trample." -> "... have trample."
+    if ability_kind(s) == 'static' and 'until end of turn' not in s:
+        s = re.sub(r'^((?:Other )?(?:[A-Z]\w* )?(?:creatures|artifacts|permanents|[A-Z]\w+s) you control) gain\b', r'\1 have', s)
+    # Graveyard targets are cards: "Return target creature from your graveyard" -> "target creature card"
+    s = re.sub(r'\btarget (creature|artifact|enchantment|land|instant|sorcery|permanent) from (your|a|an opponent\'s) graveyard',
+               r'target \1 card from \2 graveyard', s)
     s = re.sub(r'\bAt the beginning of end step\b', 'At the beginning of your end step', s)
     s = re.sub(r'^(When|Whenever) it\b', lambda m: f'{m.group(1)} {ref}', s)
     s = re.sub(r'^Discard:', 'Discard a card:', s)
@@ -828,6 +957,8 @@ def clean_abilities(abilities: list[str], card: dict | None) -> list[str]:
     # 2. Symbols and templating, one line at a time; then drop near-duplicates
     # ("+1: ... deals 1 damage" / "+1: ... deals 2 damage" -> keep the first)
     kept = [_fix_templating(_fix_symbols(s), card) for s in kept]
+    # Flavor text posing as an ability ("Vyraxa exhales a molten torrent ...") has no rules meaning
+    kept = [s for s in kept if ability_kind(s) != 'static' or RULES_WORDS.search(s) or keyword_head(s.split(',')[0])]
     # A lone invented name ("Miststep.", "Giant Growth.") or verbless fragment ("Charge counters.")
     # is a made-up keyword with no rules meaning
     kept = [s for s in kept if not (
@@ -917,6 +1048,7 @@ def clean_abilities(abilities: list[str], card: dict | None) -> list[str]:
     # "Banner" enchantment) most plausibly means the team: "Creatures you control get ..."
     if 'equipment' not in subtype and 'aura' not in subtype:
         def team(s):
+            s = re.sub(r'^Whenever (?:equipped|enchanted) creature\b', 'Whenever a creature you control', s)
             s = re.sub(r'^(?:Equipped|Enchanted) creature gets\b', 'Creatures you control get', s)
             s = re.sub(r'^(?:Equipped|Enchanted) creature has\b', 'Creatures you control have', s)
             s = re.sub(r'^(?:Equipped|Enchanted) creature can\'t\b', "Creatures you control can't", s)
@@ -924,6 +1056,8 @@ def clean_abilities(abilities: list[str], card: dict | None) -> list[str]:
         rest = [team(s) for s in rest]
     # Meaningless "X has charge counters." statements
     rest = [s for s in rest if not re.match(r'^[\w ]+ has (?:\w+ )?counters?\.?$', s)]
+    param_first = list(dict.fromkeys(p.rstrip('.') for p in param_first))
+    param_last = list(dict.fromkeys(p.rstrip('.') for p in param_last))
     # Enchant / Equip / Crew only belong on Auras / Equipment / Vehicles
     if 'aura' not in subtype:
         param_first = []
@@ -1022,6 +1156,11 @@ def parse_reply(raw: str) -> list[str]:
             return [str(x) for x in data if str(x).strip()]
     except (ValueError, TypeError):
         pass
+    # Truncated JSON (the reply hit the length limit): keep every complete string
+    if raw.startswith('{') and '"abilities"' in raw:
+        body = raw.split('"abilities"', 1)[1]
+        items = [json.loads(f'"{x}"') for x in re.findall(r'"((?:[^"\\]|\\.)*)"(?=\s*[,\]])', body)]
+        return [x for x in items if x.strip()]
     # Not JSON: one quoted ability per "..." or one per line
     quoted = re.findall(r'"([^"\n]{3,})"', raw)
     if len(quoted) >= 1 and sum(len(q) for q in quoted) > len(raw) * 0.6:
@@ -1034,17 +1173,19 @@ def generate_rules_text(prompt: str, card: dict | None, client, model: str, *,
                         think: bool = False) -> str | None:
     """
     Ask the model for rules text, clean it, and keep the attempt with the fewest lint
-    errors (stopping early on a clean one). Returns None if every call failed.
+    errors, then the least over its power budget (stopping early on a clean one).
+    Returns None if every call failed.
     """
     import random
     rng = rng or random.Random()
-    best, best_errors = None, None
+    best, best_score = None, None
     for _ in range(max(1, attempts)):
         messages = build_messages(prompt, card, rng)
         try:
             resp = client.chat(
                 model=model, messages=messages, format=RESPONSE_SCHEMA, think=think,
-                options={"temperature": temperature, "top_p": 0.95, "num_predict": 2000 if think else 300,
+                options={"temperature": temperature, "top_p": 0.95, "repeat_penalty": 1.1,
+                         "num_predict": 2000 if think else 300,
                          # ~1.5k-token prompt + short reply. A small context keeps qwen3:8b at ~5.3 GB so
                          # SDXL still fits beside it on a 12 GB GPU (at 4096 it spills: 5s -> 120s art).
                          "num_ctx": 4096 if think else 2560},
@@ -1059,9 +1200,39 @@ def generate_rules_text(prompt: str, card: dict | None, client, model: str, *,
         print(f'📜 Rules text raw reply: {raw!r}')
         text = format_rules_text(clean_abilities(parse_reply(raw), card))
         errors = error_count(lint_rules_text(text, card)) if text else 99
-        print(f'🧹 Cleaned rules text ({errors} lint errors): {text!r}')
-        if best is None or errors < best_errors:
-            best, best_errors = text, errors
-        if errors == 0:
+        value, allowed = power.assess(text, card or {})
+        over = max(0.0, value - allowed)
+        print(f'🧹 Cleaned rules text ({errors} lint errors, power {value}/{allowed}): {text!r}')
+        if best is None or (errors, over) < best_score:
+            best, best_score = text, (errors, over)
+        if errors == 0 and over <= power.WARN_OVER:
             break
+    # Last resorts. A line that still has a lint error after every attempt is dropped, as
+    # long as the card keeps at least one real ability and its Enchant/Equip/Crew lines
+    if best and best_score[0]:
+        lines = best.split('\n')
+        messages = [m for s, m in lint_rules_text(best, card) if s == 'error']
+        bad = [l for l in lines if any(repr(l) in m for m in messages)
+               and not re.match(r'^(Enchant|Equip|Crew)\b', l)]
+        kept_lines = [l for l in lines if l not in bad]
+        if bad and any(not re.match(r'^(Enchant|Equip|Crew)\b', l) for l in kept_lines):
+            print(f'🚫 Dropped lines that stayed broken: {bad!r}')
+            best = format_rules_text(kept_lines)
+            best_score = (error_count(lint_rules_text(best, card)),
+                          max(0.0, power.estimate(best, card or {}) - power.budget(card or {})))
+    # Never print a forbidden ability: drop it if anything else remains
+    if best:
+        lines = best.split('\n')
+        allowed_lines = [l for l in lines if not any(p.search(l) for p, _ in FORBIDDEN)]
+        if allowed_lines and allowed_lines != lines:
+            print(f'🚫 Dropped forbidden abilities: {[l for l in lines if l not in allowed_lines]!r}')
+            best = format_rules_text(allowed_lines)
+            best_score = (best_score[0], max(0.0, power.estimate(best, card or {}) - power.budget(card or {})))
+    # The model ignored the budget every time, so drop its most valuable ability
+    if best and best_score[1] > power.ERROR_OVER:
+        lines = best.split('\n')
+        protect = 1 if lines and re.match(r"^(Enchant\b|.*'s (power|toughness)\b.*\bequal to)", lines[0]) else 0
+        trimmed = format_rules_text(power.trim_to_budget(lines, card or {}, keep_first=protect))
+        print(f'✂️ Trimmed to its power budget: {trimmed!r}')
+        best = trimmed
     return best

@@ -1,7 +1,9 @@
 """
-AI Night HTTP API (users, generations, sets, events, votes, queue status, media).
+AI Night HTTP API (users, generations, sets, events, votes, queue status, media)
+and the Knowledge Pool (pools, entries, pool votes).
 
-Spec: docs/superpowers/specs/2026-09-28-ai-night-design.md §4.
+Specs: docs/superpowers/specs/2026-09-28-ai-night-design.md §4 and
+docs/superpowers/specs/2026-09-29-knowledge-pool-design.md §4.
 The blueprint receives its dependencies so it can be tested without importing app.py.
 
 CardView.card is the final card dict when set, otherwise the card's card_params,
@@ -29,7 +31,12 @@ from flask import Blueprint, jsonify, request, send_file
 
 from generation_queue import GenerationQueue
 from storage import (PENDING_STATUSES, Storage, StorageError, clean_commander_name,
-                     leader_flags)
+                     leader_flags, slot_rule_text)
+
+try:  # the power heuristic is advisory: pools still work without it
+    import power_level
+except ImportError:  # pragma: no cover
+    power_level = None
 
 MAX_PENDING_PER_USER = 3
 MAX_PROMPT_CHARS = 1000  # the form's auto art prompt can reach ~450 chars (5 colours, long types)
@@ -39,6 +46,20 @@ ADMIN_LOCKOUT_MESSAGE = "Too many wrong PINs - wait a few minutes"
 DEFAULT_ADMIN_PIN = "1234"
 MEDIA_KINDS = ("cards", "art")
 API_PREFIX = "/api/v1"
+
+
+def power_check(card: dict | None) -> dict | None:
+    """{estimate, budget, verdict: fair|pushed|over} for a finished card's rules text, or None."""
+    if power_level is None or not isinstance(card, dict):
+        return None
+    try:
+        estimate, budget = power_level.assess(card.get("description") or "", card)
+    except Exception:  # a heuristic must never break the pool view
+        return None
+    over = estimate - budget
+    verdict = ("over" if over >= power_level.ERROR_OVER
+               else "pushed" if over >= power_level.WARN_OVER else "fair")
+    return {"estimate": estimate, "budget": budget, "verdict": verdict}
 
 
 def admin_pin_warning(admin_pin) -> str | None:
@@ -178,6 +199,70 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         user = optional_user()
         return user["id"] if user else None
 
+    # ----- knowledge pool views -----
+    def pool_summary(row: dict) -> dict:
+        return {"id": row["id"], "name": row["name"], "status": row["status"],
+                "maxEntriesPerUser": row["max_entries_per_user"],
+                "createdAt": row["created_at"], "closedAt": row["closed_at"]}
+
+    def pool_view(row: dict, viewer_id: str | None) -> dict:
+        """The whole pool as `viewer_id` sees it: submitters stay anonymous until close."""
+        closed = row["status"] == "closed"
+        entries = storage.pool_entries(row["id"])
+        tally = storage.pool_vote_tally(row["id"])
+        my_votes = storage.my_pool_votes(viewer_id, row["id"]) if viewer_id else {}
+        usernames: dict[str, str] = {}
+
+        def username(user_id: str) -> str:
+            if user_id not in usernames:
+                user = storage.get_user(user_id)
+                usernames[user_id] = user["username"] if user else ""
+            return usernames[user_id]
+
+        slot_views = []
+        for slot in storage.pool_slots(row["id"]):
+            slot_entries = [e for e in entries if e["slot_id"] == slot["id"]]
+            flags = leader_flags(tally, [e["id"] for e in slot_entries])
+            entry_views = []
+            for e in slot_entries:
+                card = storage.get_card(e["card_id"])
+                if card is None:
+                    continue
+                view = card_view(card)
+                mine = e["user_id"] == viewer_id
+                entry_views.append({
+                    "id": e["id"],
+                    "slotId": slot["id"],
+                    "cardId": e["card_id"],
+                    "mine": mine,
+                    "username": username(e["user_id"]) if closed or mine else None,
+                    "card": view,
+                    "power": power_check(view["card"]),
+                    "createdAt": e["created_at"],
+                    **flags[e["id"]],
+                })
+            slot_views.append({
+                "id": slot["id"],
+                "position": slot["position"],
+                "label": slot["label"],
+                "colorRule": slot["color_rule"],
+                "typeRule": slot["type_rule"],
+                "ruleText": slot_rule_text(slot["color_rule"], slot["type_rule"]),
+                "entries": entry_views,
+                "myVoteEntryId": my_votes.get(slot["id"]),
+                "myEntryId": next(
+                    (e["id"] for e in slot_entries if e["user_id"] == viewer_id), None),
+            })
+        return {**pool_summary(row),
+                "myEntryCount": sum(1 for e in entries if e["user_id"] == viewer_id),
+                "slots": slot_views}
+
+    def pool_or_404(pool_id: str) -> dict:
+        row = storage.get_pool(pool_id)
+        if row is None:
+            raise StorageError(404, "Pool not found")
+        return row
+
     def conditional_json(payload):
         """JSON with an ETag over the body; If-None-Match on it gets an empty 304.
 
@@ -304,6 +389,57 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         storage.cast_vote(user["id"], set_id, card_id)
         return jsonify(set_view(storage.get_set(set_id), user["id"]))
 
+    # ----- knowledge pool -----
+    @bp.get("/pools/current")
+    def current_pool():
+        viewer = voter_id()
+        row = storage.current_pool()
+        return conditional_json(pool_view(row, viewer) if row else None)
+
+    @bp.get("/pools")
+    def list_pools():
+        return jsonify([pool_summary(p) for p in storage.list_pools()])
+
+    @bp.get("/pools/<pool_id>")
+    def get_pool(pool_id):
+        viewer = voter_id()
+        return conditional_json(pool_view(pool_or_404(pool_id), viewer))
+
+    @bp.post("/pools/entries")
+    def submit_pool_entry():
+        user = require_user()
+        data = required_body()
+        slot_id, card_id = data.get("slotId"), data.get("cardId")
+        if not isinstance(slot_id, str) or not isinstance(card_id, str):
+            raise StorageError(400, "slotId and cardId are required")
+        entry = storage.submit_pool_entry(user["id"], slot_id, card_id)
+        return jsonify(pool_view(pool_or_404(entry["pool_id"]), user["id"]))
+
+    @bp.post("/pools/entries/<entry_id>/withdraw")
+    def withdraw_pool_entry(entry_id):
+        user = require_user()
+        pool_id = storage.withdraw_pool_entry(entry_id, user["id"])
+        return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
+
+    @bp.post("/pools/votes")
+    def pool_vote():
+        user = require_user()
+        data = required_body()
+        slot_id, entry_id = data.get("slotId"), data.get("entryId")
+        if not isinstance(slot_id, str) or not isinstance(entry_id, str):
+            raise StorageError(400, "slotId and entryId are required")
+        pool_id = storage.cast_pool_vote(user["id"], slot_id, entry_id)
+        return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
+
+    @bp.post("/pools/votes/clear")
+    def clear_pool_vote():
+        user = require_user()
+        slot_id = required_body().get("slotId")
+        if not isinstance(slot_id, str):
+            raise StorageError(400, "slotId is required")
+        pool_id = storage.clear_pool_vote(user["id"], slot_id)
+        return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
+
     @bp.get("/queue_status")
     def queue_status():
         return jsonify(gen_queue.status())
@@ -336,5 +472,18 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     def admin_close_event(event_id):
         require_admin()
         return jsonify(event_view(storage.close_event(event_id), None))
+
+    @bp.post("/admin/pools")
+    def admin_create_pool():
+        require_admin()
+        data = required_body()
+        row = storage.create_pool(data.get("name"), data.get("maxEntriesPerUser"),
+                                  data.get("slots"))
+        return jsonify(pool_view(row, None))
+
+    @bp.post("/admin/pools/<pool_id>/close")
+    def admin_close_pool(pool_id):
+        require_admin()
+        return jsonify(pool_view(storage.close_pool(pool_id), None))
 
     return bp

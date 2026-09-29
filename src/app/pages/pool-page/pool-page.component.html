@@ -1,0 +1,239 @@
+<div class="page pool-page">
+  <p *ngIf="pool === undefined && !loadError" class="muted loading">Loading the Knowledge Pool…</p>
+
+  <div *ngIf="loadError" class="alert alert-error" role="alert">
+    <span class="material-icons">cloud_off</span>
+    <span>{{ loadError }}</span>
+  </div>
+
+  <!-- No open pool -->
+  <section *ngIf="pool === null" class="panel empty-state">
+    <h2 class="page-title">No Knowledge Pool open</h2>
+    <p class="muted">When the host opens this year's pool, submit your best cards here and vote on everyone else's.</p>
+  </section>
+
+  <ng-container *ngIf="pool as p">
+    <!-- Header: what this is and how it works -->
+    <section class="panel pool-header">
+      <div class="pool-heading">
+        <div>
+          <p class="eyebrow">Knowledge Pool</p>
+          <h2 class="page-title">{{ p.name }}</h2>
+        </div>
+        <span class="badge" [class.badge-gold]="isOpen" [class.badge-muted]="!isOpen">
+          {{ isOpen ? 'Submissions & voting open' : 'Closed' }}
+        </span>
+      </div>
+
+      <ul class="rules" *ngIf="isOpen">
+        <li><span class="material-icons" aria-hidden="true">upload</span>
+          <span>Submit up to <strong>{{ p.maxEntriesPerUser }}</strong> finished cards from your gallery, one per slot.</span></li>
+        <li><span class="material-icons" aria-hidden="true">how_to_vote</span>
+          <span>Vote for one card per slot, but not your own. You can change your vote until the host closes the pool.</span></li>
+        <li><span class="material-icons" aria-hidden="true">visibility_off</span>
+          <span>Submitters stay anonymous until the pool closes.</span></li>
+        <li><span class="material-icons" aria-hidden="true">workspace_premium</span>
+          <span>The top card in each slot becomes legal for everyone at the event.</span></li>
+      </ul>
+      <p class="muted" *ngIf="!isOpen">
+        This pool is closed. The winning card in each slot is legal for everyone at the event.
+      </p>
+
+      <div class="stats" *ngIf="isOpen">
+        <span class="stat"><strong>{{ p.myEntryCount }}</strong> / {{ p.maxEntriesPerUser }} submitted</span>
+        <span class="stat"><strong>{{ filledSlots }}</strong> / {{ p.slots.length }} slots have a leader</span>
+        <span class="stat" *ngIf="votesLeft"><strong>{{ votesLeft }}</strong> {{ votesLeft === 1 ? 'slot' : 'slots' }} waiting for your vote</span>
+      </div>
+    </section>
+
+    <div *ngIf="error" class="alert alert-error" role="alert">
+      <span class="material-icons">error</span>
+      <span>{{ error }}</span>
+      <button type="button" class="alert-close" (click)="clearError()" aria-label="Dismiss">×</button>
+    </div>
+
+    <!-- Final results -->
+    <section *ngIf="!isOpen" class="panel results">
+      <h3 class="section-title">Legal cards</h3>
+      <p class="muted" *ngIf="!results.length">No slot received a vote, so no cards made it in.</p>
+      <div class="results-grid">
+        <ng-container *ngFor="let r of results">
+          <figure *ngFor="let e of r.entries; trackBy: trackEntry" class="result" [class.tied]="r.tied">
+            <app-card-slot [view]="e.card" [showReroll]="false"></app-card-slot>
+            <figcaption>
+              <span class="result-slot">
+                <i *ngIf="pipClass(r.slot.colorRule) as pip" [class]="pip" aria-hidden="true"></i>
+                {{ r.slot.label }}
+              </span>
+              <span class="muted">
+                <ng-container *ngIf="r.tied">Tied · host decides · </ng-container>
+                {{ e.votes }} {{ e.votes === 1 ? 'vote' : 'votes' }}<ng-container *ngIf="e.username"> · by {{ e.username }}</ng-container>
+              </span>
+              <button type="button" class="btn btn-ghost btn-sm" (click)="download(e)" *ngIf="e.card.cardImageUrl">
+                <span class="material-icons">download</span> Card
+              </button>
+            </figcaption>
+          </figure>
+        </ng-container>
+      </div>
+    </section>
+
+    <!-- Slot overview: jump to a slot -->
+    <nav class="overview" aria-label="Slots">
+      <button *ngFor="let slot of p.slots; trackBy: trackSlot"
+              type="button"
+              class="overview-chip"
+              [ngClass]="'state-' + slotState(slot)"
+              [class.voted]="!!slot.myVoteEntryId"
+              [class.submitted]="!!slot.myEntryId"
+              (click)="scrollTo(slot)"
+              [title]="slot.ruleText + ' · ' + slot.entries.length + (slot.entries.length === 1 ? ' card' : ' cards')">
+        <span class="chip-num">{{ slot.position }}</span>
+        <i *ngIf="pipClass(slot.colorRule) as pip" [class]="pip" aria-hidden="true"></i>
+        <span class="chip-label">{{ slot.label }}</span>
+        <span class="chip-count">{{ slot.entries.length }}</span>
+        <span *ngIf="slot.myVoteEntryId" class="material-icons chip-voted" aria-label="You voted">check</span>
+      </button>
+    </nav>
+
+    <!-- One row per slot -->
+    <article *ngFor="let slot of p.slots; trackBy: trackSlot"
+             class="panel slot-row"
+             [id]="'pool-slot-' + slot.position">
+      <header class="slot-header">
+        <span class="slot-num">{{ slot.position }}</span>
+        <div class="slot-title">
+          <h3 class="section-title">
+            <i *ngIf="pipClass(slot.colorRule) as pip" [class]="pip" aria-hidden="true"></i>
+            {{ slot.label }}
+          </h3>
+          <span class="muted">
+            <ng-container *ngIf="slot.ruleText !== slot.label">{{ slot.ruleText }} · </ng-container>
+            {{ slot.entries.length }} {{ slot.entries.length === 1 ? 'card' : 'cards' }}
+          </span>
+        </div>
+        <span class="slot-vote-state muted" *ngIf="isOpen && canVoteIn(slot)">
+          <ng-container *ngIf="slot.myVoteEntryId; else notVoted">
+            <span class="material-icons" aria-hidden="true">check_circle</span> You voted
+          </ng-container>
+          <ng-template #notVoted>Not voted yet</ng-template>
+        </span>
+      </header>
+
+      <div class="entries">
+        <div *ngFor="let entry of slot.entries; trackBy: trackEntry"
+             class="entry"
+             [attr.data-entry-id]="entry.id"
+             [class.pick]="isMyPick(slot, entry)"
+             [class.leader]="entry.leader"
+             [class.tied]="entry.tied">
+          <div class="flags">
+            <span *ngIf="entry.leader" class="flag flag-leader">
+              <span class="material-icons" aria-hidden="true">workspace_premium</span> {{ isOpen ? 'Leading' : 'Legal' }}
+            </span>
+            <span *ngIf="entry.tied" class="flag flag-tied">Tied</span>
+            <span *ngIf="isMyPick(slot, entry)" class="flag flag-pick">Your pick</span>
+            <span *ngIf="entry.mine" class="flag flag-mine">Your card</span>
+          </div>
+
+          <app-card-slot [view]="entry.card" [showReroll]="false"></app-card-slot>
+
+          <div class="entry-meta">
+            <span *ngIf="entry.power as power"
+                  class="power"
+                  [ngClass]="'power-' + power.verdict"
+                  [title]="powerTitle(power)">
+              <span class="material-icons" aria-hidden="true">{{ power.verdict === 'fair' ? 'balance' : 'warning' }}</span>
+              {{ powerLabel(power) }}
+            </span>
+            <span class="muted by" *ngIf="entry.username && !entry.mine">by {{ entry.username }}</span>
+          </div>
+
+          <div class="vote-bar">
+            <span class="count">{{ entry.votes }} {{ entry.votes === 1 ? 'vote' : 'votes' }}</span>
+            <ng-container *ngIf="isOpen">
+              <button *ngIf="!entry.mine"
+                      type="button"
+                      class="btn btn-sm vote-button"
+                      [class.btn-gold]="isMyPick(slot, entry)"
+                      [class.btn-ghost]="!isMyPick(slot, entry)"
+                      [disabled]="busy.has(slot.id)"
+                      [attr.aria-pressed]="isMyPick(slot, entry)"
+                      [title]="isMyPick(slot, entry) ? 'Click to take your vote back' : ''"
+                      (click)="vote(slot, entry)">
+                <span class="material-icons">{{ isMyPick(slot, entry) ? 'how_to_vote' : 'thumb_up' }}</span>
+                {{ isMyPick(slot, entry) ? 'Voted' : 'Vote' }}
+              </button>
+              <button *ngIf="entry.mine"
+                      type="button"
+                      class="btn btn-ghost btn-sm withdraw-button"
+                      [disabled]="busy.has(slot.id)"
+                      (click)="withdraw(slot, entry)">
+                <span class="material-icons">undo</span> Withdraw
+              </button>
+            </ng-container>
+          </div>
+        </div>
+
+        <!-- Submit tile -->
+        <button *ngIf="isOpen && !slot.myEntryId"
+                type="button"
+                class="entry submit-tile"
+                [class.active]="pickerSlotId === slot.id"
+                [disabled]="!canSubmitTo(slot) || busy.has(slot.id)"
+                [attr.aria-expanded]="pickerSlotId === slot.id"
+                (click)="openPicker(slot)">
+          <span class="material-icons" aria-hidden="true">{{ canSubmitTo(slot) ? 'add_circle_outline' : 'block' }}</span>
+          <span class="submit-title">{{ canSubmitTo(slot) ? 'Submit a card' : 'No submissions left' }}</span>
+          <span class="muted">{{ canSubmitTo(slot) ? slot.ruleText : 'Withdraw one to submit here' }}</span>
+        </button>
+        <p *ngIf="!slot.entries.length && !isOpen" class="muted no-entries">Nobody submitted a card for this slot.</p>
+      </div>
+
+      <!-- Card picker -->
+      <div *ngIf="pickerSlotId === slot.id" class="picker">
+        <div class="picker-head">
+          <strong>Pick one of your cards for {{ slot.label }}</strong>
+          <button type="button" class="icon-btn" (click)="closePicker()" aria-label="Close picker">
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+        <div *ngIf="myCardsError" class="alert alert-error" role="alert">
+          <span class="material-icons">error</span><span>{{ myCardsError }}</span>
+        </div>
+        <p *ngIf="myCards === null && !myCardsError" class="muted">Loading your cards…</p>
+        <ng-container *ngIf="myCards">
+          <p *ngIf="!eligibleCards(slot).length" class="muted">
+            None of your finished cards fit this slot ({{ slot.ruleText }}).
+            <a routerLink="/create" class="night-link">Create one</a>, then come back.
+          </p>
+          <div class="picker-grid">
+            <button *ngFor="let card of eligibleCards(slot); trackBy: trackCard"
+                    type="button"
+                    class="picker-card"
+                    [disabled]="busy.has(slot.id)"
+                    (click)="submit(slot, card)"
+                    [title]="'Submit ' + (card.card?.name || 'this card')">
+              <img [src]="card.cardImageUrl | media | async" [alt]="card.card?.name || 'Your card'" loading="lazy">
+              <span class="picker-name">{{ card.card?.name || 'Untitled card' }}</span>
+            </button>
+          </div>
+        </ng-container>
+      </div>
+    </article>
+  </ng-container>
+
+  <section *ngIf="pastPools?.length" class="panel past-pools">
+    <h3 class="section-title">Past pools</h3>
+    <ul class="history">
+      <li *ngFor="let past of pastPools">
+        <a [routerLink]="['/pool', past.id]" class="night-link">{{ past.name }}</a>
+        <span class="badge" [class.badge-gold]="past.status === 'open'" [class.badge-muted]="past.status === 'closed'">
+          {{ past.status === 'open' ? 'Open' : 'Closed' }}
+        </span>
+        <span class="muted">{{ past.createdAt | date:'mediumDate' }}</span>
+      </li>
+    </ul>
+    <p *ngIf="isPast"><a routerLink="/pool" class="night-link">Back to the current pool</a></p>
+  </section>
+</div>

@@ -132,3 +132,64 @@ export interface GenerationRequest {
 }
 
 export interface GenerationResponse { setId: string | null; cards: CardView[]; }
+
+// ===== Knowledge Pool (docs/superpowers/specs/2026-09-29-knowledge-pool-design.md) =====
+
+export type PoolColorRule = 'any' | 'W' | 'U' | 'B' | 'R' | 'G' | 'multicolor' | 'colorless';
+export type PoolTypeRule = 'any' | 'creature' | 'noncreature' | 'land';
+
+/** Advisory power estimate: rules-text value vs. what the card's cost and rarity usually buy. */
+export interface PowerCheck {
+  estimate: number;
+  budget: number;
+  verdict: 'fair' | 'pushed' | 'over';
+}
+
+export interface PoolEntryView {
+  id: string;
+  slotId: string;
+  cardId: string;
+  /** The viewer submitted this card. */
+  mine: boolean;
+  /** The submitter: hidden (null) on other players' cards until the pool closes. */
+  username: string | null;
+  card: CardView;
+  power: PowerCheck | null;
+  votes: number;
+  leader: boolean;
+  tied: boolean;
+  createdAt: string;
+}
+
+export interface PoolSlotView {
+  id: string;
+  position: number;
+  label: string;
+  colorRule: PoolColorRule;
+  typeRule: PoolTypeRule;
+  /** e.g. "Blue creature", "Any card" */
+  ruleText: string;
+  entries: PoolEntryView[];
+  myVoteEntryId: string | null;
+  myEntryId: string | null;
+}
+
+export interface PoolSummary {
+  id: string;
+  name: string;
+  status: 'open' | 'closed';
+  maxEntriesPerUser: number;
+  createdAt: string;
+  closedAt: string | null;
+}
+
+export interface PoolView extends PoolSummary {
+  myEntryCount: number;
+  slots: PoolSlotView[];
+}
+
+export interface PoolSlotSpec {
+  label: string;
+  colorRule: PoolColorRule;
+  typeRule: PoolTypeRule;
+}

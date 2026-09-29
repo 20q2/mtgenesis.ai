@@ -38,6 +38,15 @@
         ],
         "createdAt": "2026-09-29T15:26:30.592Z",
         "reason": "Claude verified: img src comes from an Angular [src] binding through the media pipe"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/pages/pool-page/pool-page.component.html"
+        ],
+        "createdAt": "2026-09-29T19:14:52.822Z",
+        "reason": "Claude: src is bound via [src]=\"... | media | async\" (same pattern as card-slot), not a missing image"
       }
     ]
   }

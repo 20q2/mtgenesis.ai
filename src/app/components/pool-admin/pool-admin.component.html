@@ -1,0 +1,92 @@
+<section class="panel pool-admin">
+  <h3 class="section-title">Knowledge Pool</h3>
+  <p class="muted">
+    The shared custom cards for the real event. Players submit cards into slots and vote; the top card in each slot becomes legal.
+  </p>
+
+  <div *ngIf="error" class="alert alert-error" role="alert">
+    <span class="material-icons">error</span>
+    <span>{{ error }}</span>
+    <button type="button" class="alert-close" (click)="clearMessages()" aria-label="Dismiss">×</button>
+  </div>
+  <div *ngIf="success" class="alert alert-success" role="status">
+    <span class="material-icons">check_circle</span>
+    <span>{{ success }}</span>
+    <button type="button" class="alert-close" (click)="clearMessages()" aria-label="Dismiss">×</button>
+  </div>
+
+  <p class="muted" *ngIf="loading">Loading…</p>
+
+  <ng-container *ngIf="!loading">
+    <div *ngIf="current as pool; else createPoolForm" class="current-pool">
+      <div>
+        <strong class="pool-name">{{ pool.name }}</strong>
+        <span class="badge badge-gold">Open</span>
+        <p class="muted">
+          {{ pool.slots.length }} slots · {{ entryCount }} {{ entryCount === 1 ? 'card' : 'cards' }} submitted ·
+          up to {{ pool.maxEntriesPerUser }} per player ·
+          <a routerLink="/pool" class="night-link">pool page</a>
+        </p>
+      </div>
+      <button type="button" class="btn btn-danger close-pool" [disabled]="saving" (click)="closePool()">
+        <span class="material-icons">gavel</span>
+        {{ saving ? 'Closing…' : 'Close pool' }}
+      </button>
+    </div>
+
+    <ng-template #createPoolForm>
+      <p class="muted" *ngIf="closedResult">
+        "{{ closedResult.name }}" closed with {{ winnerCount }} of {{ closedResult.slots.length }} slots filled.
+        <a [routerLink]="['/pool', closedResult.id]" class="night-link">See the legal cards</a>
+      </p>
+      <form [formGroup]="form" (ngSubmit)="createPool()" class="create-pool">
+        <div class="row">
+          <label class="field">
+            <span class="field-label">Pool name</span>
+            <input class="night-input pool-name-input" type="text" formControlName="name" maxlength="80"
+                   placeholder="e.g. Knowledge Pool 2026">
+          </label>
+          <label class="field cap">
+            <span class="field-label">Submissions per player</span>
+            <input class="night-input" type="number" min="1" max="40" formControlName="maxEntries">
+          </label>
+        </div>
+
+        <div class="slots-head">
+          <span class="field-label">Slots ({{ slots.length }})</span>
+          <div class="slots-actions">
+            <button type="button" class="btn btn-ghost btn-sm" (click)="resetSlots()">
+              <span class="material-icons">restart_alt</span> Default 16
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm add-slot" (click)="addSlot()" [disabled]="slots.length >= 40">
+              <span class="material-icons">add</span> Add slot
+            </button>
+          </div>
+        </div>
+        <p class="muted hint">Default: a creature and a noncreature for each color, 2 multicolor, 2 colorless, a land and a wild card, which suits 8 players.</p>
+
+        <ol class="slot-list" formArrayName="slots">
+          <li *ngFor="let slot of slots.controls; let i = index" [formGroupName]="i" class="slot-edit">
+            <span class="slot-num">{{ i + 1 }}</span>
+            <input class="night-input" type="text" formControlName="label" maxlength="40" placeholder="Label (optional)"
+                   [attr.aria-label]="'Slot ' + (i + 1) + ' label'">
+            <select class="night-input" formControlName="colorRule" [attr.aria-label]="'Slot ' + (i + 1) + ' color'">
+              <option *ngFor="let c of colorRules" [value]="c.value">{{ c.label }}</option>
+            </select>
+            <select class="night-input" formControlName="typeRule" [attr.aria-label]="'Slot ' + (i + 1) + ' type'">
+              <option *ngFor="let t of typeRules" [value]="t.value">{{ t.label }}</option>
+            </select>
+            <button type="button" class="icon-btn" (click)="removeSlot(i)" [attr.aria-label]="'Remove slot ' + (i + 1)">
+              <span class="material-icons">delete_outline</span>
+            </button>
+          </li>
+        </ol>
+
+        <button type="submit" class="btn btn-gold create-pool-btn" [disabled]="saving">
+          <span class="material-icons">auto_stories</span>
+          {{ saving ? 'Opening…' : 'Open Knowledge Pool' }}
+        </button>
+      </form>
+    </ng-template>
+  </ng-container>
+</section>

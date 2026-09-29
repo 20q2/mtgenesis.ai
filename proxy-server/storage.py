@@ -1,5 +1,6 @@
 """
-SQLite persistence for AI Night: users, events, commander sets, cards and votes.
+SQLite persistence for AI Night: users, events, commander sets, cards and votes,
+plus the Knowledge Pool (docs/superpowers/specs/2026-09-29-knowledge-pool-design.md).
 
 Spec: docs/superpowers/specs/2026-09-28-ai-night-design.md §3.
 Rows are returned as plain dicts with snake_case keys; JSON columns
@@ -85,7 +86,127 @@ CREATE TABLE IF NOT EXISTS votes (
     UNIQUE (voter_id, set_id)
 );
 CREATE INDEX IF NOT EXISTS votes_set ON votes(set_id);
+
+-- Knowledge Pool (docs/superpowers/specs/2026-09-29-knowledge-pool-design.md)
+CREATE TABLE IF NOT EXISTS pools (
+    id                    TEXT PRIMARY KEY,
+    name                  TEXT NOT NULL,
+    status                TEXT NOT NULL CHECK (status IN ('open', 'closed')),
+    max_entries_per_user  INTEGER NOT NULL,
+    created_at            TEXT NOT NULL,
+    closed_at             TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS pools_one_open ON pools(status) WHERE status = 'open';
+
+CREATE TABLE IF NOT EXISTS pool_slots (
+    id          TEXT PRIMARY KEY,
+    pool_id     TEXT NOT NULL,
+    position    INTEGER NOT NULL,
+    label       TEXT NOT NULL,
+    color_rule  TEXT NOT NULL,
+    type_rule   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pool_slots_pool ON pool_slots(pool_id, position);
+
+CREATE TABLE IF NOT EXISTS pool_entries (
+    id          TEXT PRIMARY KEY,
+    pool_id     TEXT NOT NULL,
+    slot_id     TEXT NOT NULL,
+    card_id     TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (pool_id, card_id),
+    UNIQUE (slot_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS pool_entries_slot ON pool_entries(slot_id);
+
+CREATE TABLE IF NOT EXISTS pool_votes (
+    voter_id    TEXT NOT NULL,
+    slot_id     TEXT NOT NULL,
+    entry_id    TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (voter_id, slot_id)
+);
+CREATE INDEX IF NOT EXISTS pool_votes_slot ON pool_votes(slot_id);
 """
+
+POOL_NAME_MAX = 80
+POOL_SLOT_LABEL_MAX = 40
+POOL_MAX_SLOTS = 40
+POOL_MAX_ENTRIES_CAP = 40
+MONO_COLORS = ("W", "U", "B", "R", "G")
+COLOR_RULES = ("any", *MONO_COLORS, "multicolor", "colorless")
+TYPE_RULES = ("any", "creature", "noncreature", "land")
+_COLOR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green",
+                "multicolor": "Multicolor", "colorless": "Colorless"}
+_TYPE_NAMES = {"creature": "creature", "noncreature": "noncreature", "land": "land"}
+
+
+def card_colors(card: dict) -> set[str]:
+    """The card's colors among WUBRG: its `colors` list, else the symbols in its mana cost."""
+    card = card or {}
+    colors = {c for c in (card.get("colors") or []) if c in MONO_COLORS}
+    if not colors:
+        colors = set(re.findall(r"[WUBRG]", (card.get("manaCost") or "").upper()))
+    return colors
+
+
+def card_fits_slot(card: dict, color_rule: str, type_rule: str) -> bool:
+    """Whether a card meets a pool slot's color and type rules."""
+    card = card or {}
+    colors = card_colors(card)
+    if color_rule in MONO_COLORS:
+        color_ok = colors == {color_rule}
+    elif color_rule == "multicolor":
+        color_ok = len(colors) >= 2
+    elif color_rule == "colorless":
+        color_ok = not colors
+    else:
+        color_ok = True
+    card_type = f"{card.get('supertype') or ''} {card.get('type') or ''}".lower()
+    is_creature, is_land = "creature" in card_type, "land" in card_type
+    type_ok = {"creature": is_creature, "land": is_land,
+               "noncreature": not is_creature and not is_land}.get(type_rule, True)
+    return color_ok and type_ok
+
+
+def slot_rule_text(color_rule: str, type_rule: str) -> str:
+    """Human description of a slot's rules, e.g. "Blue creature", "Any card"."""
+    color = _COLOR_NAMES.get(color_rule)
+    kind = _TYPE_NAMES.get(type_rule)
+    if color and kind:
+        return f"{color} {kind}"
+    if color:
+        return f"{color} card"
+    if kind:
+        return f"Any {kind}"
+    return "Any card"
+
+
+def clean_pool_slots(slots) -> list[dict]:
+    """Validated [{label, color_rule, type_rule}] from the API's [{label, colorRule, typeRule}]."""
+    if not isinstance(slots, list) or not slots:
+        raise StorageError(400, "A pool needs at least one slot")
+    if len(slots) > POOL_MAX_SLOTS:
+        raise StorageError(400, f"A pool can have at most {POOL_MAX_SLOTS} slots")
+    cleaned = []
+    for i, slot in enumerate(slots, start=1):
+        if not isinstance(slot, dict):
+            raise StorageError(400, f"Slot {i} must be an object")
+        color_rule = slot.get("colorRule", "any")
+        type_rule = slot.get("typeRule", "any")
+        if color_rule not in COLOR_RULES:
+            raise StorageError(400, f"Slot {i}: color rule must be one of {', '.join(COLOR_RULES)}")
+        if type_rule not in TYPE_RULES:
+            raise StorageError(400, f"Slot {i}: type rule must be one of {', '.join(TYPE_RULES)}")
+        label = slot.get("label")
+        label = label.strip() if isinstance(label, str) else ""
+        if not label:
+            label = slot_rule_text(color_rule, type_rule)
+        if len(label) > POOL_SLOT_LABEL_MAX:
+            raise StorageError(400, f"Slot {i}: label must be at most {POOL_SLOT_LABEL_MAX} characters")
+        cleaned.append({"label": label, "color_rule": color_rule, "type_rule": type_rule})
+    return cleaned
 
 
 _clock_lock = threading.Lock()
@@ -497,6 +618,183 @@ class Storage:
             "SELECT card_id FROM votes WHERE voter_id = ? AND set_id = ?",
             (voter_id, set_id)).fetchone()
         return row["card_id"] if row is not None else None
+
+    # ----- knowledge pool -----
+    # Pool row keys: id, name, status, max_entries_per_user, created_at, closed_at
+    # Slot row keys: id, pool_id, position, label, color_rule, type_rule
+    # Entry row keys: id, pool_id, slot_id, card_id, user_id, created_at
+    _POOL_COLS = "id, name, status, max_entries_per_user, created_at, closed_at"
+    _SLOT_COLS = "id, pool_id, position, label, color_rule, type_rule"
+    _ENTRY_COLS = "id, pool_id, slot_id, card_id, user_id, created_at"
+
+    def create_pool(self, name: str, max_entries_per_user: int, slots: list) -> dict:
+        """New open pool with its slots (see clean_pool_slots). 409 if a pool is already open."""
+        if not isinstance(name, str) or not name.strip():
+            raise StorageError(400, "Pool name is required")
+        name = name.strip()
+        if len(name) > POOL_NAME_MAX:
+            raise StorageError(400, f"Pool name must be at most {POOL_NAME_MAX} characters")
+        if (type(max_entries_per_user) is not int
+                or not 1 <= max_entries_per_user <= POOL_MAX_ENTRIES_CAP):
+            raise StorageError(
+                400, f"Submissions per player must be a whole number from 1 to {POOL_MAX_ENTRIES_CAP}")
+        cleaned = clean_pool_slots(slots)
+        pool_id = _new_id()
+        with self._tx() as conn:
+            if conn.execute("SELECT 1 FROM pools WHERE status = 'open'").fetchone():
+                raise StorageError(409, "A Knowledge Pool is already open")
+            conn.execute(
+                "INSERT INTO pools (id, name, status, max_entries_per_user, created_at) "
+                "VALUES (?, ?, 'open', ?, ?)", (pool_id, name, max_entries_per_user, _now()))
+            for position, slot in enumerate(cleaned, start=1):
+                conn.execute(
+                    "INSERT INTO pool_slots (id, pool_id, position, label, color_rule, type_rule) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (_new_id(), pool_id, position, slot["label"], slot["color_rule"],
+                     slot["type_rule"]))
+        return self.get_pool(pool_id)
+
+    def close_pool(self, pool_id: str) -> dict:
+        """409 if already closed, 404 if unknown."""
+        with self._tx() as conn:
+            row = conn.execute("SELECT status FROM pools WHERE id = ?", (pool_id,)).fetchone()
+            if row is None:
+                raise StorageError(404, "Pool not found")
+            if row["status"] != "open":
+                raise StorageError(409, "This Knowledge Pool is already closed")
+            conn.execute("UPDATE pools SET status = 'closed', closed_at = ? WHERE id = ?",
+                         (_now(), pool_id))
+        return self.get_pool(pool_id)
+
+    def current_pool(self) -> dict | None:
+        return self._one(f"SELECT {self._POOL_COLS} FROM pools WHERE status = 'open'")
+
+    def get_pool(self, pool_id: str) -> dict | None:
+        return self._one(f"SELECT {self._POOL_COLS} FROM pools WHERE id = ?", (pool_id,))
+
+    def list_pools(self) -> list[dict]:
+        """Newest first."""
+        return self._all(
+            f"SELECT {self._POOL_COLS} FROM pools ORDER BY created_at DESC, rowid DESC")
+
+    def pool_slots(self, pool_id: str) -> list[dict]:
+        """Slots in position order."""
+        return self._all(f"SELECT {self._SLOT_COLS} FROM pool_slots WHERE pool_id = ? "
+                         "ORDER BY position", (pool_id,))
+
+    def pool_entries(self, pool_id: str) -> list[dict]:
+        """All entries of the pool, oldest first."""
+        return self._all(f"SELECT {self._ENTRY_COLS} FROM pool_entries WHERE pool_id = ? "
+                         "ORDER BY created_at, rowid", (pool_id,))
+
+    def pool_vote_tally(self, pool_id: str) -> dict[str, int]:
+        """entry_id -> count, only entries that have votes."""
+        rows = self._conn().execute(
+            "SELECT v.entry_id, COUNT(*) AS n FROM pool_votes v "
+            "JOIN pool_slots s ON s.id = v.slot_id WHERE s.pool_id = ? GROUP BY v.entry_id",
+            (pool_id,)).fetchall()
+        return {r["entry_id"]: r["n"] for r in rows}
+
+    def my_pool_votes(self, voter_id: str, pool_id: str) -> dict[str, str]:
+        """slot_id -> entry_id for this voter's votes in the pool."""
+        rows = self._conn().execute(
+            "SELECT v.slot_id, v.entry_id FROM pool_votes v "
+            "JOIN pool_slots s ON s.id = v.slot_id WHERE s.pool_id = ? AND v.voter_id = ?",
+            (pool_id, voter_id)).fetchall()
+        return {r["slot_id"]: r["entry_id"] for r in rows}
+
+    @staticmethod
+    def _open_pool_slot(conn: sqlite3.Connection, slot_id: str) -> sqlite3.Row:
+        """The slot joined with its pool's status; 404 unknown slot, 409 pool closed."""
+        slot = conn.execute(
+            "SELECT s.id, s.pool_id, s.color_rule, s.type_rule, s.label, p.status, "
+            "p.max_entries_per_user FROM pool_slots s JOIN pools p ON p.id = s.pool_id "
+            "WHERE s.id = ?", (slot_id,)).fetchone()
+        if slot is None:
+            raise StorageError(404, "Slot not found")
+        if slot["status"] != "open":
+            raise StorageError(409, "This Knowledge Pool is closed")
+        return slot
+
+    def submit_pool_entry(self, user_id: str, slot_id: str, card_id: str) -> dict:
+        """Put one of the user's finished cards into an open pool's slot.
+        403 not the owner, 400 card unfinished or not fitting the slot, 409 pool closed,
+        card already in the pool, the user already has a card in the slot, or the cap reached."""
+        entry_id = _new_id()
+        with self._tx() as conn:
+            slot = self._open_pool_slot(conn, slot_id)
+            card = self._decode_card(conn.execute(
+                f"SELECT {self._CARD_COLS} FROM cards WHERE id = ?", (card_id,)).fetchone())
+            if card is None:
+                raise StorageError(404, "Card not found")
+            if card["user_id"] != user_id:
+                raise StorageError(403, "You can only submit your own cards")
+            if card["status"] != "done":
+                raise StorageError(400, "Only finished cards can be submitted")
+            data = card["card"] if card["card"] is not None else card["card_params"]
+            if not card_fits_slot(data, slot["color_rule"], slot["type_rule"]):
+                raise StorageError(
+                    400, f"That card doesn't fit this slot (needs: "
+                         f"{slot_rule_text(slot['color_rule'], slot['type_rule'])})")
+            if conn.execute("SELECT 1 FROM pool_entries WHERE pool_id = ? AND card_id = ?",
+                            (slot["pool_id"], card_id)).fetchone():
+                raise StorageError(409, "That card is already in the pool")
+            if conn.execute("SELECT 1 FROM pool_entries WHERE slot_id = ? AND user_id = ?",
+                            (slot_id, user_id)).fetchone():
+                raise StorageError(
+                    409, "You already have a card in this slot - withdraw it first")
+            count = conn.execute(
+                "SELECT COUNT(*) FROM pool_entries WHERE pool_id = ? AND user_id = ?",
+                (slot["pool_id"], user_id)).fetchone()[0]
+            if count >= slot["max_entries_per_user"]:
+                raise StorageError(
+                    409, f"You've used all {slot['max_entries_per_user']} of your submissions - "
+                         "withdraw one to submit another")
+            conn.execute(
+                "INSERT INTO pool_entries (id, pool_id, slot_id, card_id, user_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (entry_id, slot["pool_id"], slot_id, card_id, user_id, _now()))
+        return self._one(f"SELECT {self._ENTRY_COLS} FROM pool_entries WHERE id = ?", (entry_id,))
+
+    def withdraw_pool_entry(self, entry_id: str, user_id: str) -> str:
+        """Remove the user's entry and its votes while the pool is open. Returns the pool id."""
+        with self._tx() as conn:
+            entry = conn.execute("SELECT pool_id, slot_id, user_id FROM pool_entries WHERE id = ?",
+                                 (entry_id,)).fetchone()
+            if entry is None:
+                raise StorageError(404, "Submission not found")
+            if entry["user_id"] != user_id:
+                raise StorageError(403, "You can only withdraw your own submissions")
+            self._open_pool_slot(conn, entry["slot_id"])
+            conn.execute("DELETE FROM pool_votes WHERE entry_id = ?", (entry_id,))
+            conn.execute("DELETE FROM pool_entries WHERE id = ?", (entry_id,))
+        return entry["pool_id"]
+
+    def cast_pool_vote(self, voter_id: str, slot_id: str, entry_id: str) -> str:
+        """One vote per (voter, slot); a new vote moves it. 400 entry not in the slot,
+        403 own card, 409 pool closed. Returns the pool id."""
+        with self._tx() as conn:
+            slot = self._open_pool_slot(conn, slot_id)
+            entry = conn.execute("SELECT slot_id, user_id FROM pool_entries WHERE id = ?",
+                                 (entry_id,)).fetchone()
+            if entry is None or entry["slot_id"] != slot_id:
+                raise StorageError(400, "That card is not in this slot")
+            if entry["user_id"] == voter_id:
+                raise StorageError(403, "You can't vote for your own card")
+            conn.execute(
+                "INSERT INTO pool_votes (voter_id, slot_id, entry_id, created_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(voter_id, slot_id) DO UPDATE SET "
+                "entry_id = excluded.entry_id, created_at = excluded.created_at",
+                (voter_id, slot_id, entry_id, _now()))
+        return slot["pool_id"]
+
+    def clear_pool_vote(self, voter_id: str, slot_id: str) -> str:
+        """Remove the voter's vote in the slot (no-op if none). 409 pool closed. Returns the pool id."""
+        with self._tx() as conn:
+            slot = self._open_pool_slot(conn, slot_id)
+            conn.execute("DELETE FROM pool_votes WHERE voter_id = ? AND slot_id = ?",
+                         (voter_id, slot_id))
+        return slot["pool_id"]
 
 
 def leader_flags(tally: dict[str, int], card_ids: list[str]) -> dict[str, dict]:

@@ -8,6 +8,7 @@ import { GalleryPageComponent } from './pages/gallery-page/gallery-page.componen
 import { VotePageComponent } from './pages/vote-page/vote-page.component';
 import { EventHistoryPageComponent } from './pages/event-history-page/event-history-page.component';
 import { AdminPageComponent } from './pages/admin-page/admin-page.component';
+import { PoolPageComponent } from './pages/pool-page/pool-page.component';
 
 /** Spec §7 routes. Everything except /login needs a stored user. */
 export const routes: Routes = [
@@ -19,6 +20,8 @@ export const routes: Routes = [
   { path: 'vote', component: VotePageComponent, canActivate: [authGuard], title: 'Vote · MTGenesis.AI' },
   { path: 'events', component: EventHistoryPageComponent, canActivate: [authGuard], title: 'Past Events · MTGenesis.AI' },
   { path: 'events/:id', component: EventHistoryPageComponent, canActivate: [authGuard], title: 'Event · MTGenesis.AI' },
+  { path: 'pool', component: PoolPageComponent, canActivate: [authGuard], title: 'Knowledge Pool · MTGenesis.AI' },
+  { path: 'pool/:id', component: PoolPageComponent, canActivate: [authGuard], title: 'Knowledge Pool · MTGenesis.AI' },
   { path: 'admin', component: AdminPageComponent, canActivate: [authGuard], title: 'Host · MTGenesis.AI' },
   { path: '**', redirectTo: 'create' }
 ];

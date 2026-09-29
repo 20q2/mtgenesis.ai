@@ -152,6 +152,29 @@ def test_rarity_cap_drops_trailing_abilities():
     assert len(out) == 2  # common: two abilities
 
 
+def test_repeating_abilities_make_at_most_one_token():
+    assert clean(["Whenever a creature you control attacks, create three 1/1 white Soldier creature tokens.",
+                  "{T}: Create two Treasure tokens."], {**ENCHANTMENT, "rarity": "rare"}) == \
+        ["Whenever a creature you control attacks, create a 1/1 white Soldier creature token.",
+         "{T}: Create a Treasure token."]
+
+
+def test_undefined_tokens_and_mana_noise_are_repaired():
+    assert clean(["+1: Create a storm token. Storm tokens can't be blocked.", "−3: Draw a card."], WALKER)[0] ==         "+1: Create a 1/1 blue and red Storm creature token. Storm tokens can't be blocked."
+    assert clean(["Whenever Vyraxa attacks, you may pay {3} to add {R}. If you do, Vyraxa deals 3 damage to any target."],
+                 DRAGON) == ["Whenever Vyraxa attacks, you may pay {3}. If you do, Vyraxa deals 3 damage to any target."]
+    assert clean(["{T}: Add {C} {C} {C} {C} {C} {C}."], LAND) == ["{T}: Add {C}{C}."]
+
+
+def test_truncated_json_keeps_the_complete_abilities():
+    raw = '{"abilities": ["Hexproof", "When this creature enters, draw a card.", "Whenever you cast a spell, add {C} {C} {C'
+    assert rt.parse_reply(raw) == ["Hexproof", "When this creature enters, draw a card."]
+
+
+def test_keyword_glued_to_a_cost_is_split():
+    assert clean(["Flash, {T}: Add {U}{U}, then draw a card."], DRAGON) == ["Flash", "{T}: Add {U}{U}, then draw a card."]
+
+
 # ===== Lint =====
 
 @pytest.mark.parametrize("text, card, fragment", [
@@ -173,6 +196,17 @@ def test_rarity_cap_drops_trailing_abilities():
     ("Destroy target creature.", {**INSTANT, "manaCost": "{X}{R}"}, "X in mana cost"),
     ("Trample", COLOSSUS, "never defined"),
     ("+1: Draw a card.\n+1: Scry 2.", WALKER, "no minus"),
+    # power and nonsense found while tuning the budget
+    ("At the beginning of your end step, destroy target creature with power 3 or less.", ENCHANTMENT, "repeats every turn"),
+    ("+1: Cast an instant spell without paying its mana cost.\n−2: Draw a card.", WALKER, "free spells"),
+    ("Colorless spells you control get +2/+0 and have trample.", ENCHANTMENT, "spells don't get"),
+    ("Whenever this Vehicle deals combat damage to a player, you get a charge counter.\nCrew 2", VEHICLE, "players don't get"),
+    ("Whenever this creature attacks, you may add {U}.", SOLDIER, "filler"),
+    ("Whenever this creature attacks, you may pay {2} to add {R}.", SOLDIER, "pointless mana"),
+    ("Vyraxa deals 3 damage to any target.", DRAGON, "damage with no trigger"),
+    ("Vyraxa exhales a molten torrent that scorches the battlefield.", DRAGON, "flavor text"),
+    ("Whenever Vyraxa create a 1/1 red Elemental creature token.", DRAGON, "missing its verb"),
+    ("Whenever you cast a spell, put a +1/+1 counter on this creature and it can't be blocked by creatures with power 2 or less this turn.", SOLDIER, "too strong"),
 ])
 def test_lint_catches(text, card, fragment):
     issues = rt.lint_rules_text(text, card)
@@ -257,6 +291,38 @@ def test_generation_raises_when_the_model_is_unreachable():
         rt.generate_rules_text("dragon", DRAGON, client, "m")
 
 
+def test_an_over_budget_card_is_retried_and_the_weaker_one_kept():
+    strong = ["Whenever you cast a spell, put a +1/+1 counter on this creature and it can't be blocked by creatures with power 2 or less this turn."]  # 2-mana common engine
+    fair = ["When this creature enters, you gain 2 life."]
+    client = FakeClient(strong, fair)
+    assert rt.generate_rules_text("sentry", SOLDIER, client, "m", attempts=3) == "When this creature enters, you gain 2 life."
+    assert len(client.calls) == 2
+
+
+def test_a_forbidden_ability_is_never_printed():
+    reply = ["When this enchantment enters, you gain 2 life.",
+             "At the beginning of your end step, destroy target creature with power 3 or less."]
+    client = FakeClient(reply, reply, reply)
+    assert rt.generate_rules_text("banner", ENCHANTMENT, client, "m", attempts=3) == \
+        "When this enchantment enters, you gain 2 life."
+
+
+def test_prompt_states_the_fixed_body_and_the_power_budget():
+    user = rt.build_messages("a sentry", SOLDIER, random.Random(0))[1]["content"]
+    assert "Power/toughness: 2/2 (fixed" in user
+    assert "Power budget: a 2-mana common" in user
+    assert "Write 1 ability" in user  # a small budget buys one ability
+
+
 def test_later_failure_keeps_the_earlier_attempt():
-    client = FakeClient(["Flying", "Create a storm token."], TimeoutError("slow"))
-    assert rt.generate_rules_text("dragon", DRAGON, client, "m", attempts=2) == "Flying\nCreate a storm token."
+    # The earlier attempt is kept, minus the line that stayed broken ("lightning bolts" aren't tokens)
+    client = FakeClient(["Flying", "Create three lightning bolts."], TimeoutError("slow"))
+    assert rt.generate_rules_text("dragon", DRAGON, client, "m", attempts=2) == "Flying"
+
+
+def test_a_line_that_stays_broken_is_dropped():
+    reply = ["Enchant creature", "Enchanted creature has lifetap.",
+             "Whenever enchanted creature deals combat damage to a player, you gain 2 life."]
+    client = FakeClient(reply, reply, reply)
+    assert rt.generate_rules_text("oath", AURA, client, "m", attempts=3) == \
+        "Enchant creature\nWhenever enchanted creature deals combat damage to a player, you gain 2 life."

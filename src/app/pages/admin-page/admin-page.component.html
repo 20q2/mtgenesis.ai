@@ -69,6 +69,8 @@
                       [sets]="closedResult.sets"
                       [title]="'Winners · ' + closedResult.name"></app-winners-banner>
 
+  <app-pool-admin [pin]="pin.value"></app-pool-admin>
+
   <section class="panel history-panel">
     <h3 class="section-title">History</h3>
     <div *ngIf="historyError" class="alert alert-error history-error" role="alert">

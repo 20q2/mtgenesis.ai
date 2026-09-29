@@ -1,3 +1,4 @@
+import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { ReactiveFormsModule } from '@angular/forms';
@@ -27,6 +28,7 @@ describe('AdminPageComponent', () => {
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
       declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe],
+      schemas: [NO_ERRORS_SCHEMA],
       providers: [{ provide: MediaService, useValue: media }]
     });
     http = TestBed.inject(HttpTestingController);
@@ -173,6 +175,7 @@ describe('AdminPageComponent', () => {
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
       declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe],
+      schemas: [NO_ERRORS_SCHEMA],
       providers: [{ provide: MediaService, useValue: media }]
     });
     http = TestBed.inject(HttpTestingController);
@@ -195,6 +198,7 @@ describe('AdminPageComponent', () => {
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
       declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe],
+      schemas: [NO_ERRORS_SCHEMA],
       providers: [{ provide: MediaService, useValue: media }]
     });
     http = TestBed.inject(HttpTestingController);

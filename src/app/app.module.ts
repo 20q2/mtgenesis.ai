@@ -19,12 +19,14 @@ import { GalleryPageComponent } from './pages/gallery-page/gallery-page.componen
 import { VotePageComponent } from './pages/vote-page/vote-page.component';
 import { EventHistoryPageComponent } from './pages/event-history-page/event-history-page.component';
 import { AdminPageComponent } from './pages/admin-page/admin-page.component';
+import { PoolPageComponent } from './pages/pool-page/pool-page.component';
 import { QueueBadgeComponent } from './components/queue-badge/queue-badge.component';
 import { MediaPipe } from './pipes/media.pipe';
 import { TiltDirective } from './directives/tilt.directive';
 import { CardSlotComponent } from './components/card-slot/card-slot.component';
 import { SetRowComponent } from './components/set-row/set-row.component';
 import { WinnersBannerComponent } from './components/winners-banner/winners-banner.component';
+import { PoolAdminComponent } from './components/pool-admin/pool-admin.component';
 
 @NgModule({
   declarations: [
@@ -38,10 +40,12 @@ import { WinnersBannerComponent } from './components/winners-banner/winners-bann
     VotePageComponent,
     EventHistoryPageComponent,
     AdminPageComponent,
+    PoolPageComponent,
     QueueBadgeComponent,
     CardSlotComponent,
     SetRowComponent,
     WinnersBannerComponent,
+    PoolAdminComponent,
     MediaPipe,
     TiltDirective
   ],
