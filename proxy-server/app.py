@@ -3,26 +3,10 @@ import os
 os.environ['XFORMERS_DISABLED'] = '1'
 os.environ['DISABLE_XFORMERS'] = '1'
 
-# ===== PERFORMANCE TOGGLE =====
-# Set to False to force CPU-only mode (slower but won't destroy your GPU)
-# Set to True to use CUDA if available (faster but may lag your system)
-USE_CUDA = True  # <-- Change this to True when you want GPU mode
-
-# ===== MODEL SELECTION =====
-# Choose model based on your hardware capabilities:
-# "heavy" - stabilityai/sdxl-turbo (best quality, needs good GPU/lots of RAM)
-# "medium" - runwayml/stable-diffusion-v1-5 (balanced quality/performance)
-# "light" - CompVis/stable-diffusion-v1-4 (lighter, works better on CPU)
-# "placeholder" - disable image generation entirely (for testing/debugging)
-MODEL_SIZE = "heavy"  # <-- CUDA enabled! Using SDXL-Turbo for best quality
-
-# ===== TIMEOUT CONFIGURATION =====
-# Global timeout settings for all operations (in seconds)
-COLD_START_TIMEOUT = 180    # 3 minutes for first-time model loading
-WARM_RUN_TIMEOUT = 180      # 3 minutes for subsequent generations
-MAX_REQUEST_AGE = 300       # 5 minutes max age before cleanup (was 600)
-CLEANUP_INTERVAL = 60       # Check for old requests every 60 seconds
-DELAYED_CLEANUP = 30        # Wait 30 seconds before cleaning completed requests
+# ===== CONFIGURATION =====
+# All toggles (USE_CUDA, MODEL_SIZE, image model settings, ADMIN_PIN, DATA_DIR,
+# timeouts) live in config.py.
+from config import *
 
 # Track model loading state for cold vs warm timeout detection
 _models_loaded = {
