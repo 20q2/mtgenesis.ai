@@ -8,16 +8,17 @@ def test_subject_first_and_style():
     assert positive.startswith("a goblin shaman")
     assert "fiery" in positive
     assert "full figure" in positive
-    assert "oil painting, Magic: The Gathering card art, painterly brushstrokes" in positive
+    assert "traditional oil painting on canvas, Magic: The Gathering card art, visible impasto brushstrokes" in positive
     assert "highly detailed" not in positive
     # Ordered: subject, art style, type context, color mood and palette.
-    assert positive.index("painterly") < positive.index("full figure") < positive.index("fiery")
+    assert positive.index("impasto") < positive.index("full figure") < positive.index("fiery")
 
 
 def test_negative_prompt():
     _, negative = build_art_prompt("a goblin shaman", {"colors": ["R"], "type": "Creature"})
     for word in ("text", "watermark", "border", "frame", "blurry", "nsfw", "nudity",
-                 "photograph", "photorealistic", "3d render", "overexposed", "blown highlights"):
+                 "photorealistic", "3d render", "digital painting", "airbrushed", "overexposed", "blown highlights",
+                 "shirtless", "bare chest", "cleavage", "revealing clothing"):
         assert word in negative
     assert estimate_tokens(negative) <= 75
 
@@ -66,7 +67,7 @@ def test_no_card_data():
     positive, negative = build_art_prompt("x", None)
     assert positive.startswith("x")
     assert "fantasy scene" in positive
-    assert "painterly" in positive
+    assert "oil painting" in positive
     assert "watermark" in negative
 
 
@@ -77,3 +78,32 @@ def test_multicolor_and_type_variants():
     assert "landscape" in positive and "verdant" in positive
     positive, _ = build_art_prompt("a pact", {"colors": ["B", "G"], "type": "Sorcery"})
     assert "ominous" in positive and "verdant" in positive
+
+
+def test_human_creatures_get_a_human_context():
+    # "creature portrait" drew Human cards as horned forest spirits.
+    for subtype in ("Human", "Human Wizard", "Knight", "Rogue Cleric"):
+        positive, _ = build_art_prompt("Ligma, a legendary human", {"colors": ["B", "G"], "type": "Legendary Creature", "subtype": subtype})
+        assert "human character, fully clothed" in positive, subtype
+        assert "creature portrait" not in positive, subtype
+    for subtype in ("Dragon", "Beast", "Spirit", "", None):
+        positive, _ = build_art_prompt("a beast", {"colors": ["G"], "type": "Creature", "subtype": subtype})
+        assert "creature portrait" in positive, subtype
+
+
+def test_humanoid_races_are_clothed_characters():
+    # An elf drew as a horned monster and a vampire in a low-cut dress under "creature portrait".
+    for subtype in ("Elf Druid", "Vampire Noble", "Dwarf Cleric", "Merfolk Wizard"):
+        positive, _ = build_art_prompt("Countess Vael", {"colors": ["B"], "type": "Creature", "subtype": subtype})
+        assert "fantasy character, fully clothed" in positive, subtype
+        assert "creature portrait" not in positive, subtype
+
+
+def test_fighters_are_armored():
+    # Berserkers stayed bare-chested under "fully clothed"; naming the armor covered them.
+    for subtype in ("Human Berserker", "Warrior", "Orc Barbarian", "Human Rogue Warrior"):
+        positive, _ = build_art_prompt("Grom", {"colors": ["R"], "type": "Creature", "subtype": subtype})
+        assert "chainmail shirt and breastplate" in positive, subtype
+    for subtype in ("Human Wizard", "Human Monk", "Elf Druid", "Beast"):
+        positive, _ = build_art_prompt("Grom", {"colors": ["R"], "type": "Creature", "subtype": subtype})
+        assert "chainmail" not in positive, subtype

@@ -22,6 +22,7 @@ npm run start                        # Angular dev server on :4200
 - Renderer smoke test (no Flask/Ollama needed): `python test_colored_artifact.py` from the repo root. It imports `proxy-server/card_renderer.py` directly and renders a card.
 - Backend tests: `python -m pytest tests` from `proxy-server/` (the `slow` ones import app.py and torch).
 - Rules-text e2e (needs Ollama): `python tools/e2e_rules_text.py --label <name> [--model M] [--repeat N] [--from-db]` from `proxy-server/`. It runs a fixed matrix of card requests (or the stored ones) through the real pipeline and writes rendered PNGs plus `report.md` (raw replies, final text, lint findings) to `data/e2e/<name>/`. Use it after any prompt or cleanup change.
+- Art e2e (needs the GPU; don't run while people are generating): `python tools/e2e_art.py --label <name> [--seeds N] [--art-only] [--set NAME=VALUE] [--lora REPO FILE SCALE]` from `proxy-server/`. It renders a fixed, human-heavy card matrix with fixed seeds through the real gallery pipeline and writes art/card contact sheets plus `report.md` (prompts, blown-white %, contrast) to `data/e2e/<name>/`. `--set` overrides a prompt constant in `image_generation.py` for A/B runs. Use it after any art prompt, sampler or LoRA change.
 - No linter or Python test framework is configured.
 
 ## Known issue: missing frontend models
@@ -47,6 +48,7 @@ Every service and component imports from `src/app/models/` (`card.model.ts`, `ap
 - **Config constants live in `proxy-server/config.py`** (imported with `from config import *`):
   - `USE_CUDA` selects GPU or CPU.
   - `MODEL_SIZE`: `placeholder` = no image generation (gray art; handy for fast iteration); anything else uses `IMAGE_MODEL_ID` (an SDXL fine-tune).
+  - `IMAGE_LORAS`: style LoRAs fused in at load (an oil-painting slider by default; needs `peft`). The art prompt itself (painting style, per-color palettes, clothed/armored contexts for people) is built in `image_generation.build_art_prompt`.
   - `TEXT_MODEL` (Ollama rules-text model, `MTG_TEXT_MODEL` env override), `TEXT_ATTEMPTS`, `TEXT_THINK`.
   - Timeout constants (`COLD_START_TIMEOUT`, etc.).
   - xformers is disabled through env vars that must be set before `diffusers` is imported.

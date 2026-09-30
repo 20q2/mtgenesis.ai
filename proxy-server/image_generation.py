@@ -25,14 +25,18 @@ SUBJECT_MIN_TOKENS = 30      # the subject always keeps at least this much room
 # painting: visible brushwork, muted earthy palettes, soft atmospheric light, no pure whites.
 # The style sits right after the subject (CLIP weights early tokens most). No "highly
 # detailed" or "dramatic lighting": they pull toward photoreal HDR with blown highlights.
-ART_STYLE = ("oil painting, Magic: The Gathering card art, painterly brushstrokes, "
-             "rich earthy colors, soft atmospheric light")
-# Photo/3D terms push away from realism and the glossy CG look; the exposure terms stop the
-# blown-white skies and halos; nsfw/nudity because SDXL has no safety checker and
-# DreamShaper drifts toward nudity on humanoid subjects.
-NEGATIVE_PROMPT = ("photograph, photorealistic, 3d render, cgi, overexposed, blown highlights, "
-                   "harsh contrast, oversaturated, oversharpened, glowing halo, text, watermark, "
-                   "signature, border, frame, card, UI, blurry, lowres, deformed, extra limbs, nsfw, nudity")
+# "traditional ... on canvas" and "impasto" (plus config.IMAGE_LORAS) took a CLIP
+# oil-painting score from 22% to 62% of renders in tools/e2e_art.py.
+ART_STYLE = ("traditional oil painting on canvas, Magic: The Gathering card art, "
+             "visible impasto brushstrokes, rich earthy colors, soft atmospheric light")
+# SDXL has no safety checker and DreamShaper drifts toward nudity, bare chests and cleavage
+# on humanoid subjects, so those go first: CLIP weights early tokens most, and diffusers
+# drops anything past 77 tokens. Then the smooth digital/3D look, then the blown-white
+# skies and halos. 69 CLIP tokens.
+NEGATIVE_PROMPT = ("nsfw, nudity, shirtless, bare chest, cleavage, revealing clothing, "
+                   "photorealistic, 3d render, digital painting, airbrushed, smooth, glossy, "
+                   "overexposed, blown highlights, harsh contrast, oversaturated, text, watermark, "
+                   "signature, border, frame, card, blurry, lowres, deformed, extra limbs")
 GENERIC_CONTEXT = "fantasy scene"
 
 WUBRG = "WUBRG"
@@ -99,6 +103,26 @@ TYPE_CONTEXTS = {
     "planeswalker": "powerful planeswalker, character focus",
     "battle": "epic battle scene, warfare",
 }
+# "creature portrait" turns Human cards into horned spirits and oni, so people get this instead.
+HUMAN_CONTEXT = "human character, fully clothed, full figure"
+# Other people-shaped races: "creature portrait" drew elves as horned monsters and left
+# vampires in low-cut dresses, so they get a clothed character context too.
+HUMANOID_CONTEXT = "fantasy character, fully clothed, full figure"
+HUMANOID_RACES = {
+    "dwarf", "elf", "faerie", "giant", "gnome", "halfling", "kithkin", "kor", "merfolk",
+    "orc", "vampire", "vedalken", "viashino", "aetherborn", "siren", "zombie",
+}
+# Class-only subtypes ("Knight", "Wizard Rogue") are humans in MTG too.
+PERSON_CLASSES = {
+    "advisor", "archer", "artificer", "assassin", "barbarian", "bard", "berserker", "citizen",
+    "cleric", "druid", "gladiator", "knight", "mercenary", "monk", "ninja", "noble", "peasant",
+    "pilot", "pirate", "rebel", "rogue", "samurai", "scout", "shaman", "soldier", "warlock",
+    "warrior", "wizard",
+}
+# Berserkers stayed bare-chested under "fully clothed" and "covered chest"; naming the
+# armor covered them in every e2e render. Only for fighters, so wizards keep their robes.
+MARTIAL_CONTEXT = "armored warrior, wearing a chainmail shirt and breastplate, full figure"
+MARTIAL_CLASSES = {"barbarian", "berserker", "gladiator", "warrior"}
 
 
 def estimate_tokens(text: str) -> int:
@@ -170,10 +194,30 @@ def _normalize_colors(card_data: dict | None) -> tuple[list[str], bool]:
     return [c for c in WUBRG if c in letters], "C" in letters
 
 
+def _subtypes(card_data: dict | None) -> list[str]:
+    return re.findall(r"[a-z]+", str((card_data or {}).get("subtype") or "").lower())
+
+
+def _is_human(card_data: dict | None) -> bool:
+    subtypes = _subtypes(card_data)
+    return "human" in subtypes or (bool(subtypes) and all(s in PERSON_CLASSES for s in subtypes))
+
+
+def _is_humanoid(card_data: dict | None) -> bool:
+    """A non-human people race (Elf Druid, Vampire Noble), not a beast or dragon."""
+    return any(s in HUMANOID_RACES for s in _subtypes(card_data))
+
+
 def _type_context(card_data: dict | None) -> str:
     card_type = str((card_data or {}).get("type") or "").lower()
     for keyword, context in TYPE_CONTEXTS.items():
         if keyword in card_type:
+            if keyword == "creature" and (_is_human(card_data) or _is_humanoid(card_data))                     and any(s in MARTIAL_CLASSES for s in _subtypes(card_data)):
+                return MARTIAL_CONTEXT
+            if keyword == "creature" and _is_human(card_data):
+                return HUMAN_CONTEXT
+            if keyword == "creature" and _is_humanoid(card_data):
+                return HUMANOID_CONTEXT
             return context
     return GENERIC_CONTEXT
 
@@ -290,6 +334,21 @@ def _get_pipeline():
         # edges and gradients than DPM++ 2M SDE Karras, which looked crunchy and over-sharpened.
         pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(
             pipe.scheduler.config, timestep_spacing="trailing")
+        if config.IMAGE_LORAS:
+            # Fused into the UNet once at load, so style LoRAs cost nothing per image. A
+            # missing peft or a failed download only loses the style, not the art.
+            try:
+                names = []
+                for i, (repo, weight_name, _) in enumerate(config.IMAGE_LORAS):
+                    names.append(f"style{i}")
+                    pipe.load_lora_weights(repo, weight_name=weight_name, adapter_name=names[-1])
+                pipe.set_adapters(names, adapter_weights=[scale for _, _, scale in config.IMAGE_LORAS])
+                pipe.fuse_lora(adapter_names=names)
+                pipe.unload_lora_weights()
+                print(f"🖌️ Fused style LoRAs: {config.IMAGE_LORAS}")
+            except Exception as e:
+                pipe.unload_lora_weights()
+                print(f"⚠️ Style LoRAs not loaded, using the base model's look: {e}")
         if use_cuda and config.IMAGE_CPU_OFFLOAD:
             # Must replace .to("cuda"); see config.IMAGE_CPU_OFFLOAD for why.
             pipe.enable_model_cpu_offload()

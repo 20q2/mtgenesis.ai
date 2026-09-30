@@ -26,6 +26,13 @@ ART_BOX_SIZE = (408, 336)      # size of the art window on the rendered card
 # fp16-safe SDXL VAE: decodes in fp16 instead of upcasting to fp32 (8.3s -> 1.9s per image,
 # ~1.5 GB less VRAM, visually identical). None = use the model's own VAE.
 IMAGE_VAE_ID = "madebyollin/sdxl-vae-fp16-fix"
+# Style LoRAs fused into the model at load: (Hugging Face repo, weight file, strength).
+# Needs `peft`. Empty = the base model's own look. The oil-painting slider (MIT, 9 MB) at 3
+# gives visible brushwork instead of DreamShaper's smooth digital look; compare strengths
+# with tools/e2e_art.py --lora.
+IMAGE_LORAS: list[tuple[str, str, float]] = [
+    ("ntc-ai/SDXL-LoRA-slider.oil-painting", "oil painting.safetensors", 3.0),
+]
 # Keep each SDXL component in RAM and move it to the GPU only while it runs (peak ~5.6 GB
 # instead of ~9.4 GB). Needed on a 12 GB card while Ollama keeps the text model (~5.3 GB) resident:
 # without it the driver spills to system RAM and one image takes ~280s instead of ~4s.

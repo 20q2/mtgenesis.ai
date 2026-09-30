@@ -22,6 +22,7 @@ torchvision==0.23.0+cu128
 transformers==4.56.0
 diffusers==0.35.1
 accelerate==1.10.1
+peft==0.21.1  # style LoRAs (config.IMAGE_LORAS)
 huggingface-hub==0.34.4
 tokenizers==0.22.0
 safetensors==0.6.2
