@@ -37,6 +37,7 @@ export class CreatePageComponent implements OnInit, OnDestroy {
   isGenerating = false;
   /** Latest view of the running job (queue position, ETA, checklist). */
   jobView: CardView | null = null;
+  sharing = false;
 
   // Message rotation properties
   currentMessage = { title: 'Generating Your Magic Card', subtitle: 'Creating artwork and card text with AI...' };
@@ -163,6 +164,26 @@ export class CreatePageComponent implements OnInit, OnDestroy {
       error: err => {
         this.error = `Failed to generate card: ${apiErrorMessage(err)}`;
       }
+    });
+  }
+
+  /** Shares the finished card to the gallery's Community tab, or takes it back. */
+  toggleShare(): void {
+    const job = this.jobView;
+    if (!job || job.status !== 'done' || this.sharing) {
+      return;
+    }
+    this.sharing = true;
+    this.generation.share(job.id, !job.shared).pipe(
+      finalize(() => (this.sharing = false))
+    ).subscribe({
+      next: view => {
+        this.jobView = view;
+        if (view.shared) {
+          this.showSuccess('Shared! Everyone can see it on the Community tab of the Gallery.');
+        }
+      },
+      error: err => (this.error = apiErrorMessage(err, 'Could not share the card.'))
     });
   }
 

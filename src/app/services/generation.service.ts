@@ -3,7 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import {
   EMPTY, Observable, TimeoutError, catchError, exhaustMap, takeWhile, throwError, timeout
 } from 'rxjs';
-import { CardParams, CardView, GenerationRequest, GenerationResponse } from '../models/api.model';
+import { CardParams, CardView, GenerationRequest, GenerationResponse, SharedCardView } from '../models/api.model';
 import { Card, Rarity } from '../models/card.model';
 import { api, mediaUrl } from './api.util';
 import { isFinished } from './card-status';
@@ -34,6 +34,16 @@ export class GenerationService {
   /** All my cards, newest first, replaced (rerolled) ones included. */
   myCards(): Observable<CardView[]> {
     return this.http.get<CardView[]>(api('/me/cards'));
+  }
+
+  /** Shares a finished card of mine to the Community tab, or takes it back. */
+  share(cardId: string, shared: boolean): Observable<CardView> {
+    return this.http.post<CardView>(api(`/cards/${encodeURIComponent(cardId)}/share`), { shared });
+  }
+
+  /** Everyone's shared cards, most recently shared first. */
+  sharedCards(): Observable<SharedCardView[]> {
+    return this.http.get<SharedCardView[]>(api('/cards/shared'));
   }
 
   getCard(cardId: string): Observable<CardView> {

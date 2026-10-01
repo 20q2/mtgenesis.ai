@@ -71,6 +71,15 @@
           <span class="material-icons" aria-hidden="true">download</span>
           Download card
         </button>
+        <button type="button"
+                *ngIf="currentCard.cardImageUrl && jobView?.status === 'done'"
+                class="btn btn-ghost btn-sm download-button share-card"
+                [attr.aria-pressed]="jobView?.shared"
+                [disabled]="sharing"
+                (click)="toggleShare()">
+          <span class="material-icons" aria-hidden="true">{{ jobView?.shared ? 'public' : 'share' }}</span>
+          {{ jobView?.shared ? 'Shared · Unshare' : 'Share to gallery' }}
+        </button>
       </div>
     </section>
 

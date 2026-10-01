@@ -77,6 +77,50 @@ describe('GalleryPageComponent', () => {
     expect(el().querySelector('[data-card-id="f"]')!.textContent).toContain('Free play');
   });
 
+  it('shares a finished card from My cards, and unshares it', () => {
+    http.expectOne(url).flush([doneCard({ id: 'd1' })]);
+    fixture.detectChanges();
+    const tile = () => el().querySelector('[data-card-id="d1"]') as HTMLElement;
+    const shareButton = () => tile().querySelector('button.share') as HTMLButtonElement;
+    expect(shareButton().textContent).toContain('Share');
+
+    shareButton().click();
+    const req = http.expectOne(`${environment.apiUrl}/api/v1/cards/d1/share`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ shared: true });
+    req.flush(doneCard({ id: 'd1', shared: true }));
+    fixture.detectChanges();
+    expect(tile().textContent).toContain('Shared');
+    expect(shareButton().textContent).toContain('Unshare');
+
+    shareButton().click();
+    const undo = http.expectOne(`${environment.apiUrl}/api/v1/cards/d1/share`);
+    expect(undo.request.body).toEqual({ shared: false });
+    undo.flush(doneCard({ id: 'd1', shared: false }));
+  });
+
+  it('the Community tab lists shared cards with their maker', () => {
+    http.expectOne(url).flush([]);
+    fixture.detectChanges();
+    (el().querySelector('button.tab-community') as HTMLElement).click();
+    fixture.detectChanges();
+    http.expectOne(`${environment.apiUrl}/api/v1/cards/shared`).flush([
+      { ...doneCard({ id: 'x1', shared: true }), username: 'Beth' }
+    ]);
+    fixture.detectChanges();
+
+    const tile = el().querySelector('[data-card-id="x1"]') as HTMLElement;
+    expect(tile.textContent).toContain('by Beth');
+    expect(tile.querySelector('button.share')).toBeNull();
+    expect(tile.querySelector('.download')).not.toBeNull();
+    expect(el().querySelector('button.tab-community')!.getAttribute('aria-selected')).toBe('true');
+
+    // switching back doesn't refetch My cards; switching again doesn't refetch Community
+    (el().querySelector('button.tab-mine') as HTMLElement).click();
+    (el().querySelector('button.tab-community') as HTMLElement).click();
+    http.expectNone(`${environment.apiUrl}/api/v1/cards/shared`);
+  });
+
   it('shows an empty state when there are no cards', () => {
     http.expectOne(url).flush([]);
     fixture.detectChanges();

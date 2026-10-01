@@ -89,7 +89,12 @@ export interface CardView {
   cardImageUrl: string | null;
   artImageUrl: string | null;
   createdAt: string;
+  /** True while the card is shared to the gallery's Community tab */
+  shared: boolean;
 }
+
+/** A card on the gallery's Community tab (GET /cards/shared), with its maker. */
+export interface SharedCardView extends CardView { username: string; }
 
 export interface SetCardView extends CardView { votes: number; leader: boolean; tied: boolean; }
 

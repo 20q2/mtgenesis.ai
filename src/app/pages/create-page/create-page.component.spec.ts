@@ -29,7 +29,7 @@ describe('CreatePageComponent (jobs)', () => {
     watch$ = new Subject<CardView>();
     online$ = new BehaviorSubject<boolean>(true);
     gen = jasmine.createSpyObj<GenerationService>('GenerationService',
-      ['submit', 'watch', 'toCard', 'cardParams', 'promptFor']);
+      ['submit', 'watch', 'toCard', 'cardParams', 'promptFor', 'share']);
     gen.watch.and.returnValue(watch$);
     gen.cardParams.and.callFake(GenerationService.prototype.cardParams);
     gen.promptFor.and.callFake(GenerationService.prototype.promptFor);
@@ -92,6 +92,29 @@ describe('CreatePageComponent (jobs)', () => {
     expect(component.isGenerating).toBeFalse();
     expect(component.currentCard.cardImageUrl).toBe(`${environment.apiUrl}/api/v1/media/cards/j-1.png`);
     expect(component.successMessage).toContain('generated');
+  });
+
+  it('offers Share once the card is done and toggles it', () => {
+    gen.submit.and.returnValue(of({ setId: null, cards: [cardView({ id: 'j-1' })] }));
+    component.generateCard(card);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('button.share-card')).toBeNull();
+
+    watch$.next(doneCard({ id: 'j-1' }));
+    watch$.complete();
+    fixture.detectChanges();
+    const button = () => fixture.nativeElement.querySelector('button.share-card') as HTMLButtonElement;
+    expect(button().textContent).toContain('Share to gallery');
+
+    gen.share.and.returnValue(of(doneCard({ id: 'j-1', shared: true })));
+    button().click();
+    fixture.detectChanges();
+    expect(gen.share).toHaveBeenCalledWith('j-1', true);
+    expect(button().textContent).toContain('Shared');
+
+    gen.share.and.returnValue(of(doneCard({ id: 'j-1', shared: false })));
+    button().click();
+    expect(gen.share).toHaveBeenCalledWith('j-1', false);
   });
 
   it('shows the failure reason when the job fails', () => {

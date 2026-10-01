@@ -1,7 +1,16 @@
 <div class="page gallery-page">
   <section class="panel">
     <h2 class="page-title">Gallery</h2>
-    <p class="muted">Every card you've generated, newest first &mdash; rerolled versions included.</p>
+    <div class="tabs" role="tablist" aria-label="Gallery">
+      <button type="button" role="tab" class="tab tab-mine"
+              [attr.aria-selected]="tab === 'mine'" (click)="selectTab('mine')">My cards</button>
+      <button type="button" role="tab" class="tab tab-community"
+              [attr.aria-selected]="tab === 'community'" (click)="selectTab('community')">Community</button>
+    </div>
+    <p class="muted" *ngIf="tab === 'mine'">
+      Every card you've generated, newest first &mdash; rerolled versions included. Share one to put it on the Community tab.
+    </p>
+    <p class="muted" *ngIf="tab === 'community'">Cards everyone has shared, most recent first.</p>
   </section>
 
   <div *ngIf="error" class="alert alert-error" role="alert">
@@ -9,6 +18,7 @@
     <span>{{ error }}</span>
   </div>
 
+  <ng-container *ngIf="tab === 'mine'">
   <p *ngIf="cards === null && !error" class="muted loading">Loading your cards…</p>
 
   <section *ngIf="cards && !cards.length" class="panel empty-state">
@@ -28,6 +38,9 @@
         <div class="tags">
           <span class="badge badge-muted">{{ label(view) }}</span>
           <span class="badge badge-muted" *ngIf="view.replaced">Rerolled</span>
+          <span class="badge badge-gold" *ngIf="view.shared">
+            <span class="material-icons" aria-hidden="true">public</span> Shared
+          </span>
         </div>
         <span class="muted">{{ view.createdAt | date:'short' }}</span>
       </div>
@@ -39,7 +52,44 @@
         <button type="button" class="btn btn-ghost btn-sm download-art" *ngIf="view.artImageUrl" (click)="downloadArt(view)">
           <span class="material-icons">image</span> Art
         </button>
+        <button type="button" class="btn btn-ghost btn-sm share"
+                [attr.aria-pressed]="view.shared"
+                [disabled]="sharing.has(view.id)"
+                (click)="toggleShare(view)">
+          <span class="material-icons">{{ view.shared ? 'public_off' : 'share' }}</span>
+          {{ view.shared ? 'Unshare' : 'Share' }}
+        </button>
       </div>
     </div>
   </div>
+  </ng-container>
+
+  <ng-container *ngIf="tab === 'community'">
+    <p *ngIf="communityCards === null && !error" class="muted loading">Loading shared cards…</p>
+
+    <section *ngIf="communityCards && !communityCards.length" class="panel empty-state">
+      <p>Nobody has shared a card yet.</p>
+      <p class="muted">Share one from <strong>My cards</strong> or right after you make it.</p>
+    </section>
+
+    <div class="grid" *ngIf="communityCards?.length">
+      <div *ngFor="let view of communityCards; trackBy: trackCard" class="tile panel" [attr.data-card-id]="view.id">
+        <app-card-slot [view]="view" [showReroll]="false"></app-card-slot>
+
+        <div class="tile-info">
+          <strong class="tile-name">{{ view.card?.name || 'Untitled card' }}</strong>
+          <span class="muted maker">by {{ view.username }}</span>
+        </div>
+
+        <div class="tile-actions">
+          <button type="button" class="btn btn-ghost btn-sm download" (click)="download(view)">
+            <span class="material-icons">download</span> Card
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm download-art" *ngIf="view.artImageUrl" (click)="downloadArt(view)">
+            <span class="material-icons">image</span> Art
+          </button>
+        </div>
+      </div>
+    </div>
+  </ng-container>
 </div>

@@ -23,6 +23,7 @@ export function cardView(overrides: Partial<CardView> = {}): CardView {
     cardImageUrl: null,
     artImageUrl: null,
     createdAt: '2026-09-28T20:00:00+00:00',
+    shared: false,
     ...overrides
   };
 }
