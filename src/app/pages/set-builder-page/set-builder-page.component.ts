@@ -12,6 +12,20 @@ import { PageVisibilityService } from '../../services/page-visibility.service';
 export const COMMANDER_NAME_MAX = 40;
 export const EVENT_POLL_MS = 30000;
 export const UNLOCK_CONFIRM = 'This clears votes on your set';
+/** Mana value of versions 1..3; mirrors COMMANDER_SLOT_CMC in proxy-server/storage.py. */
+export const COMMANDER_SLOT_CMC = [3, 4, 5];
+
+/**
+ * Mana the colored pips of a cost are worth (generic and X are dropped; {2/W} counts 2).
+ * Mirrors commander_slot_params in proxy-server/storage.py: it must be at most 3.
+ */
+export function commanderPipValue(manaCost: string): number {
+  const symbols = (manaCost || '').match(/\{[^}]+\}/g) || [];
+  return symbols
+    .map(s => s.slice(1, -1))
+    .filter(s => !/^\d+$/.test(s) && !/^[XYZ]$/i.test(s))
+    .reduce((sum, s) => sum + (s.startsWith('2/') ? 2 : 1), 0);
+}
 
 /**
  * /set: build a 3-card commander set, reroll slots, lock it into the open event (spec §7).
@@ -116,11 +130,23 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
     return this.slots.some(s => !!s && isPending(s.status));
   }
 
+  /** True when the chosen pips don't fit the 3-mana version. */
+  get tooManyPips(): boolean {
+    return commanderPipValue(this.formCard?.manaCost ?? '') > COMMANDER_SLOT_CMC[0];
+  }
+
+  slotLabel(index: number): string {
+    return `Version ${index + 1} · ${COMMANDER_SLOT_CMC[index]} mana`;
+  }
+
   canGenerate(): boolean {
-    return !this.submitting && !this.hasPending() && !this.isLocked && !this.loading;
+    return !this.submitting && !this.hasPending() && !this.isLocked && !this.loading && !this.tooManyPips;
   }
 
   generateHint(): string | null {
+    if (this.tooManyPips) {
+      return `Colored pips can add up to at most ${COMMANDER_SLOT_CMC[0]} mana (the first version costs ${COMMANDER_SLOT_CMC[0]}).`;
+    }
     if (this.isLocked) {
       return 'Your set is locked in. Unlock it to start a new one.';
     }

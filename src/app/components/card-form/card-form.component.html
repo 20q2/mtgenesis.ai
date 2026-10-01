@@ -15,11 +15,11 @@
     </div>
 
     <div class="field">
-      <label for="manaCost" class="field-label">Mana cost</label>
+      <label for="manaCost" class="field-label">{{ commanderMode ? 'Colored pips' : 'Mana cost' }}</label>
       <input id="manaCost"
              type="text"
              formControlName="manaCost"
-             placeholder="{1}{W}{U} or {X}"
+             [placeholder]="commanderMode ? '{W}{U}' : '{1}{W}{U} or {X}'"
              autocomplete="off"
              spellcheck="false"
              class="night-input mana-input"
@@ -39,11 +39,14 @@
           Clear
         </button>
       </div>
+      <span class="muted commander-cost-hint" *ngIf="commanderMode">
+        Generic mana is added per version: 3, 4 and 5 mana.
+      </span>
     </div>
   </div>
 
-  <!-- Type line -->
-  <div class="field">
+  <!-- Type line (fixed to Legendary Creature for a commander set) -->
+  <div class="field" *ngIf="!commanderMode">
     <label for="supertype" class="field-label">Supertype <span class="optional">optional</span></label>
     <input id="supertype"
            type="text"
@@ -62,7 +65,7 @@
     </div>
   </div>
 
-  <div class="field">
+  <div class="field" *ngIf="!commanderMode">
     <label for="type" class="field-label">Card type</label>
     <input id="type"
            type="text"

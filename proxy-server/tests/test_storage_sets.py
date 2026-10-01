@@ -35,7 +35,7 @@ def test_create_card_row_shape(tmp_storage, user):
     card = tmp_storage.create_card(user["id"], "a dragon", PARAMS)
     assert set(card) == {"id", "user_id", "set_id", "slot", "replaced", "prompt", "card_params",
                          "card", "art_path", "card_path", "status", "text_ready", "art_ready",
-                         "error", "created_at", "finished_at"}
+                         "error", "created_at", "finished_at", "shared_at"}
     assert card["status"] == "queued"
     assert card["set_id"] is None and card["slot"] is None
     assert card["replaced"] == 0 and card["text_ready"] == 0 and card["art_ready"] == 0

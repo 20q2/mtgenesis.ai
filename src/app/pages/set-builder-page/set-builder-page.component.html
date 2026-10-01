@@ -2,7 +2,7 @@
   <section class="panel intro">
     <h2 class="page-title">Commander Set</h2>
     <p class="muted">
-      Generate 3 versions of the same commander, reroll any you don't like, then lock in the set.
+      Generate 3 versions of the same commander at 3, 4 and 5 mana, reroll any you don't like, then lock in the set.
       Everyone votes on which version becomes legal tonight.
     </p>
   </section>
@@ -37,6 +37,7 @@
       </div>
 
       <app-card-form [modelsReady]="true"
+                     [commanderMode]="true"
                      [showName]="false"
                      [showGenerate]="false"
                      (cardChange)="onCardChange($event)"></app-card-form>
@@ -69,7 +70,7 @@
       <div class="slots">
         <app-card-slot *ngFor="let view of slots; let i = index; trackBy: trackSlot"
                        [view]="view"
-                       [label]="'Version ' + (i + 1)"
+                       [label]="slotLabel(i)"
                        [showReroll]="!!setId && !isLocked"
                        [canReroll]="canRerollSlot(view)"
                        (reroll)="onReroll($event)"></app-card-slot>

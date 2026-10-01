@@ -13,6 +13,9 @@ import {
 } from '../../models/card.model';
 import { ManaService } from '../../services/mana.service';
 
+/** The mana value a commander set's shared art prompt is sized for (its middle version). */
+const COMMANDER_ART_CMC = 4;
+
 @Component({
   selector: 'app-card-form',
   templateUrl: './card-form.component.html',
@@ -39,6 +42,11 @@ export class CardFormComponent implements OnInit {
   @Input() showName = true;
   /** Hide the Generate button (the set builder has its own "Generate set of 3"). */
   @Input() showGenerate = true;
+  /**
+   * Commander set mode: the type line is fixed to Legendary Creature and P/T is left to the
+   * server's stat curve (the three versions cost 3, 4 and 5 mana).
+   */
+  @Input() commanderMode = false;
   @Output() cardChange = new EventEmitter<Card>();
   @Output() generateCard = new EventEmitter<Card>();
   @Output() regenerateText = new EventEmitter<Card>();
@@ -47,7 +55,8 @@ export class CardFormComponent implements OnInit {
 
   ngOnInit(): void {
     this.initForm();
-    
+    this.applyCommanderDefaults();
+
     // Emit initial values
     this.onFormValueChanges();
     
@@ -86,7 +95,7 @@ export class CardFormComponent implements OnInit {
     // Show power/toughness for:
     // 1. Creatures (main type includes 'creature')
     // 2. Vehicles (subtype includes 'vehicle') - since they become creatures when crewed
-    this.showPowerToughness = type.includes('creature') || subtype.includes('vehicle');
+    this.showPowerToughness = !this.commanderMode && (type.includes('creature') || subtype.includes('vehicle'));
     
     console.log(`Power/Toughness visibility updated: type="${type}", subtype="${subtype}", show=${this.showPowerToughness}`);
     
@@ -138,6 +147,15 @@ export class CardFormComponent implements OnInit {
       setCode: [emptyCard.setCode],
       cardNumber: [emptyCard.cardNumber]
     });
+  }
+
+  /** In commander mode, fixes the type line to Legendary Creature. */
+  private applyCommanderDefaults(): void {
+    if (!this.commanderMode) {
+      return;
+    }
+    this.cardForm.patchValue({ type: 'Creature', supertype: 'Legendary' }, { emitEvent: false });
+    this.updateTypeRelatedFields('Creature');
   }
 
   onFormValueChanges(): void {
@@ -335,7 +353,11 @@ export class CardFormComponent implements OnInit {
     const parts: string[] = [];
     if (name) parts.push(name);
     if (typeDescription) parts.push(`${/^[aeiou]/.test(typeDescription) ? 'an' : 'a'} ${typeDescription}`);
-    if (isCreature) parts.push(this.creatureScale(Number(this.cardForm.get('cmc')?.value) || 0));
+    if (isCreature) {
+      // A commander set shares one art prompt across its 3-, 4- and 5-mana versions.
+      const cmc = this.commanderMode ? COMMANDER_ART_CMC : Number(this.cardForm.get('cmc')?.value) || 0;
+      parts.push(this.creatureScale(cmc));
+    }
     return parts.join(', ') || 'a fantasy scene';
   }
 
@@ -441,7 +463,8 @@ export class CardFormComponent implements OnInit {
     // Reset UI state
     this.showPowerToughness = false;
     this.filteredSubtypes = [];
-    
+    this.applyCommanderDefaults();
+
     // Emit the changes
     this.onFormValueChanges();
     

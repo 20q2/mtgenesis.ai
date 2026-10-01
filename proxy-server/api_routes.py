@@ -31,8 +31,8 @@ from flask import Blueprint, jsonify, request, send_file
 
 from generation_queue import GenerationQueue
 from storage import (MEDAL_POINTS, PENDING_STATUSES, POOL_BAN_THRESHOLD, POOL_BANS_PER_PLAYER,
-                     Storage, StorageError, clean_commander_name, leader_flags, pool_standings,
-                     slot_rule_text)
+                     Storage, StorageError, clean_commander_name, commander_slot_params,
+                     leader_flags, pool_standings, slot_rule_text)
 
 try:  # the power heuristic is advisory: pools still work without it
     import power_level
@@ -169,6 +169,7 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
             "cardImageUrl": f"{API_PREFIX}/media/cards/{cid}.png" if row["card_path"] else None,
             "artImageUrl": f"{API_PREFIX}/media/art/{cid}.png" if row["art_path"] else None,
             "createdAt": row["created_at"],
+            "shared": row.get("shared_at") is not None,
         }
 
     def set_view(row: dict, voter_id: str | None) -> dict:
@@ -321,6 +322,10 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         if type(count) is not int or count not in (1, 3):
             raise StorageError(400, "count must be 1 or 3")
         commander_name = clean_commander_name(data.get("commanderName")) if count == 3 else None
+        if count == 3:
+            params = {**card_data, "name": commander_name}
+            # One 3-, 4- and 5-mana version; checked before the old draft is abandoned.
+            slot_params = {slot: commander_slot_params(params, slot) for slot in (1, 2, 3)}
 
         with create_lock:
             check_pending_cap(user["id"], count)
@@ -328,9 +333,9 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
                 set_id = None
                 cards = [storage.create_card(user["id"], prompt, card_data)]
             else:
-                params = {**card_data, "name": commander_name}
                 set_id = storage.create_set(user["id"], commander_name, prompt, params)["id"]
-                cards = [storage.create_card(user["id"], prompt, params, set_id=set_id, slot=slot)
+                cards = [storage.create_card(user["id"], prompt, slot_params[slot], set_id=set_id,
+                                             slot=slot)
                          for slot in (1, 2, 3)]
         for card in cards:
             gen_queue.enqueue(card["id"])
@@ -351,6 +356,21 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
             new = storage.reroll_card(card_id, user["id"])
         gen_queue.enqueue(new["id"])
         return jsonify(card_view(storage.get_card(new["id"])))
+
+    @bp.post("/cards/<card_id>/share")
+    def share_card(card_id):
+        user = require_user()
+        shared = required_body().get("shared")
+        if not isinstance(shared, bool):
+            raise StorageError(400, "shared must be true or false")
+        return jsonify(card_view(storage.set_card_shared(card_id, user["id"], shared)))
+
+    @bp.get("/cards/shared")
+    def shared_cards():
+        """The gallery's Community tab: every shared card, with its maker."""
+        optional_user()
+        return jsonify([{**card_view(c), "username": c["username"]}
+                        for c in storage.list_shared_cards()])
 
     @bp.get("/cards/<card_id>")
     def get_card(card_id):

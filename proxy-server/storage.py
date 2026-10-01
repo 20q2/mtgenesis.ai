@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS cards (
     art_ready         INTEGER NOT NULL DEFAULT 0,
     error             TEXT,
     created_at        TEXT NOT NULL,
-    finished_at       TEXT
+    finished_at       TEXT,
+    shared_at         TEXT   -- set while the card is shared to the gallery's Community tab
 );
 CREATE INDEX IF NOT EXISTS cards_user ON cards(user_id);
 CREATE INDEX IF NOT EXISTS cards_set ON cards(set_id, replaced);
@@ -263,6 +264,30 @@ def clean_commander_name(name) -> str:
     return name
 
 
+COMMANDER_SLOT_CMC = {1: 3, 2: 4, 3: 5}
+_MANA_SYMBOL_RE = re.compile(r"\{([^}]+)\}")
+
+
+def commander_slot_params(params: dict, slot: int) -> dict:
+    """A commander set slot's card params: a Legendary Creature costing 3, 4 or 5 mana.
+
+    Keeps the requested colored/hybrid/Phyrexian pips, drops generic and {X}, and pads
+    generic to the slot's mana value. Typed P/T is dropped so the stat curve sets each
+    version's body. Pips worth more than 3 mana are a StorageError 400."""
+    pips = [s for s in _MANA_SYMBOL_RE.findall(params.get("manaCost") or "")
+            if not s.isdigit() and s.upper() not in ("X", "Y", "Z")]
+    pip_value = sum(2 if s.startswith("2/") else 1 for s in pips)
+    if pip_value > COMMANDER_SLOT_CMC[1]:
+        raise StorageError(400, f"A commander set's colored pips can add up to at most "
+                                f"{COMMANDER_SLOT_CMC[1]} mana (the first version costs 3)")
+    cmc = COMMANDER_SLOT_CMC[slot]
+    generic = cmc - pip_value
+    cost = (f"{{{generic}}}" if generic else "") + "".join(f"{{{s}}}" for s in pips)
+    out = {k: v for k, v in params.items() if k not in ("power", "toughness")}
+    out.update(type="Creature", supertype="Legendary", manaCost=cost, cmc=cmc)
+    return out
+
+
 class StorageError(Exception):
     """A rule violation that maps directly to an HTTP status (400/403/404/409)."""
 
@@ -281,6 +306,16 @@ class Storage:
         conn = self._conn()
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(_SCHEMA)
+        self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Columns added after a table first shipped (CREATE TABLE IF NOT EXISTS skips them)."""
+        card_cols = {r[1] for r in conn.execute("PRAGMA table_info(cards)")}
+        if "shared_at" not in card_cols:
+            conn.execute("ALTER TABLE cards ADD COLUMN shared_at TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS cards_shared ON cards(shared_at) "
+                     "WHERE shared_at IS NOT NULL")
 
     # ----- connection helpers -----
     def _conn(self) -> sqlite3.Connection:
@@ -341,10 +376,10 @@ class Storage:
 
     # ----- cards -----
     # Row keys: id, user_id, set_id, slot, replaced, prompt, card_params, card, art_path,
-    # card_path, status, text_ready, art_ready, error, created_at, finished_at
+    # card_path, status, text_ready, art_ready, error, created_at, finished_at, shared_at
     _CARD_COLS = ("id, user_id, set_id, slot, replaced, prompt, card_params_json, card_json, "
                   "art_path, card_path, status, text_ready, art_ready, error, created_at, "
-                  "finished_at")
+                  "finished_at, shared_at")
     _CARD_UPDATABLE = frozenset({"status", "text_ready", "art_ready", "card", "art_path",
                                  "card_path", "error", "finished_at"})
 
@@ -403,6 +438,30 @@ class Storage:
         """Newest first, replaced cards included."""
         rows = self._all(f"SELECT {self._CARD_COLS} FROM cards WHERE user_id = ? "
                          "ORDER BY created_at DESC, rowid DESC", (user_id,))
+        return [self._decode_card(r) for r in rows]
+
+    def set_card_shared(self, card_id: str, user_id: str, shared: bool) -> dict:
+        """Share a finished card to the Community tab, or take it back. Sharing an already
+        shared card keeps its original time. 404 unknown, 403 not owner, 409 not finished."""
+        with self._tx() as conn:
+            card = conn.execute("SELECT user_id, status, shared_at FROM cards WHERE id = ?",
+                                (card_id,)).fetchone()
+            if card is None:
+                raise StorageError(404, "Card not found")
+            if card["user_id"] != user_id:
+                raise StorageError(403, "You can only share your own cards")
+            if card["status"] != "done":
+                raise StorageError(409, "Only finished cards can be shared")
+            shared_at = (card["shared_at"] or _now()) if shared else None
+            conn.execute("UPDATE cards SET shared_at = ? WHERE id = ?", (shared_at, card_id))
+        return self.get_card(card_id)
+
+    def list_shared_cards(self, limit: int = 200) -> list[dict]:
+        """Shared cards with their maker's `username`, most recently shared first."""
+        cols = ", ".join(f"c.{c.strip()}" for c in self._CARD_COLS.split(","))
+        rows = self._all(f"SELECT {cols}, u.username FROM cards c JOIN users u ON u.id = c.user_id "
+                         "WHERE c.shared_at IS NOT NULL ORDER BY c.shared_at DESC, c.rowid DESC "
+                         "LIMIT ?", (limit,))
         return [self._decode_card(r) for r in rows]
 
     def count_pending(self, user_id: str) -> int:

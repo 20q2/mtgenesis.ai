@@ -11,7 +11,7 @@ CARD_DATA = {"name": "Placeholder", "manaCost": "{2}{B}{R}", "colors": ["B", "R"
              "power": "3", "toughness": "4"}
 CARD_VIEW_KEYS = {"id", "userId", "setId", "slot", "replaced", "status", "error", "textReady",
                   "artReady", "queuePosition", "etaSeconds", "card", "cardImageUrl",
-                  "artImageUrl", "createdAt"}
+                  "artImageUrl", "createdAt", "shared"}
 SET_VIEW_KEYS = {"id", "userId", "username", "eventId", "commanderName", "prompt", "status",
                  "lockedAt", "cards", "myVoteCardId"}
 EVENT_SUMMARY_KEYS = {"id", "name", "status", "createdAt", "closedAt"}
@@ -153,12 +153,16 @@ def test_generations_set(client, queue, tmp_storage):
     assert all(c["setId"] == body["setId"] for c in body["cards"])
     assert all(c["card"]["name"] == name for c in body["cards"])
     assert all(c["card"]["type"] == "Creature" for c in body["cards"])
+    assert all(c["card"]["supertype"] == "Legendary" for c in body["cards"])
+    assert [c["card"]["manaCost"] for c in body["cards"]] == ["{1}{B}{R}", "{2}{B}{R}", "{3}{B}{R}"]
+    assert [c["card"]["cmc"] for c in body["cards"]] == [3, 4, 5]
     assert queue.enqueued == [c["id"] for c in body["cards"]]
     assert tmp_storage.get_set(body["setId"])["commander_name"] == name
 
     other = login(client, "Beth")
     for extra in [{}, {"commanderName": ""}, {"commanderName": "   "},
-                  {"commanderName": "x" * 41}]:
+                  {"commanderName": "x" * 41},
+                  {"commanderName": "Ok", "cardData": {**CARD_DATA, "manaCost": "{B}{B}{R}{R}"}}]:
         res = client.post("/api/v1/generations", headers=H(other),
                           json={"prompt": "p", "cardData": CARD_DATA, "count": 3, **extra})
         assert res.status_code == 400, extra
@@ -239,6 +243,7 @@ def test_reroll_endpoint(client, queue, tmp_storage):
     new = res.get_json()
     assert set(new) == CARD_VIEW_KEYS
     assert new["id"] != old["id"] and new["slot"] == 2 and new["status"] == "queued"
+    assert new["card"]["manaCost"] == "{2}{B}{R}" and new["card"]["cmc"] == 4
     assert new["setId"] == body["setId"]
     assert queue.enqueued[-1] == new["id"]
 

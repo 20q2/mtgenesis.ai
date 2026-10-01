@@ -10,7 +10,7 @@ import { GenerationService } from '../../services/generation.service';
 import { PageVisibilityService } from '../../services/page-visibility.service';
 import { fakeVisibility } from '../../testing/fake-visibility';
 import { cardView, doneCard, eventView, setCard, setView } from '../../testing/fixtures';
-import { EVENT_POLL_MS, SetBuilderPageComponent } from './set-builder-page.component';
+import { EVENT_POLL_MS, SetBuilderPageComponent, commanderPipValue } from './set-builder-page.component';
 
 describe('SetBuilderPageComponent', () => {
   let fixture: ComponentFixture<SetBuilderPageComponent>;
@@ -165,6 +165,35 @@ describe('SetBuilderPageComponent', () => {
     expect(gen.watch.calls.allArgs().map(a => a[0])).toEqual(['n1', 'n2', 'n3']);
     // Still disabled: the new set has pending cards.
     expect(generateButton().disabled).toBeTrue();
+  });
+
+  describe('mana value per version', () => {
+    it('labels the versions 3, 4 and 5 mana', () => {
+      setup(null, openEvent);
+      expect(component.slotLabel(0)).toBe('Version 1 · 3 mana');
+      expect(component.slotLabel(2)).toBe('Version 3 · 5 mana');
+    });
+
+    it('counts colored pips, not generic or X', () => {
+      expect(commanderPipValue('{X}{4}{W}{U}')).toBe(2);
+      expect(commanderPipValue('{2/W}{G/P}')).toBe(3);
+      expect(commanderPipValue('')).toBe(0);
+    });
+
+    it('disables Generate with a reason when the pips cost more than 3', () => {
+      setup(null, openEvent);
+      component.commanderName.setValue('Zur');
+      component.onCardChange({
+        name: '', manaCost: '{W}{W}{U}{U}', type: 'Creature', colors: ['W', 'U'], cmc: 4,
+        rarity: Rarity.RARE
+      });
+      fixture.detectChanges();
+      expect(component.canGenerate()).toBeFalse();
+      expect(generateButton().disabled).toBeTrue();
+      expect(component.generateHint()).toContain('at most 3');
+      component.generate();
+      expect(gen.submit).not.toHaveBeenCalled();
+    });
   });
 
   it('requires a commander name', () => {
