@@ -40,7 +40,7 @@ Tables:
 
 **Ranking** is a pure function, `pool_ranking(entries, medal_counts) -> {entry_id: {gold, silver, bronze, points, rank, in, tiedAtCutoff}}`, with the cutoff derived from the distinct `user_id`s in `entries`. `rank` is 1-based and equal keys share a rank.
 
-Storage methods: `create_pool(name, max_entries_per_user)`, `close_pool`, `current_pool`, `get_pool`, `list_pools`, `pool_entries`, `pool_medal_counts`, `my_pool_medals`, `submit_pool_entry(user_id, card_id)`, `withdraw_pool_entry`, `award_pool_medal`, `clear_pool_medal`, and `open_pool_entry_for_card(card_id) -> entry id | None`.
+Storage methods: `create_pool(name, max_entries_per_user)`, `close_pool`, `current_pool`, `get_pool`, `list_pools`, `pool_entries`, `pool_medal_counts`, `my_pool_medals`, `submit_pool_entry(user_id, card_id)`, `withdraw_pool_entry`, `award_pool_medal`, `clear_pool_medal`, and `open_pool_entry_ids() -> {card_id: entry_id}` for the open pool (one query per list request).
 
 ## 4. API (`api_routes.py`, under `/api/v1`)
 
