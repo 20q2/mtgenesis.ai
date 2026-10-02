@@ -23,6 +23,7 @@ npm run start                        # Angular dev server on :4200
 - Backend tests: `python -m pytest tests` from `proxy-server/` (the `slow` ones import app.py and torch).
 - Rules-text e2e (needs Ollama): `python tools/e2e_rules_text.py --label <name> [--model M] [--repeat N] [--from-db]` from `proxy-server/`. It runs a fixed matrix of card requests (or the stored ones) through the real pipeline and writes rendered PNGs plus `report.md` (raw replies, final text, lint findings) to `data/e2e/<name>/`. Use it after any prompt or cleanup change.
 - Art e2e (needs the GPU; don't run while people are generating): `python tools/e2e_art.py --label <name> [--seeds N] [--art-only] [--set NAME=VALUE] [--lora REPO FILE SCALE]` from `proxy-server/`. It renders a fixed, human-heavy card matrix with fixed seeds through the real gallery pipeline and writes art/card contact sheets plus `report.md` (prompts, blown-white %, contrast) to `data/e2e/<name>/`. `--set` overrides a prompt constant in `image_generation.py` for A/B runs. Use it after any art prompt, sampler or LoRA change.
+- Set variety (card director): add `--sets N [--no-director]` to either e2e tool. It runs N fixed commander sets (`tools/e2e_sets.py`) as their 3/4/5-mana versions and writes `report-sets.md`: text overlap between versions (`director.set_overlap`) or CLIP image similarity (lower = more distinct). Compare against a `--no-director` run.
 - No linter or Python test framework is configured.
 
 ## Known issue: missing frontend models
@@ -52,6 +53,11 @@ Every service and component imports from `src/app/models/` (`card.model.ts`, `ap
   - `TEXT_MODEL` (Ollama rules-text model, `MTG_TEXT_MODEL` env override), `TEXT_ATTEMPTS`, `TEXT_THINK`.
   - Timeout constants (`COLD_START_TIMEOUT`, etc.).
   - xformers is disabled through env vars that must be set before `diffusers` is imported.
+- **Card director (`proxy-server/director.py`)**: before text and art, `write_briefs` asks `DIRECTOR_MODEL` (default `TEXT_MODEL`) for a hidden brief per card: `identity`, `mechanic`, and `art` (subject, action, setting, framing, light). The spec is `docs/superpowers/specs/2026-10-02-card-director-design.md`.
+  - A commander set gets three briefs in one call, each with a different mechanic; a reroll gets one that avoids its siblings' mechanics.
+  - `GenerationQueue` runs it as a brief stage that the Ollama worker serves before rules text. The brief is stored in `cards.brief_json` (never in `CardView`) and passed to text and art as `card_params["brief"]`.
+  - `rules_text.build_messages` swaps the random color hook for the brief's identity and mechanic; `image_generation.build_art_prompt` builds the subject from the brief's art fields instead of the request prompt.
+  - It never fails a card: any problem gives no brief, and both prompts are then exactly what they were before. `MTG_DIRECTOR=0` turns it off.
 - **The image pipeline loads lazily** in `get_image_pipeline()`. `_models_loaded` tracks whether the cold-start or warm timeout applies.
 - **Rules text lives in `proxy-server/rules_text.py`**; `createCardContent` in app.py just calls `generate_rules_text`:
   - `build_messages` sends a system prompt (Oracle templating rules, card-type rules, few-shot examples) plus the card's facts, an ability budget by rarity, type-specific requirements, and one random color "design hook" for variety.
