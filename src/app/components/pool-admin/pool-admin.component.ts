@@ -1,20 +1,12 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
-import { FormArray, FormControl, FormGroup, Validators } from '@angular/forms';
+import { FormControl, FormGroup, Validators } from '@angular/forms';
 import { finalize } from 'rxjs';
-import { PoolColorRule, PoolSlotSpec, PoolTypeRule, PoolView } from '../../models/api.model';
+import { PoolView } from '../../models/api.model';
 import { apiErrorMessage } from '../../services/api.util';
-import {
-  POOL_COLOR_RULES, POOL_TYPE_RULES, PoolService, defaultPoolSlots
-} from '../../services/pool.service';
+import { POOL_DEFAULT_ENTRIES, POOL_ENTRY_CAP_MAX, PoolService } from '../../services/pool.service';
 
-type SlotForm = FormGroup<{
-  label: FormControl<string>;
-  colorRule: FormControl<PoolColorRule>;
-  typeRule: FormControl<PoolTypeRule>;
-}>;
-
-/** Host controls for the Knowledge Pool on /admin: open a pool with its slots, close it. */
+/** Host controls for the Knowledge Pool on /admin: open a pool (name and entry cap), close it. */
 @Component({
   selector: 'app-pool-admin',
   templateUrl: './pool-admin.component.html',
@@ -24,13 +16,12 @@ export class PoolAdminComponent implements OnInit {
   /** The host PIN from the admin page. */
   @Input() pin = '';
 
-  readonly colorRules = POOL_COLOR_RULES;
-  readonly typeRules = POOL_TYPE_RULES;
-  readonly slots = new FormArray<SlotForm>([]);
+  readonly capMax = POOL_ENTRY_CAP_MAX;
   readonly form = new FormGroup({
     name: new FormControl('', { nonNullable: true }),
-    maxEntries: new FormControl(4, { nonNullable: true, validators: [Validators.min(1), Validators.max(40)] }),
-    slots: this.slots
+    maxEntries: new FormControl(POOL_DEFAULT_ENTRIES, {
+      nonNullable: true, validators: [Validators.min(1), Validators.max(POOL_ENTRY_CAP_MAX)]
+    })
   });
 
   current: PoolView | null = null;
@@ -43,7 +34,6 @@ export class PoolAdminComponent implements OnInit {
   constructor(private pools: PoolService) {}
 
   ngOnInit(): void {
-    this.resetSlots();
     this.pools.current().pipe(finalize(() => (this.loading = false))).subscribe({
       next: pool => (this.current = pool),
       error: err => (this.error = apiErrorMessage(err, 'Could not load the Knowledge Pool.'))
@@ -51,24 +41,11 @@ export class PoolAdminComponent implements OnInit {
   }
 
   get entryCount(): number {
-    return this.current?.slots.reduce((n, s) => n + s.entries.length, 0) ?? 0;
+    return this.current?.entries.length ?? 0;
   }
 
-  get winnerCount(): number {
-    return this.closedResult?.slots.filter(s => s.entries.some(e => e.leader || e.tied)).length ?? 0;
-  }
-
-  resetSlots(): void {
-    this.slots.clear();
-    defaultPoolSlots().forEach(slot => this.slots.push(this.slotForm(slot)));
-  }
-
-  addSlot(): void {
-    this.slots.push(this.slotForm({ label: '', colorRule: 'any', typeRule: 'any' }));
-  }
-
-  removeSlot(index: number): void {
-    this.slots.removeAt(index);
+  get madeItCount(): number {
+    return this.closedResult?.entries.filter(e => e.in).length ?? 0;
   }
 
   createPool(): void {
@@ -87,22 +64,17 @@ export class PoolAdminComponent implements OnInit {
       this.error = 'Enter a name for the pool.';
       return;
     }
-    if (!Number.isInteger(maxEntries) || maxEntries < 1 || maxEntries > 40) {
-      this.error = 'Submissions per player must be a whole number from 1 to 40.';
+    if (!Number.isInteger(maxEntries) || maxEntries < 1 || maxEntries > POOL_ENTRY_CAP_MAX) {
+      this.error = `Entries per player must be a whole number from 1 to ${POOL_ENTRY_CAP_MAX}.`;
       return;
     }
-    if (!this.slots.length) {
-      this.error = 'Add at least one slot.';
-      return;
-    }
-    const slots: PoolSlotSpec[] = this.slots.controls.map(c => ({ ...c.getRawValue(), label: c.controls.label.value.trim() }));
     this.saving = true;
-    this.pools.createPool(name, maxEntries, slots, pin).pipe(finalize(() => (this.saving = false))).subscribe({
+    this.pools.createPool(name, maxEntries, pin).pipe(finalize(() => (this.saving = false))).subscribe({
       next: pool => {
         this.current = pool;
         this.closedResult = null;
         this.form.controls.name.setValue('');
-        this.success = `"${pool.name}" is open with ${pool.slots.length} slots. Players can submit and hand out medals on /pool.`;
+        this.success = `"${pool.name}" is open. Players submit from Create or the Gallery and hand out medals on /pool.`;
       },
       error: err => this.handleError(err, 'Could not open the pool.')
     });
@@ -118,7 +90,7 @@ export class PoolAdminComponent implements OnInit {
       this.error = 'Enter the host PIN.';
       return;
     }
-    if (!window.confirm(`Close "${pool.name}"? Submissions and voting stop and the winners become legal.`)) {
+    if (!window.confirm(`Close "${pool.name}"? Submissions and voting stop and the cards above the pool line become legal.`)) {
       return;
     }
     this.clearMessages();
@@ -136,14 +108,6 @@ export class PoolAdminComponent implements OnInit {
   clearMessages(): void {
     this.error = null;
     this.success = null;
-  }
-
-  private slotForm(slot: PoolSlotSpec): SlotForm {
-    return new FormGroup({
-      label: new FormControl(slot.label, { nonNullable: true }),
-      colorRule: new FormControl(slot.colorRule, { nonNullable: true }),
-      typeRule: new FormControl(slot.typeRule, { nonNullable: true })
-    });
   }
 
   private handleError(err: unknown, fallback: string): void {

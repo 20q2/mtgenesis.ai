@@ -59,6 +59,8 @@
           <span class="material-icons">{{ view.shared ? 'public_off' : 'share' }}</span>
           {{ view.shared ? 'Unshare' : 'Share' }}
         </button>
+        <app-pool-submit class="pool-submit-host" [card]="view" [pool]="pool"
+                         (submitted)="onPoolSubmitted(view, $event)"></app-pool-submit>
       </div>
     </div>
   </div>

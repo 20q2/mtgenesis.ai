@@ -3,14 +3,11 @@ import { ActivatedRoute } from '@angular/router';
 import {
   EMPTY, Observable, Subject, Subscription, catchError, finalize, of, startWith, switchMap
 } from 'rxjs';
-import {
-  CardView, Medal, PoolColorRule, PoolEntryView, PoolSlotView, PoolSummary, PoolView, PowerCheck
-} from '../../models/api.model';
+import { Medal, PoolEntryView, PoolSummary, PoolView, PowerCheck } from '../../models/api.model';
 import { apiErrorMessage, safeFileName } from '../../services/api.util';
-import { GenerationService } from '../../services/generation.service';
 import { MediaService } from '../../services/media.service';
 import { PageVisibilityService } from '../../services/page-visibility.service';
-import { PoolService, cardFitsSlot } from '../../services/pool.service';
+import { PoolService } from '../../services/pool.service';
 
 export const POOL_POLL_MS = 10000;
 
@@ -20,18 +17,11 @@ export const MEDALS: { medal: Medal; label: string; points: number }[] = [
   { medal: 'bronze', label: 'Bronze', points: 1 }
 ];
 
-/** A slot's final result: its winner, or the tied cards the host picks from. */
-export interface PoolResult {
-  slot: PoolSlotView;
-  entries: PoolEntryView[];
-  tied: boolean;
-}
-
 /**
- * /pool: the open Knowledge Pool. Players submit finished cards into slots, then rank
- * each slot with gold/silver/bronze (3/2/1 points, never their own card) and may spend a
- * couple of secret bans; the top card of each slot that isn't banned out becomes legal.
- * /pool/:id shows a pool read-only (past pools). Polls every 10s while visible.
+ * /pool: the open Knowledge Pool (spec docs/superpowers/specs/2026-09-29-knowledge-pool-design.md).
+ * Every entry in one ranked list; each player gives one gold, silver and bronze (3/2/1, never
+ * their own card) and the top floor(players / 2) make the pool. Cards are submitted from the
+ * create screen and the gallery. /pool/:id shows a pool read-only. Polls every 10s while visible.
  */
 @Component({
   selector: 'app-pool-page',
@@ -44,14 +34,9 @@ export class PoolPageComponent implements OnInit, OnDestroy {
   pastPools: PoolSummary[] | null = null;
   loadError: string | null = null;
   error: string | null = null;
-  /** Slots with a request in flight (guards double clicks). */
-  readonly busy = new Set<string>();
+  /** True while a medal or withdraw request is in flight (guards double clicks). */
+  busy = false;
   readonly medals = MEDALS;
-
-  /** The slot whose card picker is open. */
-  pickerSlotId: string | null = null;
-  myCards: CardView[] | null = null;
-  myCardsError: string | null = null;
 
   private readonly refresh$ = new Subject<void>();
   private routeId: string | null = null;
@@ -59,16 +44,14 @@ export class PoolPageComponent implements OnInit, OnDestroy {
   private sub?: Subscription;
   private routeSub?: Subscription;
 
-  constructor(private pools: PoolService, private generation: GenerationService,
-              private media: MediaService, private visibility: PageVisibilityService,
-              private route: ActivatedRoute) {}
+  constructor(private pools: PoolService, private media: MediaService,
+              private visibility: PageVisibilityService, private route: ActivatedRoute) {}
 
   ngOnInit(): void {
     this.loadPastPools();
     this.routeSub = this.route.paramMap.subscribe(params => {
       this.routeId = params.get('id');
       this.pool = undefined;
-      this.pickerSlotId = null;
       this.refresh();
     });
     // refresh() restarts the poll timer with an immediate fetch.
@@ -92,126 +75,60 @@ export class PoolPageComponent implements OnInit, OnDestroy {
     return !!this.routeId;
   }
 
-  get submissionsLeft(): number {
-    return this.pool ? Math.max(0, this.pool.maxEntriesPerUser - this.pool.myEntryCount) : 0;
+  /** The cards that make the pool (so far, while it's open). */
+  get inEntries(): PoolEntryView[] {
+    return this.pool?.entries.filter(e => e.in) ?? [];
   }
 
-  get filledSlots(): number {
-    return this.pool?.slots.filter(s => s.entries.some(e => e.leader)).length ?? 0;
+  /** Index of the last entry that is in; the pool line is drawn after it (-1: no line). */
+  get lineIndex(): number {
+    const entries = this.pool?.entries ?? [];
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].in) {
+        return i;
+      }
+    }
+    return -1;
   }
 
-  /** Slots with someone else's card where I haven't given my gold yet. */
-  get goldsLeft(): number {
-    return this.pool?.slots.filter(s => this.canVoteIn(s) && !s.myMedals.gold).length ?? 0;
+  /** Medals I've given, for the header chips. */
+  medalGiven(medal: Medal): boolean {
+    return !!this.pool?.myMedals[medal];
   }
 
-  /** Closed pools: cards the table banned out, in slot order. */
-  get bannedOut(): { slot: PoolSlotView; entry: PoolEntryView }[] {
-    return (this.pool?.slots ?? []).flatMap(slot =>
-      slot.entries.filter(e => e.disqualified).map(entry => ({ slot, entry })));
-  }
-
-  /** Winners (and tied groups) in slot order; slots with no medals are left out. */
-  get results(): PoolResult[] {
-    return (this.pool?.slots ?? []).flatMap(slot => {
-      const winners = slot.entries.filter(e => e.leader || e.tied);
-      return winners.length ? [{ slot, entries: winners, tied: winners.some(e => e.tied) }] : [];
-    });
+  canVote(entry: PoolEntryView): boolean {
+    return this.isOpen && !entry.mine;
   }
 
   refresh(): void {
     this.refresh$.next();
   }
 
-  // ----- slot state -----
-  /** Someone else's card is in the slot, so there is something to give medals to. */
-  canVoteIn(slot: PoolSlotView): boolean {
-    return slot.entries.some(e => !e.mine);
-  }
-
-  canSubmitTo(slot: PoolSlotView): boolean {
-    return this.isOpen && !slot.myEntryId && this.submissionsLeft > 0;
-  }
-
-  slotState(slot: PoolSlotView): 'empty' | 'leader' | 'tied' | 'open' {
-    if (!slot.entries.length) {
-      return 'empty';
-    }
-    if (slot.entries.some(e => e.leader)) {
-      return 'leader';
-    }
-    return slot.entries.some(e => e.tied) ? 'tied' : 'open';
-  }
-
-  leaderOf(slot: PoolSlotView): PoolEntryView | undefined {
-    return slot.entries.find(e => e.leader);
-  }
-
-
-  scrollTo(slot: PoolSlotView): void {
-    document.getElementById(`pool-slot-${slot.position}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
   // ----- actions -----
-  /** Give the card this medal, or take it back when the card already has it from me. */
-  award(slot: PoolSlotView, entry: PoolEntryView, medal: Medal): void {
+  /** Give the card this medal (moving it off another card), or take it back if it's already there. */
+  award(entry: PoolEntryView, medal: Medal): void {
     if (entry.myMedal === medal) {
-      this.run(slot, this.pools.clearMedal(entry.id), 'Could not take your medal back.');
+      this.run(this.pools.clearMedal(entry.id), 'Could not take your medal back.');
     } else {
-      this.run(slot, this.pools.medal(entry.id, medal), 'Your medal did not go through. Please try again.');
+      this.run(this.pools.medal(entry.id, medal), 'Your medal did not go through. Please try again.');
     }
   }
 
-  toggleBan(slot: PoolSlotView, entry: PoolEntryView): void {
-    if (entry.bannedByMe) {
-      this.run(slot, this.pools.unban(entry.id), 'Could not lift your ban.');
-      return;
-    }
+  withdraw(entry: PoolEntryView): void {
     const name = entry.card.card?.name || 'this card';
-    const left = this.pool?.myBansLeft ?? 0;
-    if (!window.confirm(`Ban "${name}"? You have ${left} of ${this.pool?.bansPerPlayer} bans left. ` +
-      `Bans are secret until the pool closes; ${this.pool?.banThreshold} bans knock a card out.`)) {
+    if (!window.confirm(`Withdraw "${name}" from the pool? Its medals are cleared.`)) {
       return;
     }
-    this.run(slot, this.pools.ban(entry.id), 'Your ban did not go through.');
+    this.run(this.pools.withdraw(entry.id), 'Could not withdraw the card.');
   }
 
-  canBan(entry: PoolEntryView): boolean {
-    return entry.bannedByMe || (this.pool?.myBansLeft ?? 0) > 0;
-  }
-
-  withdraw(slot: PoolSlotView, entry: PoolEntryView): void {
-    const name = entry.card.card?.name || 'this card';
-    if (!window.confirm(`Withdraw "${name}" from ${slot.label}? Its votes are cleared.`)) {
-      return;
+  medalTitle(entry: PoolEntryView, medal: { medal: Medal; points: number }): string {
+    if (entry.myMedal === medal.medal) {
+      return `Take your ${medal.medal} back`;
     }
-    this.run(slot, this.pools.withdraw(entry.id), 'Could not withdraw the card.');
-  }
-
-  openPicker(slot: PoolSlotView): void {
-    if (this.pickerSlotId === slot.id) {
-      this.pickerSlotId = null;
-      return;
-    }
-    this.pickerSlotId = slot.id;
-    this.loadMyCards();
-  }
-
-  closePicker(): void {
-    this.pickerSlotId = null;
-  }
-
-  submit(slot: PoolSlotView, card: CardView): void {
-    this.run(slot, this.pools.submit(slot.id, card.id), 'Could not submit the card.', () => {
-      this.pickerSlotId = null;
-    });
-  }
-
-  /** My finished cards that fit the slot and aren't in the pool yet. */
-  eligibleCards(slot: PoolSlotView): CardView[] {
-    const inPool = new Set(this.pool?.slots.flatMap(s => s.entries.map(e => e.cardId)) ?? []);
-    return (this.myCards ?? []).filter(c =>
-      c.status === 'done' && !inPool.has(c.id) && cardFitsSlot(c.card, slot.colorRule, slot.typeRule));
+    return this.pool?.myMedals[medal.medal]
+      ? `Move your ${medal.medal} here (${medal.points} pts)`
+      : `Give ${medal.medal} (${medal.points} pts)`;
   }
 
   download(entry: PoolEntryView): void {
@@ -223,10 +140,6 @@ export class PoolPageComponent implements OnInit, OnDestroy {
   }
 
   // ----- display helpers -----
-  pipClass(rule: PoolColorRule): string | null {
-    return ['W', 'U', 'B', 'R', 'G'].includes(rule) ? `ms ms-${rule.toLowerCase()} ms-cost` : null;
-  }
-
   powerLabel(power: PowerCheck): string {
     return power.verdict === 'over' ? 'Over the curve' : power.verdict === 'pushed' ? 'Pushed' : 'Fair';
   }
@@ -236,42 +149,23 @@ export class PoolPageComponent implements OnInit, OnDestroy {
       `a card with this cost and rarity usually gets about ${power.budget}.`;
   }
 
-  trackSlot(_index: number, slot: PoolSlotView): string {
-    return slot.id;
-  }
-
   trackEntry(_index: number, entry: PoolEntryView): string {
     return entry.id;
   }
 
-  trackCard(_index: number, card: CardView): string {
-    return card.id;
-  }
-
   // ----- loading -----
-  private run(slot: PoolSlotView, request: Observable<PoolView>, fallback: string, done?: () => void): void {
-    if (!this.isOpen || this.busy.has(slot.id)) {
+  private run(request: Observable<PoolView>, fallback: string): void {
+    if (!this.isOpen || this.busy) {
       return;
     }
     this.error = null;
-    this.busy.add(slot.id);
-    request.pipe(finalize(() => this.busy.delete(slot.id))).subscribe({
-      next: pool => {
-        this.pool = pool;
-        done?.();
-      },
+    this.busy = true;
+    request.pipe(finalize(() => (this.busy = false))).subscribe({
+      next: pool => (this.pool = pool),
       error: err => {
         this.error = apiErrorMessage(err, fallback);
         this.refresh();
       }
-    });
-  }
-
-  private loadMyCards(): void {
-    this.myCardsError = null;
-    this.generation.myCards().subscribe({
-      next: cards => (this.myCards = cards),
-      error: err => (this.myCardsError = apiErrorMessage(err, 'Could not load your cards.'))
     });
   }
 

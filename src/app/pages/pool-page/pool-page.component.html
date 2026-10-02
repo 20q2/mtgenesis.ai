@@ -9,7 +9,7 @@
   <!-- No open pool -->
   <section *ngIf="pool === null" class="panel empty-state">
     <h2 class="page-title">No Knowledge Pool open</h2>
-    <p class="muted">When the host opens this year's pool, submit your best cards here and vote on everyone else's.</p>
+    <p class="muted">When the host opens this year's pool, submit your best cards and vote on everyone else's.</p>
   </section>
 
   <ng-container *ngIf="pool as p">
@@ -25,29 +25,29 @@
         </span>
       </div>
 
-      <ul class="rules" *ngIf="isOpen">
-        <li><span class="material-icons" aria-hidden="true">upload</span>
-          <span>Submit up to <strong>{{ p.maxEntriesPerUser }}</strong> finished cards from your gallery, one per slot.</span></li>
-        <li><span class="material-icons" aria-hidden="true">military_tech</span>
-          <span>Rank each slot: <strong class="medal-word gold">gold</strong> 3 points, <strong class="medal-word silver">silver</strong> 2,
-            <strong class="medal-word bronze">bronze</strong> 1. Only gold is needed; never your own card.</span></li>
-        <li><span class="material-icons" aria-hidden="true">block</span>
-          <span>You have <strong>{{ p.bansPerPlayer }}</strong> secret bans. A card banned by
-            <strong>{{ p.banThreshold }}</strong> players is out, however many medals it has.</span></li>
-        <li><span class="material-icons" aria-hidden="true">visibility_off</span>
-          <span>Submitters stay anonymous until the pool closes.</span></li>
-        <li><span class="material-icons" aria-hidden="true">workspace_premium</span>
-          <span>Most points in each slot becomes legal (more golds breaks a tie).</span></li>
-      </ul>
-      <p class="muted" *ngIf="!isOpen">
-        This pool is closed. The winning card in each slot is legal for everyone at the event.
+      <p class="rules-line">
+        Colorless or mono-colored cards only · up to {{ p.maxEntriesPerUser }} per player ·
+        <strong class="medal-word gold">gold</strong> 3 / <strong class="medal-word silver">silver</strong> 2 /
+        <strong class="medal-word bronze">bronze</strong> 1, never your own card · the top half make the pool
       </p>
+      <p class="muted" *ngIf="isOpen">
+        Submit a finished card from <a routerLink="/create" class="night-link">Create</a> or your
+        <a routerLink="/gallery" class="night-link">Gallery</a>.
+      </p>
+      <p class="muted" *ngIf="!isOpen">This pool is closed. The cards above the pool line are legal for everyone at the event.</p>
 
-      <div class="stats" *ngIf="isOpen">
-        <span class="stat"><strong>{{ p.myEntryCount }}</strong> / {{ p.maxEntriesPerUser }} submitted</span>
-        <span class="stat"><strong>{{ filledSlots }}</strong> / {{ p.slots.length }} slots have a leader</span>
-        <span class="stat" *ngIf="goldsLeft"><strong>{{ goldsLeft }}</strong> {{ goldsLeft === 1 ? 'slot needs' : 'slots need' }} your gold</span>
-        <span class="stat"><strong>{{ p.myBansLeft }}</strong> / {{ p.bansPerPlayer }} bans left</span>
+      <div class="stats">
+        <span class="stat"><strong>{{ p.submitters }} {{ p.submitters === 1 ? 'player' : 'players' }} → top {{ p.cutoff }}</strong> make the pool</span>
+        <span class="stat" *ngIf="isOpen">Your entries {{ p.myEntryCount }} / {{ p.maxEntriesPerUser }}</span>
+        <span class="stat my-medals" *ngIf="isOpen" aria-label="Your medals">
+          <span *ngFor="let m of medals"
+                class="my-medal"
+                [ngClass]="m.medal"
+                [class.given]="medalGiven(m.medal)"
+                [title]="medalGiven(m.medal) ? 'Your ' + m.medal + ' is given' : 'Your ' + m.medal + ' is still free'">
+            <span class="material-icons" aria-hidden="true">military_tech</span>
+          </span>
+        </span>
       </div>
     </section>
 
@@ -57,215 +57,100 @@
       <button type="button" class="alert-close" (click)="clearError()" aria-label="Dismiss">×</button>
     </div>
 
-    <!-- Final results -->
+    <!-- Final result -->
     <section *ngIf="!isOpen" class="panel results">
-      <h3 class="section-title">Legal cards</h3>
-      <p class="muted" *ngIf="!results.length">No slot received a medal, so no cards made it in.</p>
+      <h3 class="section-title">The pool</h3>
+      <p class="muted" *ngIf="!inEntries.length">No card received enough medals, so the pool is empty.</p>
       <div class="results-grid">
-        <ng-container *ngFor="let r of results">
-          <figure *ngFor="let e of r.entries; trackBy: trackEntry" class="result" [class.tied]="r.tied">
-            <app-card-slot [view]="e.card" [showReroll]="false"></app-card-slot>
-            <figcaption>
-              <span class="result-slot">
-                <i *ngIf="pipClass(r.slot.colorRule) as pip" [class]="pip" aria-hidden="true"></i>
-                {{ r.slot.label }}
-              </span>
-              <span class="muted">
-                <ng-container *ngIf="r.tied">Tied · host decides · </ng-container>
-                {{ e.points }} {{ e.points === 1 ? 'point' : 'points' }}<ng-container *ngIf="e.username"> · by {{ e.username }}</ng-container>
-              </span>
-              <button type="button" class="btn btn-ghost btn-sm" (click)="download(e)" *ngIf="e.card.cardImageUrl">
-                <span class="material-icons">download</span> Card
-              </button>
-            </figcaption>
-          </figure>
-        </ng-container>
+        <figure *ngFor="let e of inEntries; trackBy: trackEntry" class="result" [attr.data-result-id]="e.id">
+          <app-card-slot [view]="e.card" [showReroll]="false"></app-card-slot>
+          <figcaption>
+            <span class="muted">
+              <ng-container *ngIf="e.tiedAtCutoff">Tied at the line · </ng-container>
+              {{ e.points }} {{ e.points === 1 ? 'point' : 'points' }} · by {{ e.username }}
+            </span>
+            <button type="button" class="btn btn-ghost btn-sm" (click)="download(e)" *ngIf="e.card.cardImageUrl">
+              <span class="material-icons">download</span> Card
+            </button>
+          </figcaption>
+        </figure>
       </div>
-
-      <ng-container *ngIf="bannedOut.length">
-        <h3 class="section-title banned-title">
-          <span class="material-icons" aria-hidden="true">block</span> Banned by the table
-        </h3>
-        <ul class="banned-list">
-          <li *ngFor="let b of bannedOut">
-            <strong>{{ b.entry.card.card?.name || 'Untitled card' }}</strong>
-            <span class="muted">{{ b.slot.label }} · {{ b.entry.bans }} bans · {{ b.entry.points }} points<ng-container *ngIf="b.entry.username"> · by {{ b.entry.username }}</ng-container></span>
-          </li>
-        </ul>
-      </ng-container>
     </section>
 
-    <!-- Slot overview: jump to a slot -->
-    <nav class="overview" aria-label="Slots">
-      <button *ngFor="let slot of p.slots; trackBy: trackSlot"
-              type="button"
-              class="overview-chip"
-              [ngClass]="'state-' + slotState(slot)"
-              [class.voted]="!!slot.myMedals.gold"
-              [class.submitted]="!!slot.myEntryId"
-              (click)="scrollTo(slot)"
-              [title]="slot.ruleText + ' · ' + slot.entries.length + (slot.entries.length === 1 ? ' card' : ' cards')">
-        <span class="chip-num">{{ slot.position }}</span>
-        <i *ngIf="pipClass(slot.colorRule) as pip" [class]="pip" aria-hidden="true"></i>
-        <span class="chip-label">{{ slot.label }}</span>
-        <span class="chip-count">{{ slot.entries.length }}</span>
-        <span *ngIf="slot.myMedals.gold" class="material-icons chip-voted" aria-label="Gold given">check</span>
-      </button>
-    </nav>
-
-    <!-- One row per slot -->
-    <article *ngFor="let slot of p.slots; trackBy: trackSlot"
-             class="panel slot-row"
-             [id]="'pool-slot-' + slot.position">
-      <header class="slot-header">
-        <span class="slot-num">{{ slot.position }}</span>
-        <div class="slot-title">
-          <h3 class="section-title">
-            <i *ngIf="pipClass(slot.colorRule) as pip" [class]="pip" aria-hidden="true"></i>
-            {{ slot.label }}
-          </h3>
-          <span class="muted">
-            <ng-container *ngIf="slot.ruleText !== slot.label">{{ slot.ruleText }} · </ng-container>
-            {{ slot.entries.length }} {{ slot.entries.length === 1 ? 'card' : 'cards' }}
-          </span>
-        </div>
-        <span class="slot-vote-state muted" *ngIf="isOpen && canVoteIn(slot)">
-          <ng-container *ngIf="slot.myMedals.gold; else noGold">
-            <span class="material-icons" aria-hidden="true">check_circle</span> Gold given
-          </ng-container>
-          <ng-template #noGold>Gold not given yet</ng-template>
-        </span>
-      </header>
+    <section class="panel">
+      <h3 class="section-title">{{ isOpen ? 'Entries' : 'All entries' }}</h3>
+      <p class="muted no-entries" *ngIf="!p.entries.length">
+        No cards yet. <a routerLink="/create" class="night-link">Create one</a> and submit it.
+      </p>
 
       <div class="entries">
-        <div *ngFor="let entry of slot.entries; trackBy: trackEntry"
-             class="entry"
-             [attr.data-entry-id]="entry.id"
-             [ngClass]="entry.myMedal ? 'my-' + entry.myMedal : ''"
-             [class.leader]="entry.leader"
-             [class.tied]="entry.tied"
-             [class.disqualified]="entry.disqualified">
-          <div class="flags">
-            <span *ngIf="entry.leader" class="flag flag-leader">
-              <span class="material-icons" aria-hidden="true">workspace_premium</span> {{ isOpen ? 'Leading' : 'Legal' }}
-            </span>
-            <span *ngIf="entry.tied" class="flag flag-tied">Tied</span>
-            <span *ngIf="entry.disqualified" class="flag flag-banned">
-              <span class="material-icons" aria-hidden="true">block</span> Banned out
-            </span>
-            <span *ngIf="entry.myMedal as m" class="flag flag-medal" [ngClass]="m">Your {{ m }}</span>
-            <span *ngIf="entry.bannedByMe" class="flag flag-my-ban">You banned</span>
-            <span *ngIf="entry.mine" class="flag flag-mine">Your card</span>
-          </div>
+        <ng-container *ngFor="let entry of p.entries; let i = index; trackBy: trackEntry">
+          <div class="entry"
+               [attr.data-entry-id]="entry.id"
+               [ngClass]="entry.myMedal ? 'my-' + entry.myMedal : ''"
+               [class.in]="entry.in">
+            <div class="flags">
+              <span class="flag flag-rank">#{{ entry.rank }}</span>
+              <span *ngIf="entry.in" class="flag flag-in">
+                <span class="material-icons" aria-hidden="true">workspace_premium</span>
+                {{ entry.tiedAtCutoff ? 'Tied · in' : 'In' }}
+              </span>
+              <span *ngIf="entry.myMedal as m" class="flag flag-medal" [ngClass]="m">Your {{ m }}</span>
+              <span *ngIf="entry.mine" class="flag flag-mine">Your card</span>
+            </div>
 
-          <app-card-slot [view]="entry.card" [showReroll]="false"></app-card-slot>
+            <app-card-slot [view]="entry.card" [showReroll]="false"></app-card-slot>
 
-          <div class="entry-meta">
-            <span *ngIf="entry.power as power"
-                  class="power"
-                  [ngClass]="'power-' + power.verdict"
-                  [title]="powerTitle(power)">
-              <span class="material-icons" aria-hidden="true">{{ power.verdict === 'fair' ? 'balance' : 'warning' }}</span>
-              {{ powerLabel(power) }}
-            </span>
-            <span class="muted by" *ngIf="entry.username && !entry.mine">by {{ entry.username }}</span>
-          </div>
+            <div class="entry-meta">
+              <span *ngIf="entry.power as power"
+                    class="power"
+                    [ngClass]="'power-' + power.verdict"
+                    [title]="powerTitle(power)">
+                <span class="material-icons" aria-hidden="true">{{ power.verdict === 'fair' ? 'balance' : 'warning' }}</span>
+                {{ powerLabel(power) }}
+              </span>
+              <span class="muted by" *ngIf="!entry.mine">by {{ entry.username }}</span>
+            </div>
 
-          <div class="tally" [attr.aria-label]="entry.points + ' points'">
-            <span class="points">{{ entry.points }} {{ entry.points === 1 ? 'pt' : 'pts' }}</span>
-            <span class="medal-count gold" title="Golds">{{ entry.gold }}</span>
-            <span class="medal-count silver" title="Silvers">{{ entry.silver }}</span>
-            <span class="medal-count bronze" title="Bronzes">{{ entry.bronze }}</span>
-            <span class="ban-count" *ngIf="entry.bans !== null && entry.bans > 0" title="Bans">
-              <span class="material-icons" aria-hidden="true">block</span>{{ entry.bans }}
-            </span>
-          </div>
+            <div class="tally" [attr.aria-label]="entry.points + ' points'">
+              <span class="points">{{ entry.points }} {{ entry.points === 1 ? 'pt' : 'pts' }}</span>
+              <span class="medal-count gold" title="Golds">{{ entry.gold }}</span>
+              <span class="medal-count silver" title="Silvers">{{ entry.silver }}</span>
+              <span class="medal-count bronze" title="Bronzes">{{ entry.bronze }}</span>
+            </div>
 
-          <div class="actions" *ngIf="isOpen">
-            <ng-container *ngIf="!entry.mine">
-              <div class="medal-buttons" role="group" [attr.aria-label]="'Medals for ' + (entry.card.card?.name || 'this card')">
+            <div class="actions" *ngIf="isOpen">
+              <div *ngIf="canVote(entry)" class="medal-buttons" role="group"
+                   [attr.aria-label]="'Medals for ' + (entry.card.card?.name || 'this card')">
                 <button *ngFor="let m of medals"
                         type="button"
                         class="medal-button"
                         [ngClass]="m.medal"
                         [class.on]="entry.myMedal === m.medal"
-                        [disabled]="busy.has(slot.id)"
+                        [disabled]="busy"
                         [attr.aria-pressed]="entry.myMedal === m.medal"
-                        [title]="entry.myMedal === m.medal ? 'Take your ' + m.medal + ' back'
-                          : slot.myMedals[m.medal] ? 'Move your ' + m.medal + ' here (' + m.points + ' pts)'
-                          : 'Give ' + m.medal + ' (' + m.points + ' pts)'"
-                        (click)="award(slot, entry, m.medal)">
+                        [title]="medalTitle(entry, m)"
+                        (click)="award(entry, m.medal)">
                   <span class="material-icons" aria-hidden="true">military_tech</span>
                   <span class="medal-label">{{ m.label }}</span>
                 </button>
               </div>
-              <button type="button"
-                      class="ban-button"
-                      [class.on]="entry.bannedByMe"
-                      [disabled]="busy.has(slot.id) || !canBan(entry)"
-                      [attr.aria-pressed]="entry.bannedByMe"
-                      [title]="entry.bannedByMe ? 'Lift your ban' : canBan(entry) ? 'Ban this card (secret until close)' : 'No bans left'"
-                      (click)="toggleBan(slot, entry)">
-                <span class="material-icons" aria-hidden="true">block</span>
-                {{ entry.bannedByMe ? 'Banned' : 'Ban' }}
+              <button *ngIf="entry.mine"
+                      type="button"
+                      class="btn btn-ghost btn-sm withdraw-button"
+                      [disabled]="busy"
+                      (click)="withdraw(entry)">
+                <span class="material-icons">undo</span> Withdraw
               </button>
-            </ng-container>
-            <button *ngIf="entry.mine"
-                    type="button"
-                    class="btn btn-ghost btn-sm withdraw-button"
-                    [disabled]="busy.has(slot.id)"
-                    (click)="withdraw(slot, entry)">
-              <span class="material-icons">undo</span> Withdraw
-            </button>
+            </div>
           </div>
-        </div>
 
-        <!-- Submit tile -->
-        <button *ngIf="isOpen && !slot.myEntryId"
-                type="button"
-                class="entry submit-tile"
-                [class.active]="pickerSlotId === slot.id"
-                [disabled]="!canSubmitTo(slot) || busy.has(slot.id)"
-                [attr.aria-expanded]="pickerSlotId === slot.id"
-                (click)="openPicker(slot)">
-          <span class="material-icons" aria-hidden="true">{{ canSubmitTo(slot) ? 'add_circle_outline' : 'block' }}</span>
-          <span class="submit-title">{{ canSubmitTo(slot) ? 'Submit a card' : 'No submissions left' }}</span>
-          <span class="muted">{{ canSubmitTo(slot) ? slot.ruleText : 'Withdraw one to submit here' }}</span>
-        </button>
-        <p *ngIf="!slot.entries.length && !isOpen" class="muted no-entries">Nobody submitted a card for this slot.</p>
-      </div>
-
-      <!-- Card picker -->
-      <div *ngIf="pickerSlotId === slot.id" class="picker">
-        <div class="picker-head">
-          <strong>Pick one of your cards for {{ slot.label }}</strong>
-          <button type="button" class="icon-btn" (click)="closePicker()" aria-label="Close picker">
-            <span class="material-icons">close</span>
-          </button>
-        </div>
-        <div *ngIf="myCardsError" class="alert alert-error" role="alert">
-          <span class="material-icons">error</span><span>{{ myCardsError }}</span>
-        </div>
-        <p *ngIf="myCards === null && !myCardsError" class="muted">Loading your cards…</p>
-        <ng-container *ngIf="myCards">
-          <p *ngIf="!eligibleCards(slot).length" class="muted">
-            None of your finished cards fit this slot ({{ slot.ruleText }}).
-            <a routerLink="/create" class="night-link">Create one</a>, then come back.
-          </p>
-          <div class="picker-grid">
-            <button *ngFor="let card of eligibleCards(slot); trackBy: trackCard"
-                    type="button"
-                    class="picker-card"
-                    [disabled]="busy.has(slot.id)"
-                    (click)="submit(slot, card)"
-                    [title]="'Submit ' + (card.card?.name || 'this card')">
-              <img [src]="card.cardImageUrl | media | async" [alt]="card.card?.name || 'Your card'" loading="lazy">
-              <span class="picker-name">{{ card.card?.name || 'Untitled card' }}</span>
-            </button>
+          <div *ngIf="i === lineIndex && i < p.entries.length - 1" class="pool-line" role="separator">
+            <span>Pool line · {{ inEntries.length }} {{ inEntries.length === 1 ? 'card makes' : 'cards make' }} the pool</span>
           </div>
         </ng-container>
       </div>
-    </article>
+    </section>
   </ng-container>
 
   <section *ngIf="pastPools?.length" class="panel past-pools">

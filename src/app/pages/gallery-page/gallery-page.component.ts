@@ -1,12 +1,13 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { EMPTY, Observable, Subscription, catchError, exhaustMap, filter, finalize, timeout } from 'rxjs';
-import { CardView, SharedCardView } from '../../models/api.model';
+import { CardView, PoolView, SharedCardView } from '../../models/api.model';
 import { apiErrorMessage, safeFileName } from '../../services/api.util';
 import { isPending } from '../../services/card-status';
 import { GenerationService, isTransientError } from '../../services/generation.service';
 import { MediaService } from '../../services/media.service';
 import { PageVisibilityService } from '../../services/page-visibility.service';
+import { PoolService } from '../../services/pool.service';
 
 export const GALLERY_POLL_MS = 5000;
 export const GALLERY_REQUEST_TIMEOUT_MS = 15000;
@@ -29,6 +30,8 @@ export class GalleryPageComponent implements OnInit, OnDestroy {
   communityCards: SharedCardView[] | null = null;
   /** Card ids with a share/unshare request in flight. */
   sharing = new Set<string>();
+  /** The open Knowledge Pool (null when none), for the Submit to pool buttons. */
+  pool: PoolView | null = null;
   error: string | null = null;
 
   private loadSub?: Subscription;
@@ -37,9 +40,10 @@ export class GalleryPageComponent implements OnInit, OnDestroy {
 
   constructor(private generation: GenerationService, private media: MediaService,
               private visibility: PageVisibilityService, private route: ActivatedRoute,
-              private router: Router) {}
+              private router: Router, private pools: PoolService) {}
 
   ngOnInit(): void {
+    this.pools.current().subscribe({ next: pool => (this.pool = pool), error: () => (this.pool = null) });
     if (this.route.snapshot.queryParamMap.get('tab') === 'community') {
       this.selectTab('community');
     }
@@ -114,6 +118,15 @@ export class GalleryPageComponent implements OnInit, OnDestroy {
 
   trackCard(_index: number, view: CardView): string {
     return view.id;
+  }
+
+  /** A card went into the pool: keep the pool and that card's entry in step. */
+  onPoolSubmitted(view: CardView, pool: PoolView): void {
+    this.pool = pool;
+    const entry = pool.entries.find(e => e.cardId === view.id);
+    if (entry) {
+      this.cards = (this.cards ?? []).map(c => (c.id === view.id ? { ...c, poolEntryId: entry.id } : c));
+    }
   }
 
   private loadCommunity(): void {

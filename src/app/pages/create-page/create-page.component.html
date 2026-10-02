@@ -80,6 +80,10 @@
           <span class="material-icons" aria-hidden="true">{{ jobView?.shared ? 'public' : 'share' }}</span>
           {{ jobView?.shared ? 'Shared · Unshare' : 'Share to gallery' }}
         </button>
+        <app-pool-submit *ngIf="currentCard.cardImageUrl && jobView?.status === 'done'"
+                         [card]="jobView!"
+                         [pool]="pool"
+                         (submitted)="onPoolSubmitted($event)"></app-pool-submit>
       </div>
     </section>
 

@@ -4,11 +4,12 @@ import { RouterTestingModule } from '@angular/router/testing';
 import { of } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { CardSlotComponent } from '../../components/card-slot/card-slot.component';
+import { PoolSubmitComponent } from '../../components/pool-submit/pool-submit.component';
 import { MediaPipe } from '../../pipes/media.pipe';
 import { MediaService } from '../../services/media.service';
 import { PageVisibilityService } from '../../services/page-visibility.service';
 import { fakeVisibility } from '../../testing/fake-visibility';
-import { cardView, doneCard } from '../../testing/fixtures';
+import { cardView, doneCard, poolEntry, poolView } from '../../testing/fixtures';
 import { GALLERY_POLL_MS, GALLERY_REQUEST_TIMEOUT_MS, GalleryPageComponent } from './gallery-page.component';
 
 describe('GalleryPageComponent', () => {
@@ -22,7 +23,7 @@ describe('GalleryPageComponent', () => {
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, RouterTestingModule],
-      declarations: [GalleryPageComponent, CardSlotComponent, MediaPipe],
+      declarations: [GalleryPageComponent, CardSlotComponent, PoolSubmitComponent, MediaPipe],
       providers: [
         { provide: MediaService, useValue: media },
         { provide: PageVisibilityService, useValue: fakeVisibility() }
@@ -31,6 +32,7 @@ describe('GalleryPageComponent', () => {
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(GalleryPageComponent);
     fixture.detectChanges();
+    http.expectOne(`${environment.apiUrl}/api/v1/pools/current`).flush(poolView({ myEntryCount: 1 }));
   });
 
   afterEach(() => fixture.destroy());
@@ -112,6 +114,7 @@ describe('GalleryPageComponent', () => {
     const tile = el().querySelector('[data-card-id="x1"]') as HTMLElement;
     expect(tile.textContent).toContain('by Beth');
     expect(tile.querySelector('button.share')).toBeNull();
+    expect(tile.querySelector('button.pool-submit')).toBeNull();
     expect(tile.querySelector('.download')).not.toBeNull();
     expect(el().querySelector('button.tab-community')!.getAttribute('aria-selected')).toBe('true');
 
@@ -119,6 +122,24 @@ describe('GalleryPageComponent', () => {
     (el().querySelector('button.tab-mine') as HTMLElement).click();
     (el().querySelector('button.tab-community') as HTMLElement).click();
     http.expectNone(`${environment.apiUrl}/api/v1/cards/shared`);
+  });
+
+  it('done My cards tiles offer Submit to pool; pending tiles do not', () => {
+    http.expectOne(url).flush([doneCard({ id: 'd1' }), cardView({ id: 'p1', status: 'queued' })]);
+    fixture.detectChanges();
+    const submit = el().querySelector('[data-card-id="d1"] button.pool-submit') as HTMLButtonElement;
+    expect(submit.textContent).toContain('Submit to pool (1/3)');
+    expect(el().querySelector('[data-card-id="p1"] button.pool-submit')).toBeNull();
+
+    submit.click();
+    const req = http.expectOne(`${environment.apiUrl}/api/v1/pools/entries`);
+    expect(req.request.body).toEqual({ cardId: 'd1' });
+    req.flush(poolView({
+      myEntryCount: 2,
+      entries: [poolEntry({ id: 'e9', cardId: 'd1', mine: true })]
+    }));
+    fixture.detectChanges();
+    expect(el().querySelector('[data-card-id="d1"]')!.textContent).toContain('In the pool ✓');
   });
 
   it('shows an empty state when there are no cards', () => {

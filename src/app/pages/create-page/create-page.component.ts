@@ -1,13 +1,14 @@
 import { Component, ViewChild, OnInit, OnDestroy } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Subscription, finalize, switchMap, throwError } from 'rxjs';
-import { CardView } from '../../models/api.model';
+import { CardView, PoolView } from '../../models/api.model';
 import { Card, Rarity } from '../../models/card.model';
 import { CardFormComponent } from '../../components/card-form/card-form.component';
 import { apiErrorMessage, safeFileName } from '../../services/api.util';
 import { isPainting, queueLine } from '../../services/card-status';
 import { GenerationService } from '../../services/generation.service';
 import { MediaService } from '../../services/media.service';
+import { PoolService } from '../../services/pool.service';
 import { QueueService } from '../../services/queue.service';
 
 /**
@@ -38,6 +39,8 @@ export class CreatePageComponent implements OnInit, OnDestroy {
   /** Latest view of the running job (queue position, ETA, checklist). */
   jobView: CardView | null = null;
   sharing = false;
+  /** The open Knowledge Pool (null when none), for the Submit to pool button. */
+  pool: PoolView | null = null;
 
   // Message rotation properties
   currentMessage = { title: 'Generating Your Magic Card', subtitle: 'Creating artwork and card text with AI...' };
@@ -69,7 +72,8 @@ export class CreatePageComponent implements OnInit, OnDestroy {
     private generation: GenerationService,
     private queue: QueueService,
     private media: MediaService,
-    private http: HttpClient
+    private http: HttpClient,
+    private pools: PoolService
   ) {}
 
   ngOnInit(): void {
@@ -79,6 +83,7 @@ export class CreatePageComponent implements OnInit, OnDestroy {
     }, 500);
 
     this.loadGenerationMessages();
+    this.pools.current().subscribe({ next: pool => (this.pool = pool), error: () => (this.pool = null) });
     this.onlineSub = this.queue.online$.subscribe(online => {
       this.isCheckingHealth = false;
       this.modelsReady = online;
@@ -185,6 +190,16 @@ export class CreatePageComponent implements OnInit, OnDestroy {
       },
       error: err => (this.error = apiErrorMessage(err, 'Could not share the card.'))
     });
+  }
+
+  /** The finished card went into the pool: keep the pool and the card's entry in step. */
+  onPoolSubmitted(pool: PoolView): void {
+    this.pool = pool;
+    const job = this.jobView;
+    const entry = job && pool.entries.find(e => e.cardId === job.id);
+    if (job && entry) {
+      this.jobView = { ...job, poolEntryId: entry.id };
+    }
   }
 
   /** Queue position / ETA line for the running job. */

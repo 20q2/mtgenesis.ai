@@ -1,0 +1,13 @@
+<ng-container *ngIf="card.status === 'done'">
+  <button type="button"
+          class="btn btn-ghost btn-sm pool-submit"
+          [class.entered]="entered"
+          [disabled]="sending || entered || !!disabledReason()"
+          [title]="entered ? 'Withdraw it on the Knowledge Pool page' : (disabledReason() || 'Enter this card in the Knowledge Pool')"
+          (click)="submit()">
+    <span class="material-icons" aria-hidden="true">{{ entered ? 'check_circle' : 'auto_stories' }}</span>
+    {{ sending ? 'Submitting…' : label() }}
+  </button>
+  <span class="reason" *ngIf="!entered && !error && disabledReason() as reason">{{ reason }}</span>
+  <span class="reason error" *ngIf="error" role="alert">{{ error }}</span>
+</ng-container>

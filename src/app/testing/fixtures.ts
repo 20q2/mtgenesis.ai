@@ -1,5 +1,5 @@
 import {
-  CardStatus, CardView, EventView, PoolEntryView, PoolSlotView, PoolView, SetCardView, SetView
+  CardStatus, CardView, EventView, PoolEntryView, PoolView, SetCardView, SetView
 } from '../models/api.model';
 
 /** Test-only builders for API view objects. */
@@ -24,6 +24,7 @@ export function cardView(overrides: Partial<CardView> = {}): CardView {
     artImageUrl: null,
     createdAt: '2026-09-28T20:00:00+00:00',
     shared: false,
+    poolEntryId: null,
     ...overrides
   };
 }
@@ -75,38 +76,20 @@ export function poolEntry(overrides: Partial<PoolEntryView> = {}): PoolEntryView
   const id = overrides.id ?? 'pe-1';
   return {
     id,
-    slotId: 'ps-1',
     cardId: `${id}-card`,
-    mine: false,
-    username: null,
     card: doneCard({ id: `${id}-card` }),
+    username: 'Beth',
+    mine: false,
     power: { estimate: 1, budget: 1.25, verdict: 'fair' },
     gold: 0,
     silver: 0,
     bronze: 0,
     points: 0,
-    leader: false,
-    tied: false,
-    disqualified: false,
-    bans: null,
+    rank: 1,
+    in: false,
+    tiedAtCutoff: false,
     myMedal: null,
-    bannedByMe: false,
     createdAt: '2026-09-29T19:00:00+00:00',
-    ...overrides
-  };
-}
-
-export function poolSlot(overrides: Partial<PoolSlotView> = {}): PoolSlotView {
-  return {
-    id: 'ps-1',
-    position: 1,
-    label: 'Red creature',
-    colorRule: 'R',
-    typeRule: 'creature',
-    ruleText: 'Red creature',
-    entries: [],
-    myMedals: { gold: null, silver: null, bronze: null },
-    myEntryId: null,
     ...overrides
   };
 }
@@ -116,14 +99,14 @@ export function poolView(overrides: Partial<PoolView> = {}): PoolView {
     id: 'p-1',
     name: 'Knowledge Pool 2026',
     status: 'open',
-    maxEntriesPerUser: 2,
+    maxEntriesPerUser: 3,
     createdAt: '2026-09-29T18:00:00+00:00',
     closedAt: null,
+    submitters: 0,
+    cutoff: 0,
     myEntryCount: 0,
-    bansPerPlayer: 2,
-    banThreshold: 3,
-    myBansLeft: 2,
-    slots: [poolSlot()],
+    myMedals: { gold: null, silver: null, bronze: null },
+    entries: [],
     ...overrides
   };
 }

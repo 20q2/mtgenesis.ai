@@ -30,27 +30,30 @@ describe('PoolAdminComponent', () => {
 
   const el = () => fixture.nativeElement as HTMLElement;
 
-  it('prefills the default 16 slots', () => {
+  it('has no slot editor, and the cap defaults to 3', () => {
     setup(null);
-    expect(el().querySelectorAll('.slot-edit').length).toBe(16);
+    expect(el().querySelector('.slot-edit')).toBeNull();
+    expect(component.form.controls.maxEntries.value).toBe(3);
   });
 
-  it('opens a pool with the edited slots and the PIN', () => {
+  it('opens a pool with a name, the cap and the PIN', () => {
     setup(null);
     component.form.controls.name.setValue('Knowledge Pool 2026');
-    component.form.controls.maxEntries.setValue(3);
-    component.removeSlot(15);
-    component.addSlot();
     (el().querySelector('.create-pool-btn') as HTMLButtonElement).click();
     const req = http.expectOne(`${base}/admin/pools`);
     expect(req.request.headers.get('X-Admin-Pin')).toBe('4321');
-    expect(req.request.body.name).toBe('Knowledge Pool 2026');
-    expect(req.request.body.maxEntriesPerUser).toBe(3);
-    expect(req.request.body.slots.length).toBe(16);
-    expect(req.request.body.slots[15]).toEqual({ label: '', colorRule: 'any', typeRule: 'any' });
+    expect(req.request.body).toEqual({ name: 'Knowledge Pool 2026', maxEntriesPerUser: 3 });
     req.flush(poolView());
     fixture.detectChanges();
     expect(el().textContent).toContain('Close pool');
+  });
+
+  it('rejects a cap above 10 before calling the server', () => {
+    setup(null);
+    component.form.controls.name.setValue('KP');
+    component.form.controls.maxEntries.setValue(11);
+    component.createPool();
+    expect(component.error).toBe('Entries per player must be a whole number from 1 to 10.');
   });
 
   it('asks for the PIN before calling the server', () => {

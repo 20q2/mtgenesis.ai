@@ -9,8 +9,9 @@ import { Card, Rarity } from '../../models/card.model';
 import { MediaPipe } from '../../pipes/media.pipe';
 import { GenerationService } from '../../services/generation.service';
 import { MediaService } from '../../services/media.service';
+import { PoolService } from '../../services/pool.service';
 import { QueueService } from '../../services/queue.service';
-import { cardView, doneCard } from '../../testing/fixtures';
+import { cardView, doneCard, poolView } from '../../testing/fixtures';
 import { CreatePageComponent } from './create-page.component';
 
 describe('CreatePageComponent (jobs)', () => {
@@ -45,7 +46,8 @@ describe('CreatePageComponent (jobs)', () => {
       providers: [
         { provide: GenerationService, useValue: gen },
         { provide: QueueService, useValue: { online$, status$: of(null) } },
-        { provide: MediaService, useValue: media }
+        { provide: MediaService, useValue: media },
+        { provide: PoolService, useValue: { current: () => of(poolView()) } }
       ],
       schemas: [NO_ERRORS_SCHEMA]
     });
@@ -115,6 +117,19 @@ describe('CreatePageComponent (jobs)', () => {
     gen.share.and.returnValue(of(doneCard({ id: 'j-1', shared: false })));
     button().click();
     expect(gen.share).toHaveBeenCalledWith('j-1', false);
+  });
+
+  it('offers Submit to pool once the card is done, with the open pool', () => {
+    gen.submit.and.returnValue(of({ setId: null, cards: [cardView({ id: 'j-1' })] }));
+    component.generateCard(card);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-pool-submit')).toBeNull();
+
+    watch$.next(doneCard({ id: 'j-1' }));
+    watch$.complete();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-pool-submit')).not.toBeNull();
+    expect(component.pool?.id).toBe('p-1');
   });
 
   it('shows the failure reason when the job fails', () => {

@@ -91,6 +91,8 @@ export interface CardView {
   createdAt: string;
   /** True while the card is shared to the gallery's Community tab */
   shared: boolean;
+  /** The card's entry in the open Knowledge Pool, if it has one */
+  poolEntryId: string | null;
 }
 
 /** A card on the gallery's Community tab (GET /cards/shared), with its maker. */
@@ -140,10 +142,7 @@ export interface GenerationResponse { setId: string | null; cards: CardView[]; }
 
 // ===== Knowledge Pool (docs/superpowers/specs/2026-09-29-knowledge-pool-design.md) =====
 
-export type PoolColorRule = 'any' | 'W' | 'U' | 'B' | 'R' | 'G' | 'multicolor' | 'colorless';
-export type PoolTypeRule = 'any' | 'creature' | 'noncreature' | 'land';
-
-/** Per-slot ranking: gold 3 points, silver 2, bronze 1. */
+/** One of each per player per pool: gold 3 points, silver 2, bronze 1. */
 export type Medal = 'gold' | 'silver' | 'bronze';
 
 /** Advisory power estimate: rules-text value vs. what the card's cost and rarity usually buy. */
@@ -155,43 +154,26 @@ export interface PowerCheck {
 
 export interface PoolEntryView {
   id: string;
-  slotId: string;
   cardId: string;
+  card: CardView;
+  /** Who submitted the card (everything is visible, open or closed). */
+  username: string;
   /** The viewer submitted this card. */
   mine: boolean;
-  /** The submitter: hidden (null) on other players' cards until the pool closes. */
-  username: string | null;
-  card: CardView;
   power: PowerCheck | null;
   /** Medal counts from all voters, and the points they add up to. */
   gold: number;
   silver: number;
   bronze: number;
   points: number;
-  /** Best points (golds break ties) in the slot; while open, bans are not counted yet. */
-  leader: boolean;
-  tied: boolean;
-  /** Closed pools only: banned by banThreshold+ players, so it can't win. */
-  disqualified: boolean;
-  /** Closed pools only (null while open: bans are secret). */
-  bans: number | null;
+  /** 1-based; points, then golds, then silvers. Equal keys share a rank. */
+  rank: number;
+  /** Makes the pool: in the top `cutoff`, or level with the last card that is. */
+  in: boolean;
+  /** In, but level with other cards at the pool line. */
+  tiedAtCutoff: boolean;
   myMedal: Medal | null;
-  bannedByMe: boolean;
   createdAt: string;
-}
-
-export interface PoolSlotView {
-  id: string;
-  position: number;
-  label: string;
-  colorRule: PoolColorRule;
-  typeRule: PoolTypeRule;
-  /** e.g. "Blue creature", "Any card" */
-  ruleText: string;
-  entries: PoolEntryView[];
-  /** The entry id each of my medals in this slot is on. */
-  myMedals: Record<Medal, string | null>;
-  myEntryId: string | null;
 }
 
 export interface PoolSummary {
@@ -204,16 +186,13 @@ export interface PoolSummary {
 }
 
 export interface PoolView extends PoolSummary {
+  /** Players with at least one entry. */
+  submitters: number;
+  /** floor(submitters / 2): how many cards make the pool (ties at the line add more). */
+  cutoff: number;
   myEntryCount: number;
-  bansPerPlayer: number;
-  /** Bans that disqualify a card at close. */
-  banThreshold: number;
-  myBansLeft: number;
-  slots: PoolSlotView[];
-}
-
-export interface PoolSlotSpec {
-  label: string;
-  colorRule: PoolColorRule;
-  typeRule: PoolTypeRule;
+  /** The entry id each of my medals is on. */
+  myMedals: Record<Medal, string | null>;
+  /** Sorted by rank, then oldest first. */
+  entries: PoolEntryView[];
 }

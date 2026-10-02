@@ -34,33 +34,11 @@
   color: var(--accent-text);
 }
 
-.rules {
-  list-style: none;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 0.4rem 1.25rem;
-  margin: 0.75rem 0 0;
-  padding: 0;
-
-  li {
-    display: flex;
-    gap: 0.5rem;
-    align-items: flex-start;
-    font-size: 0.92rem;
-    color: var(--text-muted);
-    line-height: 1.35;
-  }
-
-  .material-icons {
-    flex: none;
-    font-size: 1.1rem;
-    color: var(--accent-text);
-    margin-top: 0.05rem;
-  }
-
-  strong {
-    color: var(--text);
-  }
+.rules-line {
+  margin: 0.6rem 0 0.25rem;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+  line-height: 1.4;
 
   .medal-word.gold { color: var(--medal-gold); }
   .medal-word.silver { color: var(--medal-silver); }
@@ -75,6 +53,9 @@
 }
 
 .stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   padding: 0.2rem 0.65rem;
   border-radius: var(--r-pill);
   background: var(--surface-tint);
@@ -87,156 +68,52 @@
   }
 }
 
-/* ===== Slot overview strip ===== */
-.overview {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-bottom: 1rem;
-}
-
-.overview-chip {
+.my-medal {
   display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-height: 32px;
-  padding: 0.15rem 0.55rem 0.15rem 0.2rem;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--line-strong);
-  background: var(--surface-raised);
-  color: var(--text);
-  font-size: 0.84rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color var(--dur-fast) ease, background-color var(--dur-fast) ease;
+  opacity: 0.35;
 
-  &:hover {
-    border-color: var(--line-gold);
-    background: #fffaf0;
+  .material-icons {
+    font-size: 1.15rem;
   }
 
-  .chip-num {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 24px;
-    height: 24px;
-    border-radius: var(--r-pill);
-    background: var(--surface-tint);
-    font-size: 0.75rem;
-    color: var(--text-muted);
-  }
+  &.gold .material-icons { color: var(--medal-gold); }
+  &.silver .material-icons { color: var(--medal-silver); }
+  &.bronze .material-icons { color: var(--medal-bronze); }
 
-  .ms {
-    font-size: 0.8rem;
-  }
-
-  .chip-count {
-    color: var(--text-faint);
-    font-weight: 700;
-  }
-
-  .chip-voted {
-    font-size: 0.95rem;
-    color: var(--you);
-  }
-
-  &.state-empty {
-    border-style: dashed;
-    color: var(--text-muted);
-  }
-
-  &.state-leader .chip-num {
-    background: linear-gradient(145deg, var(--gold-bright), #b8912a);
-    color: var(--text-on-gold);
-  }
-
-  &.state-tied .chip-num {
-    background: #ecebf2;
-    color: var(--text);
-    outline: 1px dashed var(--line-strong);
-  }
-
-  @media (max-width: 700px) {
-    .chip-label {
-      display: none;
-    }
+  &.given {
+    opacity: 1;
   }
 }
 
-/* ===== Slot rows ===== */
-.slot-row {
-  scroll-margin-top: calc(var(--topbar-h) + 1rem);
-}
-
-.slot-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-
-  .slot-num {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    border-radius: var(--r-pill);
-    background: var(--chrome);
-    color: var(--chrome-text);
-    font-family: var(--font-display);
-    font-size: 0.95rem;
-  }
-
-  .slot-title {
-    flex: 1;
-    min-width: 0;
-
-    .section-title {
-      margin-bottom: 0.05rem;
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-    }
-
-    .ms {
-      font-size: 0.85rem;
-    }
-  }
-
-  .slot-vote-state {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 0.85rem;
-    white-space: nowrap;
-
-    .material-icons {
-      font-size: 1rem;
-      color: var(--you);
-    }
-  }
-}
-
+/* ===== Ranked entries ===== */
 .entries {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 1rem;
 
-  /* Phones: entries scroll horizontally. */
-  @media (max-width: 700px) {
-    display: flex;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    -webkit-overflow-scrolling: touch;
-    gap: 0.75rem;
-    padding: 0.25rem 0.25rem 0.75rem;
+  @media (max-width: 520px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+}
 
-    .entry {
-      flex: 0 0 72%;
-      scroll-snap-align: center;
-    }
+/* Spans the grid after the last card that makes the pool. */
+.pool-line {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--accent-text);
+  font-family: var(--font-caps);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+
+  &::before,
+  &::after {
+    content: '';
+    flex: 1;
+    border-top: 2px dashed var(--line-gold);
   }
 }
 
@@ -251,24 +128,9 @@
   background: var(--surface-tint);
   transition: box-shadow 0.3s ease, border-color 0.3s ease;
 
-  &.leader {
+  &.in {
     border-color: var(--gold);
-    box-shadow: 0 0 16px 3px rgba(212, 175, 55, 0.45);
-  }
-
-  &.tied {
-    border-color: rgba(150, 150, 170, 0.8);
-    border-style: dashed;
-  }
-
-  &.disqualified {
-    border-color: rgba(180, 35, 24, 0.45);
-    border-style: dashed;
-
-    app-card-slot {
-      opacity: 0.55;
-      filter: grayscale(0.6);
-    }
+    box-shadow: 0 0 16px 3px rgba(212, 175, 55, 0.35);
   }
 }
 
@@ -293,12 +155,12 @@
   }
 }
 
-.flag-leader {
+.flag-in {
   background: linear-gradient(145deg, var(--gold-bright), #b8912a);
   color: #1a1a2e;
 }
 
-.flag-tied {
+.flag-rank {
   background: var(--surface-raised);
   color: var(--text-muted);
   border: 1px solid var(--line-strong);
@@ -308,17 +170,6 @@
   &.gold { background: var(--medal-gold-bg); color: #7a5c0c; border: 1px solid var(--medal-gold); }
   &.silver { background: var(--medal-silver-bg); color: #4a525c; border: 1px solid var(--medal-silver); }
   &.bronze { background: var(--medal-bronze-bg); color: #7a4418; border: 1px solid var(--medal-bronze); }
-}
-
-.flag-banned {
-  background: var(--danger);
-  color: #fff;
-}
-
-.flag-my-ban {
-  background: var(--danger-bg);
-  color: var(--danger);
-  border: 1px solid rgba(180, 35, 24, 0.35);
 }
 
 .flag-mine {
@@ -400,20 +251,6 @@
   &.bronze { background: var(--medal-bronze-bg); color: #7a4418; box-shadow: inset 0 0 0 1px var(--medal-bronze); }
 }
 
-.ban-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.1rem;
-  color: var(--danger);
-  font-weight: 700;
-  font-size: 0.8rem;
-
-  .material-icons {
-    font-size: 0.95rem;
-  }
-}
-
-/* Medal buttons + ban */
 .actions {
   display: flex;
   align-items: stretch;
@@ -432,8 +269,7 @@
   gap: 0.25rem;
 }
 
-.medal-button,
-.ban-button {
+.medal-button {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
@@ -484,125 +320,8 @@
   &.on.bronze { background: var(--medal-bronze); border-color: var(--medal-bronze); color: #fff; }
 }
 
-.ban-button {
-  flex: 0 0 52px;
-
-  &:hover:not(:disabled) {
-    border-color: rgba(180, 35, 24, 0.5);
-    color: var(--danger);
-  }
-
-  &.on {
-    background: var(--danger);
-    border-color: var(--danger);
-    color: #fff;
-  }
-}
-
-.submit-tile {
-  align-items: center;
-  justify-content: center;
-  min-height: 220px;
-  border: 2px dashed var(--line-strong);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  text-align: center;
-  cursor: pointer;
-  transition: border-color var(--dur-fast) ease, background-color var(--dur-fast) ease;
-
-  > .material-icons {
-    font-size: 2rem;
-    color: var(--accent-text);
-  }
-
-  .submit-title {
-    font-family: var(--font-display);
-    font-size: 1.05rem;
-  }
-
-  &:hover:not(:disabled),
-  &.active {
-    border-color: var(--accent);
-    background: #fffaf0;
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-
-    > .material-icons {
-      color: var(--text-faint);
-    }
-  }
-}
-
 .no-entries {
   grid-column: 1 / -1;
-}
-
-/* ===== Card picker ===== */
-.picker {
-  margin-top: 1rem;
-  padding: 0.85rem;
-  border-radius: var(--r-md);
-  background: var(--surface-sunken);
-  border: 1px solid var(--line);
-}
-
-.picker-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.6rem;
-}
-
-.picker-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 0.75rem;
-}
-
-.picker-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  padding: 0.35rem;
-  border-radius: var(--r-md);
-  border: 2px solid transparent;
-  background: var(--surface-raised);
-  font: inherit;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-  transition: border-color var(--dur-fast) ease, transform var(--dur-fast) var(--ease-out);
-
-  img {
-    width: 100%;
-    aspect-ratio: 63 / 88;
-    object-fit: cover;
-    border-radius: 6px;
-    background: var(--surface-tint);
-  }
-
-  .picker-name {
-    font-size: 0.82rem;
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &:hover:not(:disabled) {
-    border-color: var(--accent);
-    transform: translateY(-2px);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: wait;
-  }
 }
 
 /* ===== Results ===== */
@@ -618,12 +337,6 @@
   gap: 0.4rem;
   margin: 0;
 
-  &.tied {
-    padding: 0.4rem;
-    border-radius: var(--r-md);
-    border: 2px dashed var(--line-strong);
-  }
-
   figcaption {
     display: flex;
     flex-direction: column;
@@ -631,42 +344,8 @@
     gap: 0.25rem;
   }
 
-  .result-slot {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-weight: 700;
-  }
-
   .muted {
     font-size: 0.85rem;
-  }
-}
-
-.banned-title {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin-top: 1.25rem;
-  color: var(--danger);
-}
-
-.banned-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-
-  li {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.25rem 0.6rem;
-    padding: 0.35rem 0;
-    border-bottom: 1px solid var(--line);
-
-    &:last-child {
-      border-bottom: none;
-    }
   }
 }
 
@@ -691,9 +370,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .picker-card:hover:not(:disabled),
-  .medal-button:active:not(:disabled),
-  .ban-button:active:not(:disabled) {
+  .medal-button:active:not(:disabled) {
     transform: none;
   }
 }

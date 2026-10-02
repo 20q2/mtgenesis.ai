@@ -27,6 +27,7 @@ import { CardSlotComponent } from './components/card-slot/card-slot.component';
 import { SetRowComponent } from './components/set-row/set-row.component';
 import { WinnersBannerComponent } from './components/winners-banner/winners-banner.component';
 import { PoolAdminComponent } from './components/pool-admin/pool-admin.component';
+import { PoolSubmitComponent } from './components/pool-submit/pool-submit.component';
 
 @NgModule({
   declarations: [
@@ -46,6 +47,7 @@ import { PoolAdminComponent } from './components/pool-admin/pool-admin.component
     SetRowComponent,
     WinnersBannerComponent,
     PoolAdminComponent,
+    PoolSubmitComponent,
     MediaPipe,
     TiltDirective
   ],
