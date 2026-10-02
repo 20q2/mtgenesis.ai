@@ -1,6 +1,6 @@
 """
 AI Night HTTP API (users, generations, sets, events, votes, queue status, media)
-and the Knowledge Pool (pools, entries, pool votes).
+and the Knowledge Pool (pools, entries, medals).
 
 Specs: docs/superpowers/specs/2026-09-28-ai-night-design.md §4 and
 docs/superpowers/specs/2026-09-29-knowledge-pool-design.md §4.
@@ -30,9 +30,9 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request, send_file
 
 from generation_queue import GenerationQueue
-from storage import (MEDAL_POINTS, PENDING_STATUSES, POOL_BAN_THRESHOLD, POOL_BANS_PER_PLAYER,
-                     Storage, StorageError, clean_commander_name, commander_slot_params,
-                     leader_flags, pool_standings, slot_rule_text)
+from storage import (MEDAL_POINTS, PENDING_STATUSES, POOL_DEFAULT_ENTRIES, Storage,
+                     StorageError, clean_commander_name, commander_slot_params, leader_flags,
+                     pool_cutoff, pool_ranking)
 
 try:  # the power heuristic is advisory: pools still work without it
     import power_level
@@ -148,7 +148,10 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
                      f"finish (max {MAX_PENDING_PER_USER} at a time)")
 
     # ----- views -----
-    def card_view(row: dict) -> dict:
+    def card_view(row: dict, pool_entry_ids: dict[str, str] | None = None) -> dict:
+        """pool_entry_ids: storage.open_pool_entry_ids(), fetched once by list routes."""
+        if pool_entry_ids is None:
+            pool_entry_ids = storage.open_pool_entry_ids()
         position, eta = None, None
         if row["status"] in PENDING_STATUSES and not row["art_ready"]:
             position, eta = gen_queue.position(row["id"])
@@ -170,9 +173,11 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
             "artImageUrl": f"{API_PREFIX}/media/art/{cid}.png" if row["art_path"] else None,
             "createdAt": row["created_at"],
             "shared": row.get("shared_at") is not None,
+            "poolEntryId": pool_entry_ids.get(cid),
         }
 
     def set_view(row: dict, voter_id: str | None) -> dict:
+        pool_entry_ids = storage.open_pool_entry_ids()
         cards = storage.set_cards(row["id"])
         flags = leader_flags(storage.vote_tally(row["id"]), [c["id"] for c in cards])
         owner = storage.get_user(row["user_id"])
@@ -185,7 +190,7 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
             "prompt": row["prompt"],
             "status": row["status"],
             "lockedAt": row["locked_at"],
-            "cards": [{**card_view(c), **flags[c["id"]]} for c in cards],
+            "cards": [{**card_view(c, pool_entry_ids), **flags[c["id"]]} for c in cards],
             "myVoteCardId": storage.user_vote(voter_id, row["id"]) if voter_id else None,
         }
 
@@ -208,14 +213,11 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
                 "createdAt": row["created_at"], "closedAt": row["closed_at"]}
 
     def pool_view(row: dict, viewer_id: str | None) -> dict:
-        """The whole pool as `viewer_id` sees it. Submitters and ban counts stay hidden until
-        close (the viewer only sees their own bans), so "leader" counts medals only while open."""
-        closed = row["status"] == "closed"
+        """The whole pool as `viewer_id` sees it, entries in rank order (spec §4)."""
         entries = storage.pool_entries(row["id"])
-        medals = storage.pool_medal_counts(row["id"])
-        bans = storage.pool_ban_counts(row["id"])
+        ranking = pool_ranking(entries, storage.pool_medal_counts(row["id"]))
         my_medals = storage.my_pool_medals(viewer_id, row["id"]) if viewer_id else {}
-        my_bans = storage.my_pool_bans(viewer_id, row["id"]) if viewer_id else set()
+        pool_entry_ids = storage.open_pool_entry_ids()
         usernames: dict[str, str] = {}
 
         def username(user_id: str) -> str:
@@ -224,52 +226,30 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
                 usernames[user_id] = user["username"] if user else ""
             return usernames[user_id]
 
-        slot_views = []
-        for slot in storage.pool_slots(row["id"]):
-            slot_entries = [e for e in entries if e["slot_id"] == slot["id"]]
-            standings = pool_standings([e["id"] for e in slot_entries], medals, bans,
-                                       apply_bans=closed)
-            entry_views = []
-            for e in slot_entries:
-                card = storage.get_card(e["card_id"])
-                if card is None:
-                    continue
-                view = card_view(card)
-                mine = e["user_id"] == viewer_id
-                entry_views.append({
-                    "id": e["id"],
-                    "slotId": slot["id"],
-                    "cardId": e["card_id"],
-                    "mine": mine,
-                    "username": username(e["user_id"]) if closed or mine else None,
-                    "card": view,
-                    "power": power_check(view["card"]),
-                    "createdAt": e["created_at"],
-                    "myMedal": my_medals.get(e["id"]),
-                    "bannedByMe": e["id"] in my_bans,
-                    "bans": bans.get(e["id"], 0) if closed else None,
-                    **standings[e["id"]],
-                })
-            slot_views.append({
-                "id": slot["id"],
-                "position": slot["position"],
-                "label": slot["label"],
-                "colorRule": slot["color_rule"],
-                "typeRule": slot["type_rule"],
-                "ruleText": slot_rule_text(slot["color_rule"], slot["type_rule"]),
-                "entries": entry_views,
-                "myMedals": {m: next((e["id"] for e in slot_entries
-                                      if my_medals.get(e["id"]) == m), None)
-                             for m in MEDAL_POINTS},
-                "myEntryId": next(
-                    (e["id"] for e in slot_entries if e["user_id"] == viewer_id), None),
+        entry_views = []
+        for e in sorted(entries, key=lambda e: ranking[e["id"]]["rank"]):  # stable: oldest first
+            card = storage.get_card(e["card_id"])
+            if card is None:
+                continue
+            view = card_view(card, pool_entry_ids)
+            entry_views.append({
+                "id": e["id"],
+                "cardId": e["card_id"],
+                "card": view,
+                "username": username(e["user_id"]),
+                "mine": e["user_id"] == viewer_id,
+                "power": power_check(view["card"]),
+                **ranking[e["id"]],
+                "myMedal": my_medals.get(e["id"]),
+                "createdAt": e["created_at"],
             })
         return {**pool_summary(row),
+                "submitters": len({e["user_id"] for e in entries}),
+                "cutoff": pool_cutoff(entries),
                 "myEntryCount": sum(1 for e in entries if e["user_id"] == viewer_id),
-                "bansPerPlayer": POOL_BANS_PER_PLAYER,
-                "banThreshold": POOL_BAN_THRESHOLD,
-                "myBansLeft": POOL_BANS_PER_PLAYER - len(my_bans),
-                "slots": slot_views}
+                "myMedals": {m: next((eid for eid, given in my_medals.items() if given == m), None)
+                             for m in MEDAL_POINTS},
+                "entries": entry_views}
 
     def pool_or_404(pool_id: str) -> dict:
         row = storage.get_pool(pool_id)
@@ -296,7 +276,8 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     @bp.get("/me/cards")
     def my_cards():
         user = require_user()
-        return jsonify([card_view(c) for c in storage.list_user_cards(user["id"])])
+        pool_entry_ids = storage.open_pool_entry_ids()
+        return jsonify([card_view(c, pool_entry_ids) for c in storage.list_user_cards(user["id"])])
 
     @bp.get("/me/sets/current")
     def my_current_set():
@@ -369,7 +350,8 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     def shared_cards():
         """The gallery's Community tab: every shared card, with its maker."""
         optional_user()
-        return jsonify([{**card_view(c), "username": c["username"]}
+        pool_entry_ids = storage.open_pool_entry_ids()
+        return jsonify([{**card_view(c, pool_entry_ids), "username": c["username"]}
                         for c in storage.list_shared_cards()])
 
     @bp.get("/cards/<card_id>")
@@ -441,11 +423,10 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     @bp.post("/pools/entries")
     def submit_pool_entry():
         user = require_user()
-        data = required_body()
-        slot_id, card_id = data.get("slotId"), data.get("cardId")
-        if not isinstance(slot_id, str) or not isinstance(card_id, str):
-            raise StorageError(400, "slotId and cardId are required")
-        entry = storage.submit_pool_entry(user["id"], slot_id, card_id)
+        card_id = required_body().get("cardId")
+        if not isinstance(card_id, str):
+            raise StorageError(400, "cardId is required")
+        entry = storage.submit_pool_entry(user["id"], card_id)
         return jsonify(pool_view(pool_or_404(entry["pool_id"]), user["id"]))
 
     @bp.post("/pools/entries/<entry_id>/withdraw")
@@ -474,18 +455,6 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     def clear_pool_medal():
         user = require_user()
         pool_id = storage.clear_pool_medal(user["id"], entry_id_from_body())
-        return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
-
-    @bp.post("/pools/bans")
-    def ban_pool_entry():
-        user = require_user()
-        pool_id = storage.ban_pool_entry(user["id"], entry_id_from_body())
-        return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
-
-    @bp.post("/pools/bans/clear")
-    def unban_pool_entry():
-        user = require_user()
-        pool_id = storage.unban_pool_entry(user["id"], entry_id_from_body())
         return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
 
     @bp.get("/queue_status")
@@ -525,8 +494,8 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     def admin_create_pool():
         require_admin()
         data = required_body()
-        row = storage.create_pool(data.get("name"), data.get("maxEntriesPerUser"),
-                                  data.get("slots"))
+        row = storage.create_pool(data.get("name"),
+                                  data.get("maxEntriesPerUser", POOL_DEFAULT_ENTRIES))
         return jsonify(pool_view(row, None))
 
     @bp.post("/admin/pools/<pool_id>/close")

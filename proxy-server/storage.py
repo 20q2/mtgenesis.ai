@@ -99,65 +99,36 @@ CREATE TABLE IF NOT EXISTS pools (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS pools_one_open ON pools(status) WHERE status = 'open';
 
-CREATE TABLE IF NOT EXISTS pool_slots (
-    id          TEXT PRIMARY KEY,
-    pool_id     TEXT NOT NULL,
-    position    INTEGER NOT NULL,
-    label       TEXT NOT NULL,
-    color_rule  TEXT NOT NULL,
-    type_rule   TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS pool_slots_pool ON pool_slots(pool_id, position);
-
 CREATE TABLE IF NOT EXISTS pool_entries (
     id          TEXT PRIMARY KEY,
     pool_id     TEXT NOT NULL,
-    slot_id     TEXT NOT NULL,
     card_id     TEXT NOT NULL,
     user_id     TEXT NOT NULL,
     created_at  TEXT NOT NULL,
-    UNIQUE (pool_id, card_id),
-    UNIQUE (slot_id, user_id)
+    UNIQUE (pool_id, card_id)
 );
-CREATE INDEX IF NOT EXISTS pool_entries_slot ON pool_entries(slot_id);
+CREATE INDEX IF NOT EXISTS pool_entries_user ON pool_entries(pool_id, user_id);
 
--- Each voter gives at most one gold, silver and bronze per slot, and one medal per card.
+-- Each voter gives at most one gold, silver and bronze per pool, and one medal per card.
 CREATE TABLE IF NOT EXISTS pool_medals (
     voter_id    TEXT NOT NULL,
     pool_id     TEXT NOT NULL,
-    slot_id     TEXT NOT NULL,
     entry_id    TEXT NOT NULL,
     medal       TEXT NOT NULL CHECK (medal IN ('gold', 'silver', 'bronze')),
     created_at  TEXT NOT NULL,
-    UNIQUE (voter_id, slot_id, medal),
+    UNIQUE (voter_id, pool_id, medal),
     UNIQUE (voter_id, entry_id)
 );
 CREATE INDEX IF NOT EXISTS pool_medals_pool ON pool_medals(pool_id);
-
--- Hidden until the pool closes; POOL_BAN_THRESHOLD bans disqualify a card.
-CREATE TABLE IF NOT EXISTS pool_bans (
-    voter_id    TEXT NOT NULL,
-    pool_id     TEXT NOT NULL,
-    entry_id    TEXT NOT NULL,
-    created_at  TEXT NOT NULL,
-    UNIQUE (voter_id, entry_id)
-);
-CREATE INDEX IF NOT EXISTS pool_bans_pool ON pool_bans(pool_id);
 """
 
 POOL_NAME_MAX = 80
-POOL_SLOT_LABEL_MAX = 40
-POOL_MAX_SLOTS = 40
-POOL_MAX_ENTRIES_CAP = 40
+POOL_ENTRY_CAP_MAX = 10
+POOL_DEFAULT_ENTRIES = 3
 MEDAL_POINTS = {"gold": 3, "silver": 2, "bronze": 1}
-POOL_BANS_PER_PLAYER = 2
-POOL_BAN_THRESHOLD = 3
 MONO_COLORS = ("W", "U", "B", "R", "G")
-COLOR_RULES = ("any", *MONO_COLORS, "multicolor", "colorless")
-TYPE_RULES = ("any", "creature", "noncreature", "land")
-_COLOR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green",
-                "multicolor": "Multicolor", "colorless": "Colorless"}
-_TYPE_NAMES = {"creature": "creature", "noncreature": "noncreature", "land": "land"}
+# The slot/ban pool's tables (replaced 2026-10-01); dropped on startup only while empty.
+_OLD_POOL_TABLES = ("pools", "pool_slots", "pool_entries", "pool_medals", "pool_bans")
 
 
 def card_colors(card: dict) -> set[str]:
@@ -169,62 +140,9 @@ def card_colors(card: dict) -> set[str]:
     return colors
 
 
-def card_fits_slot(card: dict, color_rule: str, type_rule: str) -> bool:
-    """Whether a card meets a pool slot's color and type rules."""
-    card = card or {}
-    colors = card_colors(card)
-    if color_rule in MONO_COLORS:
-        color_ok = colors == {color_rule}
-    elif color_rule == "multicolor":
-        color_ok = len(colors) >= 2
-    elif color_rule == "colorless":
-        color_ok = not colors
-    else:
-        color_ok = True
-    card_type = f"{card.get('supertype') or ''} {card.get('type') or ''}".lower()
-    is_creature, is_land = "creature" in card_type, "land" in card_type
-    type_ok = {"creature": is_creature, "land": is_land,
-               "noncreature": not is_creature and not is_land}.get(type_rule, True)
-    return color_ok and type_ok
-
-
-def slot_rule_text(color_rule: str, type_rule: str) -> str:
-    """Human description of a slot's rules, e.g. "Blue creature", "Any card"."""
-    color = _COLOR_NAMES.get(color_rule)
-    kind = _TYPE_NAMES.get(type_rule)
-    if color and kind:
-        return f"{color} {kind}"
-    if color:
-        return f"{color} card"
-    if kind:
-        return f"Any {kind}"
-    return "Any card"
-
-
-def clean_pool_slots(slots) -> list[dict]:
-    """Validated [{label, color_rule, type_rule}] from the API's [{label, colorRule, typeRule}]."""
-    if not isinstance(slots, list) or not slots:
-        raise StorageError(400, "A pool needs at least one slot")
-    if len(slots) > POOL_MAX_SLOTS:
-        raise StorageError(400, f"A pool can have at most {POOL_MAX_SLOTS} slots")
-    cleaned = []
-    for i, slot in enumerate(slots, start=1):
-        if not isinstance(slot, dict):
-            raise StorageError(400, f"Slot {i} must be an object")
-        color_rule = slot.get("colorRule", "any")
-        type_rule = slot.get("typeRule", "any")
-        if color_rule not in COLOR_RULES:
-            raise StorageError(400, f"Slot {i}: color rule must be one of {', '.join(COLOR_RULES)}")
-        if type_rule not in TYPE_RULES:
-            raise StorageError(400, f"Slot {i}: type rule must be one of {', '.join(TYPE_RULES)}")
-        label = slot.get("label")
-        label = label.strip() if isinstance(label, str) else ""
-        if not label:
-            label = slot_rule_text(color_rule, type_rule)
-        if len(label) > POOL_SLOT_LABEL_MAX:
-            raise StorageError(400, f"Slot {i}: label must be at most {POOL_SLOT_LABEL_MAX} characters")
-        cleaned.append({"label": label, "color_rule": color_rule, "type_rule": type_rule})
-    return cleaned
+def pool_card_eligible(card: dict) -> bool:
+    """Only colorless or mono-colored cards can enter the Knowledge Pool."""
+    return len(card_colors(card)) <= 1
 
 
 _clock_lock = threading.Lock()
@@ -305,8 +223,24 @@ class Storage:
         self._local = threading.local()
         conn = self._conn()
         conn.execute("PRAGMA journal_mode=WAL")
+        self._drop_old_pool_tables(conn)
         conn.executescript(_SCHEMA)
         self._migrate(conn)
+
+    @staticmethod
+    def _drop_old_pool_tables(conn: sqlite3.Connection) -> None:
+        """The slot/ban Knowledge Pool's tables give way to the voted list's, but only while
+        they are empty: a pool with data is never dropped silently."""
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if "pool_slots" not in tables:
+            return
+        for table in _OLD_POOL_TABLES:
+            if table in tables and conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():
+                raise RuntimeError(
+                    f"Old Knowledge Pool tables (pool_slots, pool_bans) hold data ({table} has "
+                    "rows); migrate them by hand")
+        for table in _OLD_POOL_TABLES:
+            conn.execute(f"DROP TABLE IF EXISTS {table}")
 
     @staticmethod
     def _migrate(conn: sqlite3.Connection) -> None:
@@ -697,24 +631,21 @@ class Storage:
 
     # ----- knowledge pool -----
     # Pool row keys: id, name, status, max_entries_per_user, created_at, closed_at
-    # Slot row keys: id, pool_id, position, label, color_rule, type_rule
-    # Entry row keys: id, pool_id, slot_id, card_id, user_id, created_at
+    # Entry row keys: id, pool_id, card_id, user_id, created_at
     _POOL_COLS = "id, name, status, max_entries_per_user, created_at, closed_at"
-    _SLOT_COLS = "id, pool_id, position, label, color_rule, type_rule"
-    _ENTRY_COLS = "id, pool_id, slot_id, card_id, user_id, created_at"
+    _ENTRY_COLS = "id, pool_id, card_id, user_id, created_at"
 
-    def create_pool(self, name: str, max_entries_per_user: int, slots: list) -> dict:
-        """New open pool with its slots (see clean_pool_slots). 409 if a pool is already open."""
+    def create_pool(self, name: str, max_entries_per_user: int) -> dict:
+        """New open pool. 400 bad name or cap, 409 if a pool is already open."""
         if not isinstance(name, str) or not name.strip():
             raise StorageError(400, "Pool name is required")
         name = name.strip()
         if len(name) > POOL_NAME_MAX:
             raise StorageError(400, f"Pool name must be at most {POOL_NAME_MAX} characters")
         if (type(max_entries_per_user) is not int
-                or not 1 <= max_entries_per_user <= POOL_MAX_ENTRIES_CAP):
+                or not 1 <= max_entries_per_user <= POOL_ENTRY_CAP_MAX):
             raise StorageError(
-                400, f"Submissions per player must be a whole number from 1 to {POOL_MAX_ENTRIES_CAP}")
-        cleaned = clean_pool_slots(slots)
+                400, f"Entries per player must be a whole number from 1 to {POOL_ENTRY_CAP_MAX}")
         pool_id = _new_id()
         with self._tx() as conn:
             if conn.execute("SELECT 1 FROM pools WHERE status = 'open'").fetchone():
@@ -722,12 +653,6 @@ class Storage:
             conn.execute(
                 "INSERT INTO pools (id, name, status, max_entries_per_user, created_at) "
                 "VALUES (?, ?, 'open', ?, ?)", (pool_id, name, max_entries_per_user, _now()))
-            for position, slot in enumerate(cleaned, start=1):
-                conn.execute(
-                    "INSERT INTO pool_slots (id, pool_id, position, label, color_rule, type_rule) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (_new_id(), pool_id, position, slot["label"], slot["color_rule"],
-                     slot["type_rule"]))
         return self.get_pool(pool_id)
 
     def close_pool(self, pool_id: str) -> dict:
@@ -753,15 +678,16 @@ class Storage:
         return self._all(
             f"SELECT {self._POOL_COLS} FROM pools ORDER BY created_at DESC, rowid DESC")
 
-    def pool_slots(self, pool_id: str) -> list[dict]:
-        """Slots in position order."""
-        return self._all(f"SELECT {self._SLOT_COLS} FROM pool_slots WHERE pool_id = ? "
-                         "ORDER BY position", (pool_id,))
-
     def pool_entries(self, pool_id: str) -> list[dict]:
         """All entries of the pool, oldest first."""
         return self._all(f"SELECT {self._ENTRY_COLS} FROM pool_entries WHERE pool_id = ? "
                          "ORDER BY created_at, rowid", (pool_id,))
+
+    def open_pool_entry_ids(self) -> dict[str, str]:
+        """card id -> entry id for the open pool ({} when no pool is open)."""
+        rows = self._all("SELECT e.card_id, e.id FROM pool_entries e JOIN pools p "
+                         "ON p.id = e.pool_id WHERE p.status = 'open'")
+        return {r["card_id"]: r["id"] for r in rows}
 
     def pool_medal_counts(self, pool_id: str) -> dict[str, dict[str, int]]:
         """entry_id -> {"gold": n, "silver": n, "bronze": n}, only entries with medals."""
@@ -772,13 +698,6 @@ class Storage:
             counts.setdefault(r["entry_id"], dict.fromkeys(MEDAL_POINTS, 0))[r["medal"]] = r["n"]
         return counts
 
-    def pool_ban_counts(self, pool_id: str) -> dict[str, int]:
-        """entry_id -> number of bans, only banned entries."""
-        rows = self._conn().execute(
-            "SELECT entry_id, COUNT(*) AS n FROM pool_bans WHERE pool_id = ? GROUP BY entry_id",
-            (pool_id,)).fetchall()
-        return {r["entry_id"]: r["n"] for r in rows}
-
     def my_pool_medals(self, voter_id: str, pool_id: str) -> dict[str, str]:
         """entry_id -> medal for this voter's medals in the pool."""
         rows = self._conn().execute(
@@ -786,33 +705,16 @@ class Storage:
             (pool_id, voter_id)).fetchall()
         return {r["entry_id"]: r["medal"] for r in rows}
 
-    def my_pool_bans(self, voter_id: str, pool_id: str) -> set[str]:
-        """Entry ids this voter banned in the pool."""
-        rows = self._conn().execute(
-            "SELECT entry_id FROM pool_bans WHERE pool_id = ? AND voter_id = ?",
-            (pool_id, voter_id)).fetchall()
-        return {r["entry_id"] for r in rows}
-
-    @staticmethod
-    def _open_pool_slot(conn: sqlite3.Connection, slot_id: str) -> sqlite3.Row:
-        """The slot joined with its pool's status; 404 unknown slot, 409 pool closed."""
-        slot = conn.execute(
-            "SELECT s.id, s.pool_id, s.color_rule, s.type_rule, s.label, p.status, "
-            "p.max_entries_per_user FROM pool_slots s JOIN pools p ON p.id = s.pool_id "
-            "WHERE s.id = ?", (slot_id,)).fetchone()
-        if slot is None:
-            raise StorageError(404, "Slot not found")
-        if slot["status"] != "open":
-            raise StorageError(409, "This Knowledge Pool is closed")
-        return slot
-
-    def submit_pool_entry(self, user_id: str, slot_id: str, card_id: str) -> dict:
-        """Put one of the user's finished cards into an open pool's slot.
-        403 not the owner, 400 card unfinished or not fitting the slot, 409 pool closed,
-        card already in the pool, the user already has a card in the slot, or the cap reached."""
+    def submit_pool_entry(self, user_id: str, card_id: str) -> dict:
+        """Enter one of the user's finished, colorless or mono-colored cards in the open pool.
+        404 no open pool or unknown card, 403 not the owner, 400 unfinished or multicolor,
+        409 card already entered or the cap reached."""
         entry_id = _new_id()
         with self._tx() as conn:
-            slot = self._open_pool_slot(conn, slot_id)
+            pool = conn.execute("SELECT id, max_entries_per_user FROM pools "
+                                "WHERE status = 'open'").fetchone()
+            if pool is None:
+                raise StorageError(404, "No Knowledge Pool is open")
             card = self._decode_card(conn.execute(
                 f"SELECT {self._CARD_COLS} FROM cards WHERE id = ?", (card_id,)).fetchone())
             if card is None:
@@ -822,104 +724,73 @@ class Storage:
             if card["status"] != "done":
                 raise StorageError(400, "Only finished cards can be submitted")
             data = card["card"] if card["card"] is not None else card["card_params"]
-            if not card_fits_slot(data, slot["color_rule"], slot["type_rule"]):
-                raise StorageError(
-                    400, f"That card doesn't fit this slot (needs: "
-                         f"{slot_rule_text(slot['color_rule'], slot['type_rule'])})")
+            if not pool_card_eligible(data):
+                raise StorageError(400, "Only colorless or mono-colored cards can enter the pool")
             if conn.execute("SELECT 1 FROM pool_entries WHERE pool_id = ? AND card_id = ?",
-                            (slot["pool_id"], card_id)).fetchone():
+                            (pool["id"], card_id)).fetchone():
                 raise StorageError(409, "That card is already in the pool")
-            if conn.execute("SELECT 1 FROM pool_entries WHERE slot_id = ? AND user_id = ?",
-                            (slot_id, user_id)).fetchone():
-                raise StorageError(
-                    409, "You already have a card in this slot - withdraw it first")
             count = conn.execute(
                 "SELECT COUNT(*) FROM pool_entries WHERE pool_id = ? AND user_id = ?",
-                (slot["pool_id"], user_id)).fetchone()[0]
-            if count >= slot["max_entries_per_user"]:
+                (pool["id"], user_id)).fetchone()[0]
+            if count >= pool["max_entries_per_user"]:
                 raise StorageError(
-                    409, f"You've used all {slot['max_entries_per_user']} of your submissions - "
+                    409, f"You've used all {pool['max_entries_per_user']} of your submissions - "
                          "withdraw one to submit another")
             conn.execute(
-                "INSERT INTO pool_entries (id, pool_id, slot_id, card_id, user_id, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (entry_id, slot["pool_id"], slot_id, card_id, user_id, _now()))
+                "INSERT INTO pool_entries (id, pool_id, card_id, user_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?)", (entry_id, pool["id"], card_id, user_id, _now()))
         return self._one(f"SELECT {self._ENTRY_COLS} FROM pool_entries WHERE id = ?", (entry_id,))
 
+    @staticmethod
+    def _open_entry(conn: sqlite3.Connection, entry_id: str) -> sqlite3.Row:
+        """The entry joined with its pool's status; 404 unknown entry, 409 pool closed."""
+        entry = conn.execute(
+            "SELECT e.id, e.pool_id, e.user_id, p.status FROM pool_entries e "
+            "JOIN pools p ON p.id = e.pool_id WHERE e.id = ?", (entry_id,)).fetchone()
+        if entry is None:
+            raise StorageError(404, "Submission not found")
+        if entry["status"] != "open":
+            raise StorageError(409, "This Knowledge Pool is closed")
+        return entry
+
     def withdraw_pool_entry(self, entry_id: str, user_id: str) -> str:
-        """Remove the user's entry, its medals and bans while the pool is open. Returns the pool id."""
+        """Remove the user's entry and its medals while the pool is open. Returns the pool id."""
         with self._tx() as conn:
-            entry = conn.execute("SELECT pool_id, slot_id, user_id FROM pool_entries WHERE id = ?",
-                                 (entry_id,)).fetchone()
-            if entry is None:
-                raise StorageError(404, "Submission not found")
+            entry = self._open_entry(conn, entry_id)
             if entry["user_id"] != user_id:
                 raise StorageError(403, "You can only withdraw your own submissions")
-            self._open_pool_slot(conn, entry["slot_id"])
             conn.execute("DELETE FROM pool_medals WHERE entry_id = ?", (entry_id,))
-            conn.execute("DELETE FROM pool_bans WHERE entry_id = ?", (entry_id,))
             conn.execute("DELETE FROM pool_entries WHERE id = ?", (entry_id,))
         return entry["pool_id"]
 
-    def _open_pool_entry(self, conn: sqlite3.Connection, entry_id: str, voter_id: str,
-                         action: str) -> sqlite3.Row:
-        """The entry of an open pool that `voter_id` may medal or ban (not their own card)."""
-        entry = conn.execute("SELECT id, pool_id, slot_id, user_id FROM pool_entries WHERE id = ?",
-                             (entry_id,)).fetchone()
-        if entry is None:
-            raise StorageError(404, "Submission not found")
-        self._open_pool_slot(conn, entry["slot_id"])
+    def _votable_entry(self, conn: sqlite3.Connection, entry_id: str, voter_id: str) -> sqlite3.Row:
+        """An open pool's entry that `voter_id` may medal (not their own card)."""
+        entry = self._open_entry(conn, entry_id)
         if entry["user_id"] == voter_id:
-            raise StorageError(403, f"You can't {action} your own card")
+            raise StorageError(403, "You can't give a medal to your own card")
         return entry
 
     def award_pool_medal(self, voter_id: str, entry_id: str, medal: str) -> str:
-        """Give a card gold, silver or bronze. The medal moves off any other card of the slot
-        it was on, and the card's previous medal from this voter is replaced.
+        """Give a card gold, silver or bronze. The medal moves off any other card it was on,
+        and the card's previous medal from this voter is replaced.
         400 unknown medal, 403 own card, 404 unknown entry, 409 pool closed. Returns the pool id."""
         if medal not in MEDAL_POINTS:
             raise StorageError(400, "Medal must be gold, silver or bronze")
         with self._tx() as conn:
-            entry = self._open_pool_entry(conn, entry_id, voter_id, "give a medal to")
+            entry = self._votable_entry(conn, entry_id, voter_id)
             conn.execute("DELETE FROM pool_medals WHERE voter_id = ? AND "
-                         "((slot_id = ? AND medal = ?) OR entry_id = ?)",
-                         (voter_id, entry["slot_id"], medal, entry_id))
+                         "((pool_id = ? AND medal = ?) OR entry_id = ?)",
+                         (voter_id, entry["pool_id"], medal, entry_id))
             conn.execute(
-                "INSERT INTO pool_medals (voter_id, pool_id, slot_id, entry_id, medal, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (voter_id, entry["pool_id"], entry["slot_id"], entry_id, medal, _now()))
+                "INSERT INTO pool_medals (voter_id, pool_id, entry_id, medal, created_at) "
+                "VALUES (?, ?, ?, ?, ?)", (voter_id, entry["pool_id"], entry_id, medal, _now()))
         return entry["pool_id"]
 
     def clear_pool_medal(self, voter_id: str, entry_id: str) -> str:
         """Take back this voter's medal on the card (no-op if none). Returns the pool id."""
         with self._tx() as conn:
-            entry = self._open_pool_entry(conn, entry_id, voter_id, "give a medal to")
+            entry = self._votable_entry(conn, entry_id, voter_id)
             conn.execute("DELETE FROM pool_medals WHERE voter_id = ? AND entry_id = ?",
-                         (voter_id, entry_id))
-        return entry["pool_id"]
-
-    def ban_pool_entry(self, voter_id: str, entry_id: str) -> str:
-        """Spend one of the voter's POOL_BANS_PER_PLAYER bans on a card (idempotent).
-        403 own card, 409 pool closed or no bans left. Returns the pool id."""
-        with self._tx() as conn:
-            entry = self._open_pool_entry(conn, entry_id, voter_id, "ban")
-            if conn.execute("SELECT 1 FROM pool_bans WHERE voter_id = ? AND entry_id = ?",
-                            (voter_id, entry_id)).fetchone():
-                return entry["pool_id"]
-            used = conn.execute("SELECT COUNT(*) FROM pool_bans WHERE voter_id = ? AND pool_id = ?",
-                                (voter_id, entry["pool_id"])).fetchone()[0]
-            if used >= POOL_BANS_PER_PLAYER:
-                raise StorageError(
-                    409, f"You've used both of your {POOL_BANS_PER_PLAYER} bans - lift one first")
-            conn.execute("INSERT INTO pool_bans (voter_id, pool_id, entry_id, created_at) "
-                         "VALUES (?, ?, ?, ?)", (voter_id, entry["pool_id"], entry_id, _now()))
-        return entry["pool_id"]
-
-    def unban_pool_entry(self, voter_id: str, entry_id: str) -> str:
-        """Lift this voter's ban on the card (no-op if none). Returns the pool id."""
-        with self._tx() as conn:
-            entry = self._open_pool_entry(conn, entry_id, voter_id, "ban")
-            conn.execute("DELETE FROM pool_bans WHERE voter_id = ? AND entry_id = ?",
                          (voter_id, entry_id))
         return entry["pool_id"]
 
@@ -938,25 +809,28 @@ def leader_flags(tally: dict[str, int], card_ids: list[str]) -> dict[str, dict]:
     }
 
 
-def pool_standings(entry_ids: list[str], medals: dict[str, dict[str, int]],
-                   bans: dict[str, int], apply_bans: bool) -> dict[str, dict]:
-    """Per entry of one slot: {gold, silver, bronze, points, disqualified, leader, tied}.
+def pool_cutoff(entries: list[dict]) -> int:
+    """How many cards make the pool: half the players with at least one entry, rounded down."""
+    return len({e["user_id"] for e in entries}) // 2
 
-    Points are gold 3, silver 2, bronze 1; more golds breaks a points tie. With apply_bans
-    (a closed pool) entries with POOL_BAN_THRESHOLD+ bans are disqualified and can't lead.
-    The best (points, golds) with points > 0 held by one entry -> leader; by several -> tied.
+
+def pool_ranking(entries: list[dict], medals: dict[str, dict[str, int]]) -> dict[str, dict]:
+    """Per entry id: {gold, silver, bronze, points, rank, in, tiedAtCutoff}.
+
+    Entries rank by points (gold 3, silver 2, bronze 1), then golds, then silvers; equal keys
+    share a rank. The top pool_cutoff(entries) are in, plus every card level with the last
+    of them on all three; a card with no points is never in.
     """
-    table = {}
-    for eid in entry_ids:
-        counts = {m: int((medals.get(eid) or {}).get(m, 0)) for m in MEDAL_POINTS}
-        table[eid] = {**counts,
-                      "points": sum(MEDAL_POINTS[m] * n for m, n in counts.items()),
-                      "disqualified": apply_bans and bans.get(eid, 0) >= POOL_BAN_THRESHOLD}
-    ranked = {eid: (row["points"], row["gold"]) for eid, row in table.items()
-              if row["points"] > 0 and not row["disqualified"]}
-    best = max(ranked.values(), default=None)
-    top = [eid for eid, key in ranked.items() if key == best]
+    table: dict[str, dict] = {}
+    for e in entries:
+        counts = {m: int((medals.get(e["id"]) or {}).get(m, 0)) for m in MEDAL_POINTS}
+        table[e["id"]] = {**counts, "points": sum(MEDAL_POINTS[m] * n for m, n in counts.items())}
+    key = {eid: (row["points"], row["gold"], row["silver"]) for eid, row in table.items()}
+    ordered = sorted(key.values(), reverse=True)
+    cutoff = pool_cutoff(entries)
+    line = ordered[cutoff - 1] if 0 < cutoff <= len(ordered) else None
     for eid, row in table.items():
-        row["leader"] = len(top) == 1 and eid in top
-        row["tied"] = len(top) > 1 and eid in top
+        row["rank"] = 1 + sum(1 for k in key.values() if k > key[eid])
+        row["in"] = line is not None and row["points"] > 0 and key[eid] >= line
+        row["tiedAtCutoff"] = row["in"] and key[eid] == line and ordered.count(line) > 1
     return table

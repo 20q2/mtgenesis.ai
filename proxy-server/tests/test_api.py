@@ -11,7 +11,7 @@ CARD_DATA = {"name": "Placeholder", "manaCost": "{2}{B}{R}", "colors": ["B", "R"
              "power": "3", "toughness": "4"}
 CARD_VIEW_KEYS = {"id", "userId", "setId", "slot", "replaced", "status", "error", "textReady",
                   "artReady", "queuePosition", "etaSeconds", "card", "cardImageUrl",
-                  "artImageUrl", "createdAt", "shared"}
+                  "artImageUrl", "createdAt", "shared", "poolEntryId"}
 SET_VIEW_KEYS = {"id", "userId", "username", "eventId", "commanderName", "prompt", "status",
                  "lockedAt", "cards", "myVoteCardId"}
 EVENT_SUMMARY_KEYS = {"id", "name", "status", "createdAt", "closedAt"}
