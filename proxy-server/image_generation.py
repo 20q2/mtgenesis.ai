@@ -40,6 +40,7 @@ NEGATIVE_PROMPT = ("nsfw, nudity, shirtless, bare chest, cleavage, revealing clo
 GENERIC_CONTEXT = "fantasy scene"
 # The director brief's art fields, most important first (director.ART_FIELDS).
 BRIEF_ART_FIELDS = ("subject", "action", "setting", "framing", "light")
+BRIEF_FIELD_MIN_WORDS = 3
 
 WUBRG = "WUBRG"
 _COLOR_NAMES = {"white": "W", "blue": "U", "black": "B", "red": "R", "green": "G", "colorless": "C"}
@@ -265,7 +266,7 @@ def build_art_prompt(prompt: str, card_data: dict | None, count_tokens=estimate_
 
     With a director brief (card_data["brief"], director.py) the subject is the brief's
     subject, action, setting, framing and light instead of the prompt; when it is too long,
-    whole fields go from the end (light first) before any words are cut.
+    light and framing go first, then the longest of subject, action and setting loses words.
     """
     brief = (card_data or {}).get("brief")
     if brief:
@@ -286,8 +287,17 @@ def build_art_prompt(prompt: str, card_data: dict | None, count_tokens=estimate_
         return sum(count_tokens(p) + 1 for p in parts)  # +1 for the joining comma
 
     subject_budget = max(MAX_PROMPT_TOKENS - tail_tokens(tail), SUBJECT_MIN_TOKENS)
-    while len(brief_parts) > 1 and count_tokens(", ".join(brief_parts)) > subject_budget:
-        brief_parts.pop()
+    if brief_parts:
+        # Light and framing go first; subject, action and setting carry what makes a set's
+        # versions differ, so they are shortened word by word (longest first) but all kept.
+        while len(brief_parts) > 3 and count_tokens(", ".join(brief_parts)) > subject_budget:
+            brief_parts.pop()
+        while count_tokens(", ".join(brief_parts)) > subject_budget:
+            longest = max(range(len(brief_parts)), key=lambda i: len(brief_parts[i].split()))
+            words = brief_parts[longest].split()
+            if len(words) <= BRIEF_FIELD_MIN_WORDS:
+                break
+            brief_parts[longest] = " ".join(words[:-1]).rstrip(" ,;")
         subject = ", ".join(brief_parts)
     subject = _trim_to_tokens(subject, subject_budget, count_tokens)
 

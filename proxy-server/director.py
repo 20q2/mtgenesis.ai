@@ -33,7 +33,7 @@ SYSTEM_PROMPT = """You are the creative director for a custom Magic: The Gatheri
 Return JSON only: {"briefs": [{"identity": "...", "mechanic": "...", "art": {"subject": "...", "action": "...", "setting": "...", "framing": "...", "light": "..."}}]}.
 - identity: who or what the card is, in at most 20 words. Draw on the name and subtype.
 - mechanic: a short theme for its abilities, at most 8 words, not rules text (for example "sacrifice tokens to drain opponents"). It must fit the card's colors (see "good at") and the power budget: cheap or common cards get small, simple mechanics.
-- art: a painting brief. subject names the creature type and what it looks like; action is what it is doing; setting is where; framing is the camera (for example "low angle, close"); light is the light source and mood. Each at most 12 words. People are always fully clothed.
+- art: a painting brief. subject names the creature type and what it looks like; action is what it is doing; setting is where; framing is the camera (for example "low angle, close"); light is the light source and mood. Each at most 12 words. Never put the card's name in the art fields. For people, describe their clothing or armor, never bare skin or their body.
 Make each brief specific to this card. Avoid generic fantasy filler."""
 
 
@@ -110,14 +110,23 @@ def _clean_art(text: str) -> str:
     return text.strip(" ,")
 
 
-def _clean(raw: dict, subtype: str) -> dict | None:
+def _strip_name(text: str, name: str) -> str:
+    """Drop a leading card name ("Zur'ka, Élan of Ash, a cleric" -> "a cleric"): CLIP can't use it."""
+    for candidate in (name, name.split(",")[0]):
+        candidate = candidate.strip()
+        if candidate and text.lower().startswith(candidate.lower()):
+            return text[len(candidate):].lstrip(" ,:-")
+    return text
+
+
+def _clean(raw: dict, subtype: str, name: str = "") -> dict | None:
     """One validated, trimmed brief, or None if a field is missing or empty."""
     if not isinstance(raw, dict) or not isinstance(raw.get("art"), dict):
         return None
     texts = [raw.get("identity"), raw.get("mechanic"), *(raw["art"].get(f) for f in ART_FIELDS)]
     if not all(isinstance(t, str) and t.strip() for t in texts):
         return None
-    art = {f: _clean_art(raw["art"][f]) for f in ART_FIELDS}
+    art = {f: _clean_art(_strip_name(raw["art"][f], name)) for f in ART_FIELDS}
     sub_words = re.findall(r"[a-z]+", subtype.lower())
     if sub_words and not set(sub_words) & set(re.findall(r"[a-z]+", art["subject"].lower())):
         art["subject"] = f"a {' '.join(sub_words)}, {art['subject']}"
@@ -173,7 +182,7 @@ def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model
             return None
         try:
             raw = json.loads(resp["message"]["content"])
-            briefs = [_clean(b, subtype) for b in raw.get("briefs") or []]
+            briefs = [_clean(b, subtype, (card or {}).get("name") or "") for b in raw.get("briefs") or []]
         except Exception as exc:  # bad JSON or shape: worth one more try
             _log(f"🎬 Director reply unreadable: {exc}")
             continue

@@ -221,3 +221,14 @@ def test_a_reroll_needs_a_new_setting():
     client = StubClient([brief("discard for value", setting="the dark stone chapel")],
                         [brief("discard for value", setting="a burning village")])
     assert run(client, avoid=avoid)[0]["art"]["setting"] == "a burning village"
+
+
+def test_the_card_name_is_kept_out_of_the_art():
+    result = run(StubClient([brief(subject="Zur'ka, a tall human cleric in dark robes")]))
+    assert result[0]["art"]["subject"] == "a tall human cleric in dark robes"
+    result = run(StubClient([brief(subject="Zur'ka, Élan of Ash, a tall human cleric")]))
+    assert result[0]["art"]["subject"] == "a tall human cleric"
+
+
+def test_people_are_described_by_clothing():
+    assert "clothing or armor" in director.SYSTEM_PROMPT

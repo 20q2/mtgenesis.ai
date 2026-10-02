@@ -81,7 +81,8 @@ A **brief stage** runs before text and art.
 **Art** (`image_generation.build_art_prompt`), when the card has a brief:
 - The subject becomes `subject, action, setting, framing, light`, joined with commas. It replaces the request's prompt, and the card name is not included.
 - If the subject lacks the card's subtype, it is prefixed with `a <subtype>`.
-- When the 75-token budget is tight, the subject is trimmed from its end, so `light` goes first and then `setting`. This follows the existing rules (`SUBJECT_MIN_TOKENS`).
+- When the 75-token budget is tight, `light` and then `framing` are dropped; after that the longest of `subject`, `action` and `setting` loses words one at a time (each keeps at least 3), so all three survive. (Revised 2026-10-02: dropping whole fields left people's cards, whose fixed tail is longer, with the subject alone.)
+- The director keeps the card's name out of the art fields and describes people by their clothing or armor.
 - Unchanged: `ART_STYLE`, the type contexts (including the clothed/armored contexts for people), the color mood and palette, and `NEGATIVE_PROMPT`.
 
 **Without a brief**, both prompts are byte-for-byte what they are today.

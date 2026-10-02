@@ -79,17 +79,29 @@ def test_art_prompt_follows_the_brief():
     assert negative == NEGATIVE_PROMPT
 
 
-def test_art_brief_trims_light_then_framing_then_setting():
+def test_art_brief_drops_light_and_framing_then_shortens_the_rest():
     def words(text):  # one token per word keeps the budget arithmetic readable
         return len(text.replace(",", " ").split())
 
-    long_art = {f: f"{f} " + " ".join(f"{f}{i}" for i in range(9)) for f in BRIEF["art"]}
+    long_art = {f: f"{f} " + " ".join(f"{f}{i}" for i in range(14)) for f in BRIEF["art"]}
     positive, _ = build_art_prompt(PROMPT, {**CARD, "brief": {**BRIEF, "art": long_art}},
                                    count_tokens=words)
     assert positive.startswith("subject subject0")
-    assert "light0" not in positive
-    assert "subject8" in positive
-    # Whatever survived of the brief keeps its order.
-    kept = [f for f in ("subject", "action", "setting", "framing") if f"{f}0" in positive]
-    assert kept == ["subject", "action", "setting", "framing"][:len(kept)]
+    assert "light0" not in positive and "framing0" not in positive
+    # subject, action and setting all survive, in order, each shortened rather than dropped
+    assert positive.index("subject0") < positive.index("action0") < positive.index("setting0")
     assert words(positive) <= 75
+
+
+def test_people_keep_action_and_setting_with_the_real_budget():
+    # The human context makes the fixed tail long; the brief must still keep its action and
+    # setting (trimming words) rather than collapse to the subject alone.
+    long_brief = {**BRIEF, "art": {
+        "subject": "a tall human cleric in dark ash-grey robes with a silver chain",
+        "action": "raising a smoking censer above a kneeling crowd of mourners",
+        "setting": "a ruined fire temple with broken pillars and drifting ash",
+        "framing": "low angle, wide shot", "light": "embers glowing from below"}}
+    positive, _ = build_art_prompt(PROMPT, {**CARD, "brief": long_brief})
+    assert "censer" in positive and "temple" in positive
+    assert positive.startswith("a tall human cleric")
+    assert "fully clothed" in positive
