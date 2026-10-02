@@ -16,8 +16,9 @@ CARD = {"name": "Zur'ka, Élan of Ash", "type": "Creature", "supertype": "Legend
 
 def brief(mechanic="sacrifice tokens to drain each opponent", subject="a human cleric in ash robes",
           identity="An ash-priest who keeps dead fires burning", **art):
+    # Each stub brief gets its own setting (sets must differ in setting as well as mechanic).
     fields = {"subject": subject, "action": "raising a smoking censer",
-              "setting": "a ruined temple", "framing": "low angle, close",
+              "setting": f"the realm of {mechanic}", "framing": "low angle, close",
               "light": "embers glowing from below"}
     fields.update(art)
     return {"identity": identity, "mechanic": mechanic, "art": fields}
@@ -200,3 +201,23 @@ def test_set_prompt_asks_for_one_character():
     client = StubClient([brief("a"), brief("b"), brief("c")])
     run(client, count=3)
     assert "same character" in client.calls[0]["messages"][-1]["content"]
+
+
+def test_a_set_needs_different_settings_too():
+    same_room = [brief("sacrifice tokens", setting="a dark stone chapel"),
+                 brief("return creatures from graveyard", setting="a dark stone chapel at night"),
+                 brief("discard for value", setting="a ruined battlefield")]
+    varied = [brief("sacrifice tokens", setting="a dark stone chapel"),
+              brief("return creatures from graveyard", setting="a fog-bound cemetery"),
+              brief("discard for value", setting="a ruined battlefield")]
+    client = StubClient(same_room, varied)
+    result = run(client, count=3)
+    assert len(client.calls) == 2
+    assert [b["art"]["setting"] for b in result] == [v["art"]["setting"] for v in varied]
+
+
+def test_a_reroll_needs_a_new_setting():
+    avoid = [brief("sacrifice tokens", setting="a dark stone chapel")]
+    client = StubClient([brief("discard for value", setting="the dark stone chapel")],
+                        [brief("discard for value", setting="a burning village")])
+    assert run(client, avoid=avoid)[0]["art"]["setting"] == "a burning village"

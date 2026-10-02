@@ -89,10 +89,13 @@ def _messages(card: dict, count: int, avoid: list[dict]) -> list[dict]:
     if count > 1:
         asks.append("Each brief must use a different mechanic.")
         asks.append("All briefs show the same character: give every brief the same art.subject "
-                    "(identical appearance) and vary only action, setting, framing and light.")
+                    "(identical appearance) and vary only action, setting, framing and light. "
+                    "Each brief takes place in a clearly different setting.")
     for other in avoid:
         if other.get("mechanic"):
             asks.append(f"Use a mechanic different from: {other['mechanic']}")
+        if isinstance(other.get("art"), dict) and other["art"].get("setting"):
+            asks.append(f"Use a setting different from: {other['art']['setting']}")
     return [{"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": "\n".join(facts) + "\n\n" + "\n".join(asks)}]
 
@@ -126,12 +129,20 @@ def _clean(raw: dict, subtype: str) -> dict | None:
 
 
 def _distinct(briefs: list[dict], avoid: list[dict]) -> bool:
-    words = [content_words(b["mechanic"]) for b in briefs]
-    avoided = [content_words(a.get("mechanic") or "") for a in avoid]
-    for a, b in itertools.combinations(words, 2):
-        if jaccard(a, b) >= MECHANIC_MAX_OVERLAP:
+    """Mechanics and settings differ between the briefs and from `avoid` (versions already
+    written): one character, but each version plays and looks different."""
+    def differ(texts: list[str], avoided: list[str]) -> bool:
+        words = [content_words(t) for t in texts]
+        others = [content_words(t) for t in avoided if t]
+        if any(jaccard(a, b) >= MECHANIC_MAX_OVERLAP for a, b in itertools.combinations(words, 2)):
             return False
-    return all(jaccard(w, x) < MECHANIC_MAX_OVERLAP for w in words for x in avoided)
+        return all(jaccard(w, x) < MECHANIC_MAX_OVERLAP for w in words for x in others)
+
+    def setting(b: dict) -> str:
+        return (b.get("art") or {}).get("setting") or "" if isinstance(b.get("art"), dict) else ""
+
+    return (differ([b["mechanic"] for b in briefs], [a.get("mechanic") or "" for a in avoid])
+            and differ([b["art"]["setting"] for b in briefs], [setting(a) for a in avoid]))
 
 
 def _same_character(briefs: list[dict], avoid: list[dict]) -> None:
