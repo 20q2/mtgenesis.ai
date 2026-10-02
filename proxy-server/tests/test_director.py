@@ -136,3 +136,19 @@ def test_config_switches():
     assert isinstance(config.DIRECTOR_ENABLED, bool)
     assert config.DIRECTOR_MODEL
     assert director.MECHANIC_MAX_OVERLAP == 0.5
+
+
+def test_set_overlap():
+    same = director.set_overlap(["Flying. Draw a card.", "Flying. Draw a card.", "Trample"])
+    different = director.set_overlap(["Flying", "Trample", "Deathtouch"])
+    assert 0 < same < 1
+    assert same > different == 0.0
+    assert director.set_overlap(["Flying"]) == 0.0
+
+
+def test_logging_never_breaks_a_good_brief(monkeypatch):
+    import io
+    import sys
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(io.BytesIO(), encoding="cp1252"))
+    assert run(StubClient([brief()])) is not None
+    assert run(StubClient("not json", "not json")) is None

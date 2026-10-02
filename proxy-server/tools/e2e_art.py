@@ -21,6 +21,13 @@ while people are generating cards on the live site. Usage (from proxy-server/):
     python tools/e2e_art.py --label quick --art-only --seeds 2 --only 2,6,9
     python tools/e2e_art.py --label paint --art-only --set ART_STYLE="oil painting, ..."
     python tools/e2e_art.py --label lora --art-only --lora ntc-ai/SDXL-LoRA-slider.oil-painting "oil painting.safetensors" 2
+    python tools/e2e_art.py --label art-director-on --sets 4
+    python tools/e2e_art.py --label art-director-off --sets 4 --no-director
+
+--sets N paints N commander sets (tools/e2e_sets.py) as their three versions, with the card
+director's briefs unless --no-director (briefs need Ollama), and writes report-sets.md and
+sets.png. similarity = mean pairwise CLIP image-embedding cosine within a set (lower = more
+distinct versions; CLIP ViT-B/32 is downloaded on first use).
 """
 from __future__ import annotations
 
@@ -106,6 +113,10 @@ def main():
                     help='override a string constant in image_generation (e.g. ART_STYLE, HUMAN_CONTEXT)')
     ap.add_argument('--lora', action='append', nargs=3, default=[], metavar=('REPO', 'FILE', 'SCALE'),
                     help='fuse a style LoRA instead of config.IMAGE_LORAS (repeatable; --lora none none 0 for none)')
+    ap.add_argument('--sets', type=int, metavar='N',
+                    help='paint N commander sets (tools/e2e_sets.py) instead of SPECS')
+    ap.add_argument('--no-director', action='store_true',
+                    help='with --sets: no director briefs (the baseline)')
     args = ap.parse_args()
 
     import torch
@@ -127,6 +138,10 @@ def main():
     only = {int(x) for x in args.only.split(',')} if args.only else None
     out = ROOT / 'data' / 'e2e' / args.label
     out.mkdir(parents=True, exist_ok=True)
+
+    if args.sets:
+        run_sets(args, ig, torch, out, overrides)
+        return
 
     results = []
     for n, (card, prompt) in enumerate(SPECS, 1):
@@ -168,6 +183,83 @@ def main():
                   + ('' if args.art_only else f" text {'ok' if text else 'FAILED'}"), flush=True)
 
     write_report(out, args, overrides, negative, results)
+
+
+def run_sets(args, ig, torch, out, overrides):
+    import itertools
+
+    import config
+    from e2e_sets import SET_SPECS, art_prompt, build_set
+
+    client = None
+    if not args.no_director:
+        import ollama
+        client = ollama.Client(timeout=120)
+    results, sets = [], []
+    for i, spec in enumerate(SET_SPECS[:args.sets], 1):
+        slots, briefs, _ = build_set(spec, not args.no_director, client, config.DIRECTOR_MODEL)
+        files = []
+        for slot, params in enumerate(slots, 1):
+            seed = SEED_BASE + i * 100 + slot
+            torch.manual_seed(seed)
+            t0 = time.time()
+            art_b64 = ig.generate_art(art_prompt(params), dict(params))
+            art_s = time.time() - t0
+            count = lambda t: len(ig._pipeline.tokenizer(t).input_ids) - 2  # noqa: E731
+            positive, _ = ig.build_art_prompt(art_prompt(params), params, count)
+            name = f'set{i:02d}-v{slot}-{slug(spec["name"])}-art.png'
+            png = base64.b64decode(art_b64)
+            (out / name).write_bytes(png)
+            files.append(out / name)
+            results.append({'n': i, 'seed': seed, 'name': spec['name'], 'subtype': spec['subtype'],
+                            'slot': slot, 'prompt': positive, 'art': name,
+                            'art_seconds': round(art_s, 1), **exposure(png)})
+        embeds = clip_embeddings(files)
+        pairs = list(itertools.combinations(range(len(embeds)), 2))
+        similarity = sum(float(embeds[a] @ embeds[b]) for a, b in pairs) / len(pairs)
+        sets.append({'n': i, 'name': spec['name'], 'briefs': briefs, 'similarity': round(similarity, 3)})
+        print(f"[{args.label}] set {i:02d} {spec['name']}: CLIP similarity {similarity:.3f}, "
+              f"briefs {'yes' if briefs else 'no'}", flush=True)
+
+    summary = {'label': args.label, 'director': not args.no_director, 'sets': len(sets),
+               'mean_similarity': round(sum(s['similarity'] for s in sets) / max(1, len(sets)), 3),
+               'avg_white': round(sum(r['white'] for r in results) / max(1, len(results)), 2),
+               'avg_art_seconds': round(sum(r['art_seconds'] for r in results) / max(1, len(results)), 1),
+               'overrides': overrides}
+    (out / 'report-sets.json').write_text(json.dumps({'summary': summary, 'sets': sets, 'results': results},
+                                                     indent=2, ensure_ascii=False), encoding='utf-8')
+    contact_sheet(out, results, 'art', 'sets.png', 3, (272, 224))
+    md = [f"# Commander set art variety: {args.label}", '',
+          f"Director: {'on' if summary['director'] else 'off'} · sets: {summary['sets']} · "
+          f"mean CLIP similarity: {summary['mean_similarity']} · avg white {summary['avg_white']}% · "
+          f"art {summary['avg_art_seconds']}s", '', '![sets](sets.png)', '']
+    for s in sets:
+        md += [f"## {s['n']:02d} {s['name']}: similarity {s['similarity']}", '']
+        for r in [r for r in results if r['n'] == s['n']]:
+            brief = s['briefs'][r['slot'] - 1] if s['briefs'] else None
+            md += [f"**Version {r['slot']}**" + (f": *{brief['mechanic']}*" if brief else ''), '',
+                   f"`{r['prompt']}`", '', f"![art]({r['art']})", '']
+    (out / 'report-sets.md').write_text('\n'.join(md), encoding='utf-8')
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
+_clip = None
+
+
+def clip_embeddings(paths):
+    """Unit-length CLIP ViT-B/32 image embeddings, one row per image."""
+    global _clip
+    import torch
+    from PIL import Image
+    from transformers import CLIPModel, CLIPProcessor
+    if _clip is None:
+        name = "openai/clip-vit-base-patch32"
+        _clip = (CLIPModel.from_pretrained(name).eval(), CLIPProcessor.from_pretrained(name))
+    model, processor = _clip
+    images = [Image.open(p).convert("RGB") for p in paths]
+    with torch.no_grad():
+        feats = model.get_image_features(**processor(images=images, return_tensors="pt"))
+    return torch.nn.functional.normalize(feats, dim=-1)
 
 
 def contact_sheet(out, results, key, name, cols, cell):

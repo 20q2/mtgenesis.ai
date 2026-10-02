@@ -14,6 +14,12 @@ Needs Ollama running. Usage (from proxy-server/):
     python tools/e2e_rules_text.py --label baseline
     python tools/e2e_rules_text.py --label qwen35 --model qwen3.5:4b --repeat 2
     python tools/e2e_rules_text.py --label quick --only 3,5,11
+    python tools/e2e_rules_text.py --label director-on --sets 4 --repeat 2
+    python tools/e2e_rules_text.py --label director-off --sets 4 --repeat 2 --no-director
+
+--sets N runs N commander sets (tools/e2e_sets.py) as their 3/4/5-mana versions, with the
+card director's briefs unless --no-director, and adds report-sets.md: the briefs, the three
+texts and how much they overlap (director.set_overlap; lower = more distinct versions).
 """
 from __future__ import annotations
 
@@ -92,6 +98,10 @@ def main():
     ap.add_argument('--model', help='sets MTG_TEXT_MODEL for this run')
     ap.add_argument('--repeat', type=int, default=1)
     ap.add_argument('--only', help='comma-separated 1-based spec numbers')
+    ap.add_argument('--sets', type=int, metavar='N',
+                    help='run N commander sets (tools/e2e_sets.py) instead of SPECS')
+    ap.add_argument('--no-director', action='store_true',
+                    help='with --sets: no director briefs (the baseline)')
     ap.add_argument('--from-db', action='store_true',
                     help='use the distinct card requests stored in data/mtgenesis.db instead of SPECS')
     args = ap.parse_args()
@@ -135,6 +145,10 @@ def main():
     out = ROOT / 'data' / 'e2e' / args.label
     out.mkdir(parents=True, exist_ok=True)
 
+    if args.sets:
+        run_sets(args, app, out, raw_log)
+        return
+
     results = []
     for rep in range(args.repeat):
         for i, (card, prompt) in enumerate(SPECS, 1):
@@ -164,6 +178,75 @@ def main():
                   f'power {pw["value"]}/{pw["budget"]}, {gen_s:.1f}s')
 
     write_report(out, args, results)
+
+
+def run_sets(args, app, out, raw_log):
+    import config
+    import director
+    import power_level
+    from e2e_sets import SET_SPECS, art_prompt, build_set
+    from rules_text import lint_rules_text
+
+    sets = []
+    for rep in range(args.repeat):
+        for i, spec in enumerate(SET_SPECS[:args.sets], 1):
+            raw_log.clear()
+            slots, briefs, brief_s = build_set(spec, not args.no_director, app.ollama_client,
+                                               config.DIRECTOR_MODEL)
+            versions = []
+            for slot, params in enumerate(slots, 1):
+                t0 = time.time()
+                text = app.createCardContent(art_prompt(params), dict(params))
+                seconds = time.time() - t0 + brief_s / 3
+                final, png = app.finalize_card(dict(params), text, None, params['name'])
+                desc = final.get('description') or ''
+                issues = lint_rules_text(desc, final) if text else [('error', 'generation failed (no text)')]
+                fname = f'set{i:02d}-{rep}-v{slot}-{slug(spec["name"])}.png'
+                if png:
+                    (out / fname).write_bytes(base64.b64decode(png))
+                value, budget = power_level.assess(desc, final)
+                versions.append({'slot': slot, 'cost': params['manaCost'], 'final': desc, 'png': fname,
+                                 'issues': issues, 'seconds': round(seconds, 1),
+                                 'power': {'value': value, 'budget': budget}})
+            overlap = director.set_overlap([v['final'] for v in versions])
+            sets.append({'n': i, 'rep': rep, 'name': spec['name'], 'briefs': briefs,
+                         'overlap': round(overlap, 3), 'versions': versions, 'raw': list(raw_log)})
+            print(f'[{args.label}] set {i:02d}.{rep} {spec["name"]}: overlap {overlap:.3f}, '
+                  f'briefs {"yes" if briefs else "no"}')
+    write_sets_report(out, args, sets)
+
+
+def write_sets_report(out, args, sets):
+    versions = [v for s in sets for v in s['versions']]
+    summary = {
+        'label': args.label, 'director': not args.no_director, 'sets': len(sets),
+        'mean_overlap': round(sum(s['overlap'] for s in sets) / max(1, len(sets)), 3),
+        'sets_with_briefs': sum(1 for s in sets if s['briefs']),
+        'errors': sum(1 for v in versions for sev, _ in v['issues'] if sev == 'error'),
+        'over_budget_1': sum(1 for v in versions if v['power']['value'] - v['power']['budget'] > 1),
+        'over_budget_2': sum(1 for v in versions if v['power']['value'] - v['power']['budget'] > 2),
+        'avg_seconds': round(sum(v['seconds'] for v in versions) / max(1, len(versions)), 1),
+    }
+    (out / 'report-sets.json').write_text(json.dumps({'summary': summary, 'sets': sets}, indent=2,
+                                                     ensure_ascii=False), encoding='utf-8')
+    md = [f"# Commander set variety: {args.label}", '',
+          f"Director: {'on' if summary['director'] else 'off'} · sets: {summary['sets']} "
+          f"(briefs for {summary['sets_with_briefs']}) · mean overlap: {summary['mean_overlap']} · "
+          f"errors: {summary['errors']} · over budget >1: {summary['over_budget_1']}, >2: "
+          f"{summary['over_budget_2']} · avg {summary['avg_seconds']}s per card", '']
+    for s in sets:
+        md += [f"## {s['n']:02d}.{s['rep']} {s['name']}: overlap {s['overlap']}", '']
+        for slot, v in enumerate(s['versions']):
+            if s['briefs']:
+                b = s['briefs'][slot]
+                md += [f"**Version {v['slot']} ({v['cost']})**: {b['identity']} · *{b['mechanic']}*", '']
+            else:
+                md += [f"**Version {v['slot']} ({v['cost']})**", '']
+            md += [f"![card]({v['png']})", '', '```', v['final'], '```',
+                   f"Power ~{v['power']['value']} of {v['power']['budget']}"
+                   + (' · ' + '; '.join(m for _, m in v['issues']) if v['issues'] else ''), '']
+    (out / 'report-sets.md').write_text('\n'.join(md), encoding='utf-8')
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
 def app_type(card):

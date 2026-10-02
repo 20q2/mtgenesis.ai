@@ -37,6 +37,14 @@ Return JSON only: {"briefs": [{"identity": "...", "mechanic": "...", "art": {"su
 Make each brief specific to this card. Avoid generic fantasy filler."""
 
 
+def _log(message: str) -> None:
+    """Print without ever raising (a console that can't encode the emoji must not lose a brief)."""
+    try:
+        print(message)
+    except Exception:
+        pass
+
+
 def content_words(text: str) -> set[str]:
     """Lowercase words of 3+ letters, minus filler, for comparing mechanics and rules text."""
     return {w for w in re.findall(r"[a-z]{3,}", (text or "").lower()) if w not in _STOPWORDS}
@@ -44,6 +52,13 @@ def content_words(text: str) -> set[str]:
 
 def jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b) if a | b else 0.0
+
+
+def set_overlap(texts: list[str]) -> float:
+    """Mean pairwise content-word Jaccard of several texts (0.0 for fewer than two). The e2e
+    tools use it to measure how alike a commander set's three versions read."""
+    pairs = list(itertools.combinations([content_words(t) for t in texts], 2))
+    return sum(jaccard(a, b) for a, b in pairs) / len(pairs) if pairs else 0.0
 
 
 def _schema(count: int) -> dict:
@@ -131,10 +146,10 @@ def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model
             raw = json.loads(resp["message"]["content"])
             briefs = [_clean(b, subtype) for b in raw.get("briefs") or []]
         except Exception as exc:  # timeouts, connection errors, bad JSON
-            print(f"🎬 Director call failed: {exc}")
+            _log(f"🎬 Director call failed: {exc}")
             continue
         if len(briefs) == count and all(briefs) and _distinct(briefs, avoid):
-            print(f"🎬 Director briefs: {[b['mechanic'] for b in briefs]}")
+            _log(f"🎬 Director briefs: {[b['mechanic'] for b in briefs]}")
             return briefs
-        print("🎬 Director reply rejected (missing fields or repeated mechanics)")
+        _log("🎬 Director reply rejected (missing fields or repeated mechanics)")
     return None
