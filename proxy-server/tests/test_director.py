@@ -163,3 +163,40 @@ def test_a_transport_error_is_not_retried():
 def test_director_has_its_own_short_timeout():
     import config
     assert 0 < config.DIRECTOR_TIMEOUT_SECONDS <= 30
+
+
+def test_colors_strengths_are_in_the_prompt():
+    from rules_text import COLOR_HOOKS, COLORLESS_HOOKS
+    client = StubClient([brief()])
+    run(client)
+    user = client.calls[0]["messages"][-1]["content"]
+    assert all(hook in user for hook in COLOR_HOOKS["B"])
+    assert "must fit" in user
+    client = StubClient([brief(subject="a bronze golem")])
+    run(client, card={**CARD, "colors": [], "manaCost": "{3}", "subtype": "Golem"})
+    assert all(hook in client.calls[0]["messages"][-1]["content"] for hook in COLORLESS_HOOKS)
+
+
+def test_mechanic_is_asked_for_as_a_short_theme():
+    assert "not rules text" in director.SYSTEM_PROMPT
+
+
+def test_a_set_shows_the_same_character():
+    replies = [brief("sacrifice tokens to drain", subject="a gaunt human cleric in black robes"),
+               brief("return creatures from the graveyard", subject="a young human cleric woman"),
+               brief("attacking makes opponents discard", subject="a hooded human cleric")]
+    result = run(StubClient(replies), count=3)
+    assert {b["art"]["subject"] for b in result} == {"a gaunt human cleric in black robes"}
+
+
+def test_a_reroll_keeps_the_siblings_character():
+    avoid = [brief("sacrifice tokens to drain", subject="a gaunt human cleric in black robes")]
+    result = run(StubClient([brief("discard cards to grow", subject="a cheerful human cleric")]),
+                 avoid=avoid)
+    assert result[0]["art"]["subject"] == "a gaunt human cleric in black robes"
+
+
+def test_set_prompt_asks_for_one_character():
+    client = StubClient([brief("a"), brief("b"), brief("c")])
+    run(client, count=3)
+    assert "same character" in client.calls[0]["messages"][-1]["content"]

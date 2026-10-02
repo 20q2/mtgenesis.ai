@@ -39,7 +39,8 @@ The art fields are at most 12 words each.
 - **Input:**
   - the card's name, type line, colors, mana cost and mana value, rarity, and subtype
   - `power.describe_budget(card)`, so the mechanic fits the card's cost
-  - for `count > 1`, an instruction that every brief uses a different mechanic
+  - what the card's colors are good at (`rules_text.COLOR_HOOKS`, or `COLORLESS_HOOKS`), which the mechanic must fit; the mechanic is asked for as a short theme (about 8 words), not rules text
+  - for `count > 1`, an instruction that every brief uses a different mechanic and shows the same character (one appearance), varying only action, setting, framing and light
   - with `avoid`, the briefs to differ from
 - **Call:** Ollama with a JSON `format` schema, `think=False`, a small `num_ctx` (as for rules text; see CLAUDE.md on keeping the context small), and model `DIRECTOR_MODEL`.
 - **Checks:**
@@ -47,6 +48,7 @@ The art fields are at most 12 words each.
   - the `art.subject` names the card's subtype (when it has one)
   - the mechanics within a call, and against `avoid`, differ: content-word Jaccard overlap below 0.5 (`MECHANIC_MAX_OVERLAP`)
   - On failure, retry once. If it fails again, return `None`.
+- **One character per set:** after validation, every brief of a set gets the first brief's `art.subject`; a reroll gets its siblings' `art.subject`. Added 2026-10-02 after the first measurement showed a commander changing appearance between versions.
 - **Art word filter:** words such as nude, naked, topless, shirtless, bare-chested and cleavage are removed from every art field.
 - **Never fatal:** any exception or timeout returns `None`. A card with no brief is generated exactly as it is today.
 
@@ -104,7 +106,8 @@ A **brief stage** runs before text and art.
 It needs the GPU, so run it only when the site is not live.
 
 **Success:**
-- Mean within-set overlap (text) and similarity (art) are at least 25% lower than the `--no-director` baseline.
+- Mean within-set text overlap is at least 25% lower than the `--no-director` baseline.
+- Mean within-set art distance (1 − CLIP similarity) is at least twice the baseline's. (Revised 2026-10-02: same-style paintings rarely fall far below 0.6 CLIP similarity, so a 25% cut in raw similarity was not a reachable bar.)
 - Lint errors and over-budget cards are no worse than the baseline.
 - Average card time rises by at most about 4 s.
 

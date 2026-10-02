@@ -14,7 +14,7 @@ import json
 import re
 
 import power_level as power
-from rules_text import type_line
+from rules_text import COLOR_HOOKS, COLORLESS_HOOKS, type_line
 
 MECHANIC_MAX_OVERLAP = 0.5   # content-word Jaccard at or above this = "the same mechanic"
 ART_FIELDS = ("subject", "action", "setting", "framing", "light")
@@ -32,7 +32,7 @@ _UNSAFE_ART = re.compile(r"\b(?:nude|naked|topless|shirtless|bare[- ]chest(?:ed)
 SYSTEM_PROMPT = """You are the creative director for a custom Magic: The Gathering card. From the card's name, type line, colors, cost and rarity, invent who or what this card is and what its rules text should revolve around, then describe its painting.
 Return JSON only: {"briefs": [{"identity": "...", "mechanic": "...", "art": {"subject": "...", "action": "...", "setting": "...", "framing": "...", "light": "..."}}]}.
 - identity: who or what the card is, in at most 20 words. Draw on the name and subtype.
-- mechanic: what its abilities revolve around, in at most 15 words, in Magic terms (for example "sacrifice tokens to drain each opponent"). Fit the power budget: cheap or common cards get small, simple mechanics.
+- mechanic: a short theme for its abilities, at most 8 words, not rules text (for example "sacrifice tokens to drain opponents"). It must fit the card's colors (see "good at") and the power budget: cheap or common cards get small, simple mechanics.
 - art: a painting brief. subject names the creature type and what it looks like; action is what it is doing; setting is where; framing is the camera (for example "low angle, close"); light is the light source and mood. Each at most 12 words. People are always fully clothed.
 Make each brief specific to this card. Avoid generic fantasy filler."""
 
@@ -83,9 +83,13 @@ def _messages(card: dict, count: int, avoid: list[dict]) -> list[dict]:
              f"Mana cost: {card.get('manaCost') or '{0}'} (mana value {card.get('cmc', 0)})",
              f"Rarity: {(card.get('rarity') or 'common').lower()}",
              power.describe_budget(card)]
+    hooks = [h for c in colors for h in COLOR_HOOKS[c]] or COLORLESS_HOOKS
+    facts.append(f"Its colors are good at: {'; '.join(hooks)}. The mechanic must fit these.")
     asks = [f"Write {count} brief{'s' if count > 1 else ''}."]
     if count > 1:
         asks.append("Each brief must use a different mechanic.")
+        asks.append("All briefs show the same character: give every brief the same art.subject "
+                    "(identical appearance) and vary only action, setting, framing and light.")
     for other in avoid:
         if other.get("mechanic"):
             asks.append(f"Use a mechanic different from: {other['mechanic']}")
@@ -130,6 +134,15 @@ def _distinct(briefs: list[dict], avoid: list[dict]) -> bool:
     return all(jaccard(w, x) < MECHANIC_MAX_OVERLAP for w in words for x in avoided)
 
 
+def _same_character(briefs: list[dict], avoid: list[dict]) -> None:
+    """A commander set is one character: every version keeps one appearance (the set's first
+    brief, or for a reroll the existing versions'), so only action, setting, framing and light vary."""
+    kept = [a["art"]["subject"] for a in avoid if isinstance(a.get("art"), dict) and a["art"].get("subject")]
+    subject = kept[0] if kept else briefs[0]["art"]["subject"]
+    for b in briefs:
+        b["art"]["subject"] = subject
+
+
 def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model: str) -> list[dict] | None:
     """`count` briefs for the card (one per commander-set version), each with a mechanic
     different from the others and from `avoid`. None if two attempts fail; never raises."""
@@ -154,6 +167,7 @@ def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model
             _log(f"🎬 Director reply unreadable: {exc}")
             continue
         if len(briefs) == count and all(briefs) and _distinct(briefs, avoid):
+            _same_character(briefs, avoid)
             _log(f"🎬 Director briefs: {[b['mechanic'] for b in briefs]}")
             return briefs
         _log("🎬 Director reply rejected (missing fields or repeated mechanics)")
