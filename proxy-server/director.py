@@ -33,7 +33,7 @@ SYSTEM_PROMPT = """You are the creative director for a custom Magic: The Gatheri
 Return JSON only: {"briefs": [{"identity": "...", "mechanic": "...", "art": {"subject": "...", "action": "...", "setting": "...", "framing": "...", "light": "..."}}]}.
 - identity: who or what the card is, in at most 20 words. Draw on the name and subtype.
 - mechanic: a short theme for its abilities, at most 8 words, not rules text (for example "sacrifice tokens to drain opponents"). It must fit the card's colors (see "good at") and the power budget: cheap or common cards get small, simple mechanics.
-- art: a painting brief. subject names the creature type and what it looks like; action is what it is doing; setting is where; framing is the camera (for example "low angle, close"); light is the light source and mood. Each at most 12 words. Never put the card's name in the art fields. For people, describe their clothing or armor, never bare skin or their body.
+- art: a painting brief. subject starts with who they are (for people: age and gender, e.g. "an old elf woman"), names the creature type, then what it looks like; action is what it is doing; setting is where; framing is the camera (for example "low angle, close"); light is the light source and mood. Each at most 12 words. Never put the card's name in the art fields. For people, describe their clothing or armor, never bare skin or their body.
 Make each brief specific to this card. Avoid generic fantasy filler."""
 
 

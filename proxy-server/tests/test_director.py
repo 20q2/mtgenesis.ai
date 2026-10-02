@@ -232,3 +232,7 @@ def test_the_card_name_is_kept_out_of_the_art():
 
 def test_people_are_described_by_clothing():
     assert "clothing or armor" in director.SYSTEM_PROMPT
+
+
+def test_subject_leads_with_who_they_are():
+    assert "age and gender" in director.SYSTEM_PROMPT

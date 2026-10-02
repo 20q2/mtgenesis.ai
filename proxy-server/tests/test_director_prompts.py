@@ -105,3 +105,15 @@ def test_people_keep_action_and_setting_with_the_real_budget():
     assert "censer" in positive and "temple" in positive
     assert positive.startswith("a tall human cleric")
     assert "fully clothed" in positive
+
+
+def test_the_subject_is_shortened_last():
+    # The subject is the character a set shares; action and setting give up words first.
+    brief = {**BRIEF, "art": {
+        "subject": "an old elf woman druid in moss-green robes with antlers",
+        "action": "pulling a glowing seedling up from the dark wet earth with both hands",
+        "setting": "a misty clearing ringed by enormous ancient oaks at dusk in autumn",
+        "framing": "wide shot", "light": "golden light"}}
+    positive, _ = build_art_prompt(PROMPT, {**CARD, "subtype": "Elf Druid", "brief": brief})
+    assert positive.startswith("an old elf woman druid in moss-green robes with antlers, ")
+    assert "pulling a glowing" in positive and "a misty clearing" in positive
