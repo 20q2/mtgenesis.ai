@@ -38,6 +38,14 @@ IMAGE_LORAS: list[tuple[str, str, float]] = [
 # without it the driver spills to system RAM and one image takes ~280s instead of ~4s.
 # Set False on a 16 GB+ GPU (or with no LLM on the GPU) for ~2s instead of ~4s per image.
 IMAGE_CPU_OFFLOAD = True
+# Nudity check on every render (the negative prompt alone doesn't stop DreamShaper). CLIP
+# zero-shot on the CPU (~0.3s, no VRAM); see image_generation.NSFW_LABELS. Flagged art is
+# re-rendered up to NSFW_ATTEMPTS times in all, then replaced with placeholder art.
+# MTG_NSFW_CHECK=0 turns it off.
+NSFW_CHECK = os.environ.get("MTG_NSFW_CHECK", "1") != "0"
+NSFW_MODEL_ID = "openai/clip-vit-large-patch14"
+NSFW_THRESHOLD = 0.35          # nude labels' share of the probability; on stored art nudes ~0.7, the rest <= 0.14
+NSFW_ATTEMPTS = 3
 
 # ===== RULES TEXT (LLM) =====
 # Ollama model that writes rules text (run `ollama pull <model>` first). It shares the GPU
