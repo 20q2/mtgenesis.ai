@@ -45,7 +45,7 @@ The art fields are at most 12 words each.
 - **Checks:**
   - every field is present and is a string; fields are trimmed to their word limits
   - the `art.subject` names the card's subtype (when it has one)
-  - the mechanics within a call, and against `avoid`, differ: content-word overlap below a threshold
+  - the mechanics within a call, and against `avoid`, differ: content-word Jaccard overlap below 0.5 (`MECHANIC_MAX_OVERLAP`)
   - On failure, retry once. If it fails again, return `None`.
 - **Art word filter:** words such as nude, naked, topless, shirtless, bare-chested and cleavage are removed from every art field.
 - **Never fatal:** any exception or timeout returns `None`. A card with no brief is generated exactly as it is today.
@@ -104,7 +104,7 @@ A **brief stage** runs before text and art.
 It needs the GPU, so run it only when the site is not live.
 
 **Success:**
-- Mean within-set overlap (text) and similarity (art) are clearly lower than the `--no-director` baseline.
+- Mean within-set overlap (text) and similarity (art) are at least 25% lower than the `--no-director` baseline.
 - Lint errors and over-budget cards are no worse than the baseline.
 - Average card time rises by at most about 4 s.
 
