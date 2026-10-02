@@ -232,15 +232,23 @@ class Storage:
         """The slot/ban Knowledge Pool's tables give way to the voted list's, but only while
         they are empty: a pool with data is never dropped silently."""
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        if "pool_slots" not in tables:
+        entry_cols = {r[1] for r in conn.execute("PRAGMA table_info(pool_entries)")}
+        # Any trace of the old layout counts, so a drop interrupted halfway is finished next start.
+        if not ({"pool_slots", "pool_bans"} & tables or "slot_id" in entry_cols):
             return
         for table in _OLD_POOL_TABLES:
             if table in tables and conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():
                 raise RuntimeError(
                     f"Old Knowledge Pool tables (pool_slots, pool_bans) hold data ({table} has "
                     "rows); migrate them by hand")
-        for table in _OLD_POOL_TABLES:
-            conn.execute(f"DROP TABLE IF EXISTS {table}")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for table in _OLD_POOL_TABLES:
+                conn.execute(f"DROP TABLE IF EXISTS {table}")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        conn.execute("COMMIT")
 
     @staticmethod
     def _migrate(conn: sqlite3.Connection) -> None:

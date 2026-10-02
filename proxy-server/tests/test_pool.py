@@ -251,6 +251,21 @@ def test_migration_drops_empty_old_tables(tmp_path):
     assert storage.create_pool("Night", 3)["status"] == "open"
 
 
+def test_migration_finishes_a_half_done_drop(tmp_path):
+    # A crash after pool_slots was dropped leaves the old pool_entries (with slot_id) behind;
+    # the next start must still replace it.
+    db = old_db(tmp_path, with_rows=False)
+    conn = sqlite3.connect(db)
+    conn.execute("DROP TABLE pool_slots")
+    conn.execute("DROP TABLE pools")
+    conn.commit()
+    conn.close()
+    storage = Storage(db)
+    cols = {r[1] for r in storage._conn().execute("PRAGMA table_info(pool_entries)")}
+    assert "slot_id" not in cols
+    assert "pool_bans" not in table_names(db)
+
+
 def test_migration_refuses_old_tables_with_rows(tmp_path):
     db = old_db(tmp_path, with_rows=True)
     with pytest.raises(RuntimeError, match="pool_slots"):
