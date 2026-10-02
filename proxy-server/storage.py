@@ -73,7 +73,8 @@ CREATE TABLE IF NOT EXISTS cards (
     error             TEXT,
     created_at        TEXT NOT NULL,
     finished_at       TEXT,
-    shared_at         TEXT   -- set while the card is shared to the gallery's Community tab
+    shared_at         TEXT,  -- set while the card is shared to the gallery's Community tab
+    brief_json        TEXT   -- the director's brief (director.py); never shown to players
 );
 CREATE INDEX IF NOT EXISTS cards_user ON cards(user_id);
 CREATE INDEX IF NOT EXISTS cards_set ON cards(set_id, replaced);
@@ -256,6 +257,8 @@ class Storage:
         card_cols = {r[1] for r in conn.execute("PRAGMA table_info(cards)")}
         if "shared_at" not in card_cols:
             conn.execute("ALTER TABLE cards ADD COLUMN shared_at TEXT")
+        if "brief_json" not in card_cols:
+            conn.execute("ALTER TABLE cards ADD COLUMN brief_json TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS cards_shared ON cards(shared_at) "
                      "WHERE shared_at IS NOT NULL")
 
@@ -318,10 +321,10 @@ class Storage:
 
     # ----- cards -----
     # Row keys: id, user_id, set_id, slot, replaced, prompt, card_params, card, art_path,
-    # card_path, status, text_ready, art_ready, error, created_at, finished_at, shared_at
+    # card_path, status, text_ready, art_ready, error, created_at, finished_at, shared_at, brief
     _CARD_COLS = ("id, user_id, set_id, slot, replaced, prompt, card_params_json, card_json, "
                   "art_path, card_path, status, text_ready, art_ready, error, created_at, "
-                  "finished_at, shared_at")
+                  "finished_at, shared_at, brief_json")
     _CARD_UPDATABLE = frozenset({"status", "text_ready", "art_ready", "card", "art_path",
                                  "card_path", "error", "finished_at"})
 
@@ -330,9 +333,10 @@ class Storage:
         if row is None:
             return None
         d = dict(row)
-        params, card = d.pop("card_params_json"), d.pop("card_json")
+        params, card, brief = d.pop("card_params_json"), d.pop("card_json"), d.pop("brief_json")
         d["card_params"] = json.loads(params) if params is not None else None
         d["card"] = json.loads(card) if card is not None else None
+        d["brief"] = json.loads(brief) if brief is not None else None
         return d
 
     @staticmethod
@@ -381,6 +385,12 @@ class Storage:
         rows = self._all(f"SELECT {self._CARD_COLS} FROM cards WHERE user_id = ? "
                          "ORDER BY created_at DESC, rowid DESC", (user_id,))
         return [self._decode_card(r) for r in rows]
+
+    def set_card_brief(self, card_id: str, brief: dict | None) -> None:
+        """Store the director's brief for a card (None clears it)."""
+        with self._tx() as conn:
+            conn.execute("UPDATE cards SET brief_json = ? WHERE id = ?",
+                         (_dumps(brief) if brief is not None else None, card_id))
 
     def set_card_shared(self, card_id: str, user_id: str, shared: bool) -> dict:
         """Share a finished card to the Community tab, or take it back. Sharing an already
