@@ -1195,7 +1195,7 @@ if __name__ == '__main__':
     print("  GET  /api/v1/media/cards/<id>.png | /media/art/<id>.png - Rendered card and artwork")
     print("  POST /api/v1/admin/events | /admin/events/<id>/close - Host event controls")
     print("  GET  /api/v1/pools/current | /pools | /pools/<id> - Knowledge Pool")
-    print("  POST /api/v1/pools/entries | /pools/entries/<id>/withdraw | /pools/medals[/clear] | /pools/bans[/clear] - Pool submissions, medals, bans")
+    print("  POST /api/v1/pools/entries | /pools/entries/<id>/withdraw | /pools/medals[/clear] - Pool submissions and medals")
     print("  POST /api/v1/admin/pools | /admin/pools/<id>/close - Host Knowledge Pool controls")
     print("\n📋 Queue Configuration:")
     print(f"  - Max concurrent requests: {request_queue.max_concurrent}")

@@ -71,14 +71,13 @@ Every service and component imports from `src/app/models/` (`card.model.ts`, `ap
 
 Shared custom cards for the paper event: `/pool` in the app. The spec is `docs/superpowers/specs/2026-09-29-knowledge-pool-design.md`.
 
-- The host opens a pool from `/admin` (`PoolAdminComponent`). It has a per-player submission cap and a list of slots, each with a color rule and a type rule; the default is 16 slots for 8 players.
-- Players submit finished gallery cards into slots.
-- Voting uses medals: in each slot a player gives gold, silver and bronze (3 / 2 / 1 points), never to their own card. Only gold is required.
-- Each player also has 2 secret bans (`POOL_BANS_PER_PLAYER`). At close, a card with `POOL_BAN_THRESHOLD` (3) bans is disqualified.
-- The most points wins a slot; more golds breaks a tie (`pool_standings`).
-- Submitters and ban counts stay hidden until close.
-- Storage: the `pools` / `pool_slots` / `pool_entries` / `pool_medals` / `pool_bans` tables and methods in `storage.py`. `card_fits_slot` is mirrored by `cardFitsSlot` in `pool.service.ts`, so keep the two in sync.
-- Routes: `/pools/*` and `/admin/pools*` in `api_routes.py`. Each entry carries an advisory `power` check from `power_level.assess`.
+- The host opens a pool from `/admin` (`PoolAdminComponent`) with a name and a per-player entry cap (default 3).
+- Only colorless or mono-colored finished cards can be entered (`pool_card_eligible`). Players submit from the create screen or a My cards tile (`PoolSubmitComponent`), and withdraw on `/pool`.
+- Voting uses medals: each player gives one gold, silver and bronze (3 / 2 / 1 points) for the whole pool, never to their own card.
+- The top ⌊submitters / 2⌋ cards make the pool, ranked by points, then golds, then silvers; cards level with the last one at the line are also in, and 0 points is never in (`pool_ranking`, `pool_cutoff`).
+- Everything is visible while voting: makers, medals and points.
+- Storage: the `pools` / `pool_entries` / `pool_medals` tables and methods in `storage.py`. On startup the old slot/ban tables are dropped only if empty. `card_colors` is mirrored by `cardColors` / `poolColorOk` in `pool.service.ts`, so keep them in sync.
+- Routes: `/pools/*` and `/admin/pools*` in `api_routes.py`. Each entry carries an advisory `power` check from `power_level.assess`, and every `CardView` carries `poolEntryId` for the open pool.
 - Tests: `tests/test_pool.py`.
 
 ### Card renderer (`proxy-server/card_renderer.py`)
