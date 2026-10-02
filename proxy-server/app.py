@@ -27,6 +27,7 @@ import re
 from PIL import Image, ImageDraw
 import tempfile
 import ollama
+import director
 import image_generation
 import rules_text
 import power_level
@@ -1164,12 +1165,17 @@ def init_ai_night(app):
 
     warn_about_admin_pin(ADMIN_PIN)
     storage = Storage(data_dir / "mtgenesis.db")
+    brief_fn = None
+    if DIRECTOR_ENABLED:
+        def brief_fn(params, count, avoid):
+            return director.write_briefs(params, count, avoid, ollama_client, DIRECTOR_MODEL)
     gen_queue = GenerationQueue(storage, data_dir, createCardContent,
-                                image_generation.generate_art, finalize_card)
+                                image_generation.generate_art, finalize_card, brief_fn=brief_fn)
     gen_queue.recover_on_startup()
     app.register_blueprint(create_api_blueprint(storage, gen_queue, data_dir, ADMIN_PIN),
                            url_prefix="/api/v1")
     print(f"🌙 AI Night ready: data in {data_dir}")
+    print(f"🎬 Card director: {'on, ' + DIRECTOR_MODEL if DIRECTOR_ENABLED else 'off (MTG_DIRECTOR=0)'}")
     return gen_queue
 
 if __name__ == '__main__':

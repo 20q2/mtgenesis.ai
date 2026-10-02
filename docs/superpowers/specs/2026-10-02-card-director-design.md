@@ -60,7 +60,7 @@ A **brief stage** runs before text and art.
 - **Sets:** the first version of a set to reach the stage makes one `write_briefs(card, 3)` call and stores brief *i* on the set's slot *i* card. The other two versions find their brief already stored and skip the call. If the call returns `None`, all three versions go on without a brief.
 - **Reroll:** the new card calls `write_briefs(card, 1, avoid=[briefs of the set's other two current cards])`.
 - **Free play:** `write_briefs(card, 1)`.
-- **Restart:** a card that was waiting for its brief is re-enqueued by `recover_on_startup` like any other unfinished card. `brief_json` already being set means the stage is skipped.
+- **Restart:** like any other unfinished card, a card still waiting for its brief is marked failed by `recover_on_startup` ("Server restarted - please reroll"). A queued card whose `brief_json` is already set skips the stage.
 - The queue's position and ETA treat the brief stage as part of the wait before art.
 
 ## 4. Storage

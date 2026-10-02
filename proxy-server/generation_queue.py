@@ -11,7 +11,12 @@ finished/failed. etaSeconds = remaining time on the image currently painting
 max(avg - elapsed, 0), or 0 when nothing is painting. status()["etaSeconds"]
 is the ETA a newly submitted card would get.
 
-Card lifecycle: enqueue() puts a card in both the text and the image wait list.
+Card lifecycle: with a director (brief_fn, director.py), enqueue() first puts a card on the
+brief wait list. The text thread (the Ollama worker) serves briefs before rules text; a set's
+first card to arrive gets one brief per waiting version in one call, and a reroll gets one
+brief told to avoid the other versions' briefs. A brief that fails is simply skipped. Either
+way the card then moves to both the text and the image wait list, and its card params carry
+the brief as "brief". Without a director, enqueue() puts a card in both lists at once.
 Whichever worker picks it up first moves it to 'generating'; each worker sets
 text_ready / art_ready when its half finishes. The worker that finishes second
 moves the card to 'rendering', calls render_fn and marks it 'done'. Any failure
@@ -44,6 +49,9 @@ RenderFn = Callable[[dict, "str | None", "str | None", "str | None"], "tuple[dic
 """(card_params, text, art_b64, force_name) -> (final card dict, rendered card base64).
 Production: app.finalize_card. force_name is the set's commander_name for set cards, else None."""
 
+BriefFn = Callable[[dict, int, list], "list[dict] | None"]
+"""(card_params, count, avoid briefs) -> count briefs, or None. Production: director.write_briefs."""
+
 IDLE_SLEEP_SECONDS = 0.2
 AVERAGE_WINDOW = 10
 MAX_ERROR_DETAIL = 200
@@ -59,6 +67,14 @@ def _decode_b64_png(data: str) -> bytes:
     if data.startswith("data:"):
         data = data.split(",", 1)[1]
     return base64.b64decode(data)
+
+
+def _params(card: dict) -> dict:
+    """The card params text and art work from, with the director's brief when it has one."""
+    params = dict(card["card_params"])
+    if card.get("brief"):
+        params["brief"] = card["brief"]
+    return params
 
 
 def _error_detail(exc: BaseException) -> str:
@@ -89,7 +105,8 @@ def _seconds(value: float) -> float:
 class GenerationQueue:
     def __init__(self, storage: Storage, data_dir: Path, text_fn: TextFn, art_fn: ArtFn,
                  render_fn: RenderFn, default_image_seconds: float = 10.0,
-                 clock: Callable[[], float] = time.monotonic, start_workers: bool = True):
+                 clock: Callable[[], float] = time.monotonic, start_workers: bool = True,
+                 brief_fn: BriefFn | None = None):
         self.storage = storage
         self.data_dir = Path(data_dir)
         self.art_dir = self.data_dir / "art"
@@ -99,10 +116,12 @@ class GenerationQueue:
         self.text_fn = text_fn
         self.art_fn = art_fn
         self.render_fn = render_fn
+        self.brief_fn = brief_fn
         self.default_image_seconds = default_image_seconds
         self.clock = clock
 
         self._lock = threading.Lock()
+        self._brief_waiting: deque[str] = deque()
         self._text_waiting: deque[str] = deque()
         self._image_waiting: deque[str] = deque()
         # card_id -> {"text", "art", "text_done", "art_done"} until both halves finish
@@ -115,7 +134,7 @@ class GenerationQueue:
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         if start_workers:
-            for name, step in (("gen-text-worker", self.process_next_text),
+            for name, step in (("gen-text-worker", self.process_next_ollama),
                                ("gen-image-worker", self.process_next_image)):
                 thread = threading.Thread(target=self._worker_loop, args=(step,), name=name,
                                           daemon=True)
@@ -130,8 +149,50 @@ class GenerationQueue:
                 return
             self._partials[card_id] = {"text": None, "art": None,
                                        "text_done": False, "art_done": False}
-            self._text_waiting.append(card_id)
-            self._image_waiting.append(card_id)
+            if self.brief_fn is not None:
+                self._brief_waiting.append(card_id)
+            else:
+                self._text_waiting.append(card_id)
+                self._image_waiting.append(card_id)
+
+    def process_next_ollama(self) -> bool:
+        """The text thread's step: a waiting brief first, else rules text."""
+        return self.process_next_brief() or self.process_next_text()
+
+    def process_next_brief(self) -> bool:
+        """Write the director's brief for the next waiting card (and for the rest of its set
+        still waiting), then release them to text and art. False if nothing was waiting."""
+        with self._lock:
+            if not self._brief_waiting:
+                return False
+            card_id = self._brief_waiting.popleft()
+        card = self.storage.get_card(card_id)
+        if card is None:
+            with self._lock:
+                self._drop(card_id)
+            return True
+        if card.get("brief") is not None:
+            self._release([card_id])
+            return True
+        group, avoid = [card], []
+        if card.get("set_id"):
+            others = [c for c in self.storage.set_cards(card["set_id"]) if c["id"] != card_id]
+            with self._lock:
+                waiting = [c for c in others if c["id"] in self._brief_waiting]
+            if waiting:
+                group = sorted([card] + waiting, key=lambda c: c.get("slot") or 0)
+            else:
+                avoid = [c["brief"] for c in others if c.get("brief")]
+        try:
+            briefs = self.brief_fn(dict(card["card_params"]), len(group), avoid)
+        except Exception as exc:
+            _log(f"🎬 Director failed for {card_id}: {_error_detail(exc)}")
+            briefs = None
+        if briefs is not None and len(briefs) == len(group):
+            for member, member_brief in zip(group, briefs):
+                self.storage.set_card_brief(member["id"], member_brief)
+        self._release([c["id"] for c in group])
+        return True
 
     def process_next_text(self) -> bool:
         """Run text generation for the next waiting card. False if nothing was waiting."""
@@ -141,7 +202,7 @@ class GenerationQueue:
         if card is None:
             return True
         try:
-            text = self.text_fn(card["prompt"], dict(card["card_params"]))
+            text = self.text_fn(card["prompt"], _params(card))
             if text is None:
                 # app.createCardContent swallows Ollama errors and returns None
                 raise RuntimeError("no rules text was returned (is Ollama running?)")
@@ -162,7 +223,7 @@ class GenerationQueue:
         if card is None:
             return True
         try:
-            art_b64 = self.art_fn(card["prompt"], dict(card["card_params"]))
+            art_b64 = self.art_fn(card["prompt"], _params(card))
             if not art_b64:
                 raise RuntimeError("no image was returned")
             self._finish_painting(record_duration=True)
@@ -183,6 +244,9 @@ class GenerationQueue:
             remaining = self._remaining(avg)
             if card_id == self._painting:
                 return 0, _seconds(remaining)
+            if card_id in self._brief_waiting:  # its art is still ahead of it, behind these
+                queue_position = len(self._image_waiting) + self._brief_waiting.index(card_id) + 1
+                return queue_position, _seconds(remaining + avg * queue_position)
             try:
                 queue_position = self._image_waiting.index(card_id) + 1
             except ValueError:
@@ -194,7 +258,7 @@ class GenerationQueue:
         with self._lock:
             avg = self._average()
             remaining = self._remaining(avg)
-            cards_ahead = len(self._image_waiting)
+            cards_ahead = len(self._image_waiting) + len(self._brief_waiting)
             in_flight = len(self._partials) + len(self._rendering)
             return {
                 "busy": in_flight > 0,
@@ -270,6 +334,18 @@ class GenerationQueue:
             self.storage.update_card(card_id, status="generating")
         return card_id, card
 
+    def _release(self, card_ids: list[str]) -> None:
+        """Brief stage done: move the cards on to the text and image wait lists."""
+        with self._lock:
+            for card_id in card_ids:
+                try:
+                    self._brief_waiting.remove(card_id)
+                except ValueError:
+                    pass
+                if card_id in self._partials:
+                    self._text_waiting.append(card_id)
+                    self._image_waiting.append(card_id)
+
     def _finish_painting(self, record_duration: bool) -> None:
         with self._lock:
             if self._painting is None:
@@ -282,7 +358,7 @@ class GenerationQueue:
         """Forget a card (caller holds the lock)."""
         self._partials.pop(card_id, None)
         self._rendering.discard(card_id)
-        for waiting in (self._text_waiting, self._image_waiting):
+        for waiting in (self._brief_waiting, self._text_waiting, self._image_waiting):
             try:
                 waiting.remove(card_id)
             except ValueError:
