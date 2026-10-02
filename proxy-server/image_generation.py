@@ -38,6 +38,8 @@ NEGATIVE_PROMPT = ("nsfw, nudity, shirtless, bare chest, cleavage, revealing clo
                    "overexposed, blown highlights, harsh contrast, oversaturated, text, watermark, "
                    "signature, border, frame, card, blurry, lowres, deformed, extra limbs")
 GENERIC_CONTEXT = "fantasy scene"
+# The director brief's art fields, most important first (director.ART_FIELDS).
+BRIEF_ART_FIELDS = ("subject", "action", "setting", "framing", "light")
 
 WUBRG = "WUBRG"
 _COLOR_NAMES = {"white": "W", "blue": "U", "black": "B", "red": "R", "green": "G", "colorless": "C"}
@@ -260,8 +262,19 @@ def build_art_prompt(prompt: str, card_data: dict | None, count_tokens=estimate_
     palette. When the budget is tight the subject is trimmed (keeping its first words,
     never below SUBJECT_MIN_TOKENS), then the palette, type context and style are
     dropped in that order.
+
+    With a director brief (card_data["brief"], director.py) the subject is the brief's
+    subject, action, setting, framing and light instead of the prompt; when it is too long,
+    whole fields go from the end (light first) before any words are cut.
     """
-    subject = " ".join(str(prompt or "").split()).strip(" ,;")
+    brief = (card_data or {}).get("brief")
+    if brief:
+        brief_parts = [" ".join(str(brief["art"].get(f) or "").split()) for f in BRIEF_ART_FIELDS]
+        brief_parts = [p for p in brief_parts if p]
+        subject = ", ".join(brief_parts)
+    else:
+        brief_parts = []
+        subject = " ".join(str(prompt or "").split()).strip(" ,;")
     if not subject:
         subject = str((card_data or {}).get("name") or "").strip() or "a fantasy scene"
 
@@ -272,8 +285,11 @@ def build_art_prompt(prompt: str, card_data: dict | None, count_tokens=estimate_
     def tail_tokens(parts: list[str]) -> int:
         return sum(count_tokens(p) + 1 for p in parts)  # +1 for the joining comma
 
-    subject = _trim_to_tokens(subject, max(MAX_PROMPT_TOKENS - tail_tokens(tail), SUBJECT_MIN_TOKENS),
-                              count_tokens)
+    subject_budget = max(MAX_PROMPT_TOKENS - tail_tokens(tail), SUBJECT_MIN_TOKENS)
+    while len(brief_parts) > 1 and count_tokens(", ".join(brief_parts)) > subject_budget:
+        brief_parts.pop()
+        subject = ", ".join(brief_parts)
+    subject = _trim_to_tokens(subject, subject_budget, count_tokens)
 
     # Drop lowest-priority tail parts until everything fits.
     for part in [p for p in (color_part, type_context, ART_STYLE) if p]:

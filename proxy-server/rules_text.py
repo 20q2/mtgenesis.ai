@@ -596,8 +596,9 @@ def build_messages(prompt: str, card: dict | None, rng) -> list[dict]:
         p, t = power.creature_stats(card)
         facts.append(f'Power/toughness: {p}/{t} (fixed; design the abilities around this body)')
     facts.append(power.describe_budget(card))
+    brief = card.get('brief')
     concept = re.sub(r',?\s*(detailed digital art|magic: the gathering style|fantasy art of)', '', prompt or '', flags=re.I).strip(' ,')
-    if concept:
+    if concept and not brief:  # the director's brief replaces the auto-built art string
         facts.append(f'Concept: {concept}')
 
     # How many abilities: the rarity's range, trimmed to what the power budget can afford
@@ -639,8 +640,12 @@ def build_messages(prompt: str, card: dict | None, rng) -> list[dict]:
         musts.append(f'A {grounded[0].capitalize()} does not fly: no flying; prefer grounded keywords like vigilance, first strike, reach or menace.')
 
     hooks = [h for c in colors for h in COLOR_HOOKS[c]] or COLORLESS_HOOKS
-    hook = rng.choice(hooks)
-    musts.append(f'Design hook to consider, scaled to the power budget: {hook}.')
+    hook = rng.choice(hooks)  # drawn either way so seeded runs stay comparable
+    if brief:
+        musts.append(f"Card idea: {brief['identity']}. Build the abilities around this mechanic, "
+                     f"scaled to the power budget: {brief['mechanic']}.")
+    else:
+        musts.append(f'Design hook to consider, scaled to the power budget: {hook}.')
 
     user = '\n'.join(facts) + '\n\n' + '\n'.join(f'- {m}' for m in musts)
     return [{'role': 'system', 'content': SYSTEM_PROMPT}, {'role': 'user', 'content': user}]
