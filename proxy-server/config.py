@@ -45,6 +45,11 @@ IMAGE_CPU_OFFLOAD = True
 TEXT_MODEL = os.environ.get("MTG_TEXT_MODEL", "qwen3:8b")
 TEXT_ATTEMPTS = 3              # regenerate (up to twice) while the cleaned text still has lint errors
 TEXT_THINK = os.environ.get("MTG_TEXT_THINK") == "1"  # reasoning models: think before answering (slower)
+# Card director (director.py): a brief per card that steers rules text and art.
+# MTG_DIRECTOR=0 switches it off (cards are then generated as before); MTG_DIRECTOR_MODEL tries
+# another model, but a second resident model needs VRAM that SDXL shares on a 12 GB card.
+DIRECTOR_ENABLED = os.environ.get("MTG_DIRECTOR", "1") != "0"
+DIRECTOR_MODEL = os.environ.get("MTG_DIRECTOR_MODEL", TEXT_MODEL)
 
 # ===== AI NIGHT =====
 ADMIN_PIN = "1234"             # change before the event; required for /admin actions

@@ -1,0 +1,138 @@
+"""Card director: briefs that steer rules text and art.
+
+Spec: docs/superpowers/specs/2026-10-02-card-director-design.md.
+"""
+import json
+
+import pytest
+
+import director
+from director import ART_FIELDS, content_words, jaccard, write_briefs
+
+CARD = {"name": "Zur'ka, Élan of Ash", "type": "Creature", "supertype": "Legendary",
+        "subtype": "Human Cleric", "colors": ["B"], "manaCost": "{2}{B}", "cmc": 3,
+        "rarity": "mythic"}
+
+
+def brief(mechanic="sacrifice tokens to drain each opponent", subject="a human cleric in ash robes",
+          identity="An ash-priest who keeps dead fires burning", **art):
+    fields = {"subject": subject, "action": "raising a smoking censer",
+              "setting": "a ruined temple", "framing": "low angle, close",
+              "light": "embers glowing from below"}
+    fields.update(art)
+    return {"identity": identity, "mechanic": mechanic, "art": fields}
+
+
+class StubClient:
+    def __init__(self, *replies):
+        self.replies = list(replies)
+        self.calls = []
+
+    def chat(self, **kwargs):
+        self.calls.append(kwargs)
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        content = reply if isinstance(reply, str) else json.dumps({"briefs": reply})
+        return {"message": {"content": content}}
+
+
+def run(client, count=1, avoid=None, card=CARD):
+    return write_briefs(card, count, avoid, client, "qwen3:8b")
+
+
+def test_one_brief_parsed_and_trimmed():
+    long_identity = " ".join(f"word{i}" for i in range(30))
+    long_subject = "a human cleric " + " ".join(f"detail{i}" for i in range(20))
+    result = run(StubClient([brief(identity=long_identity, subject=long_subject)]))
+    assert len(result) == 1
+    assert len(result[0]["identity"].split()) == 20
+    assert len(result[0]["art"]["subject"].split()) == 12
+    assert set(result[0]["art"]) == set(ART_FIELDS)
+
+
+def test_three_briefs_with_distinct_mechanics():
+    replies = [brief("sacrifice tokens to drain each opponent"),
+               brief("return creature cards from your graveyard"),
+               brief("attacking makes opponents discard")]
+    result = run(StubClient(replies), count=3)
+    assert [b["mechanic"] for b in result] == [r["mechanic"] for r in replies]
+
+
+def test_overlapping_mechanics_retry_once_then_none():
+    same = [brief("sacrifice tokens to drain each opponent"),
+            brief("sacrifice tokens to drain each opponent quickly"),
+            brief("attacking makes opponents discard")]
+    client = StubClient(same, same)
+    assert run(client, count=3) is None
+    assert len(client.calls) == 2
+
+
+def test_retry_can_succeed():
+    bad = [brief("sacrifice tokens to drain"), brief("sacrifice tokens to drain")]
+    good = [brief("sacrifice tokens to drain"), brief("return creatures from the graveyard")]
+    client = StubClient(bad, good)
+    assert [b["mechanic"] for b in run(client, count=2)] == [g["mechanic"] for g in good]
+
+
+def test_avoid_is_sent_and_enforced():
+    avoid = [brief("sacrifice tokens to drain each opponent")]
+    client = StubClient([brief("sacrifice tokens to drain each opponent twice")],
+                        [brief("discard cards to grow stronger")])
+    result = run(client, avoid=avoid)
+    assert result[0]["mechanic"] == "discard cards to grow stronger"
+    assert "sacrifice tokens to drain each opponent" in client.calls[0]["messages"][-1]["content"]
+
+
+def test_subject_gets_the_subtype_when_missing():
+    result = run(StubClient([brief(subject="a robed priest at an altar")]))
+    assert result[0]["art"]["subject"].startswith("a human cleric, a robed priest")
+
+
+def test_subject_with_a_subtype_word_is_kept():
+    result = run(StubClient([brief(subject="a gaunt cleric with ash on his hands")]))
+    assert result[0]["art"]["subject"] == "a gaunt cleric with ash on his hands"
+
+
+def test_art_word_filter():
+    result = run(StubClient([brief(subject="a shirtless nude human cleric",
+                                   action="baring cleavage and a bare chest")]))
+    art = " ".join(result[0]["art"].values()).lower()
+    for word in ("shirtless", "nude", "cleavage", "bare chest"):
+        assert word not in art
+    assert "  " not in art
+
+
+@pytest.mark.parametrize("reply", ["not json", '{"briefs": []}', '{"briefs": [{"identity": "x"}]}',
+                                   '{"briefs": [{"identity": "x", "mechanic": "", "art": {}}]}'])
+def test_garbage_returns_none(reply):
+    assert run(StubClient(reply, reply)) is None
+
+
+def test_client_error_returns_none():
+    client = StubClient(TimeoutError("ollama timed out"), ConnectionError("down"))
+    assert run(client) is None
+
+
+def test_call_options():
+    client = StubClient([brief()])
+    run(client)
+    call = client.calls[0]
+    assert call["model"] == "qwen3:8b" and call["think"] is False
+    assert call["format"]["properties"]["briefs"]["minItems"] == 1
+    assert call["options"]["num_ctx"] == 2560
+    assert "Zur'ka" in call["messages"][-1]["content"]
+
+
+def test_content_words_and_jaccard():
+    a = content_words("Sacrifice tokens to drain each opponent")
+    assert "sacrifice" in a and "each" not in a and "to" not in a
+    assert jaccard(a, content_words("drain each opponent by sacrificing tokens")) > 0
+    assert jaccard(set(), set()) == 0.0
+
+
+def test_config_switches():
+    import config
+    assert isinstance(config.DIRECTOR_ENABLED, bool)
+    assert config.DIRECTOR_MODEL
+    assert director.MECHANIC_MAX_OVERLAP == 0.5
