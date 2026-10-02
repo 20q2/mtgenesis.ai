@@ -152,3 +152,14 @@ def test_logging_never_breaks_a_good_brief(monkeypatch):
     monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(io.BytesIO(), encoding="cp1252"))
     assert run(StubClient([brief()])) is not None
     assert run(StubClient("not json", "not json")) is None
+
+
+def test_a_transport_error_is_not_retried():
+    client = StubClient(TimeoutError("ollama timed out"), [brief()])
+    assert run(client) is None
+    assert len(client.calls) == 1
+
+
+def test_director_has_its_own_short_timeout():
+    import config
+    assert 0 < config.DIRECTOR_TIMEOUT_SECONDS <= 30

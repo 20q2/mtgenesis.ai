@@ -144,16 +144,22 @@ class GenerationQueue:
     # ----- public API -----
 
     def enqueue(self, card_id: str) -> None:
+        self.enqueue_many([card_id])
+
+    def enqueue_many(self, card_ids: list[str]) -> None:
+        """Enqueue several cards at once, so a commander set reaches the brief stage together
+        and gets one director call."""
         with self._lock:
-            if card_id in self._partials or card_id in self._rendering:
-                return
-            self._partials[card_id] = {"text": None, "art": None,
-                                       "text_done": False, "art_done": False}
-            if self.brief_fn is not None:
-                self._brief_waiting.append(card_id)
-            else:
-                self._text_waiting.append(card_id)
-                self._image_waiting.append(card_id)
+            for card_id in card_ids:
+                if card_id in self._partials or card_id in self._rendering:
+                    continue
+                self._partials[card_id] = {"text": None, "art": None,
+                                           "text_done": False, "art_done": False}
+                if self.brief_fn is not None:
+                    self._brief_waiting.append(card_id)
+                else:
+                    self._text_waiting.append(card_id)
+                    self._image_waiting.append(card_id)
 
     def process_next_ollama(self) -> bool:
         """The text thread's step: a waiting brief first, else rules text."""
@@ -165,33 +171,37 @@ class GenerationQueue:
         with self._lock:
             if not self._brief_waiting:
                 return False
-            card_id = self._brief_waiting.popleft()
-        card = self.storage.get_card(card_id)
-        if card is None:
-            with self._lock:
-                self._drop(card_id)
-            return True
-        if card.get("brief") is not None:
-            self._release([card_id])
-            return True
-        group, avoid = [card], []
-        if card.get("set_id"):
-            others = [c for c in self.storage.set_cards(card["set_id"]) if c["id"] != card_id]
-            with self._lock:
-                waiting = [c for c in others if c["id"] in self._brief_waiting]
-            if waiting:
-                group = sorted([card] + waiting, key=lambda c: c.get("slot") or 0)
-            else:
-                avoid = [c["brief"] for c in others if c.get("brief")]
+            # Peek, don't pop: the card keeps its queue position while its brief is written
+            # (this thread is the list's only consumer), and _release takes it off.
+            card_id = self._brief_waiting[0]
+        group_ids = [card_id]
         try:
-            briefs = self.brief_fn(dict(card["card_params"]), len(group), avoid)
-        except Exception as exc:
-            _log(f"🎬 Director failed for {card_id}: {_error_detail(exc)}")
-            briefs = None
-        if briefs is not None and len(briefs) == len(group):
-            for member, member_brief in zip(group, briefs):
-                self.storage.set_card_brief(member["id"], member_brief)
-        self._release([c["id"] for c in group])
+            card = self.storage.get_card(card_id)
+            if card is None:
+                with self._lock:
+                    self._drop(card_id)
+                return True
+            if card.get("brief") is not None:
+                return True
+            group, avoid = [card], []
+            if card.get("set_id"):
+                others = [c for c in self.storage.set_cards(card["set_id"]) if c["id"] != card_id]
+                with self._lock:
+                    waiting = [c for c in others if c["id"] in self._brief_waiting]
+                group = sorted([card] + waiting, key=lambda c: c.get("slot") or 0)
+                group_ids = [c["id"] for c in group]
+                # Versions already briefed (an earlier call, or a reroll's siblings) are avoided.
+                avoid = [c["brief"] for c in others if c.get("brief") and c["id"] not in group_ids]
+            try:
+                briefs = self.brief_fn(dict(card["card_params"]), len(group), avoid)
+            except Exception as exc:
+                _log(f"🎬 Director failed for {card_id}: {_error_detail(exc)}")
+                briefs = None
+            if briefs is not None and len(briefs) == len(group):
+                for member, member_brief in zip(group, briefs):
+                    self.storage.set_card_brief(member["id"], member_brief)
+        finally:
+            self._release(group_ids)
         return True
 
     def process_next_text(self) -> bool:

@@ -157,3 +157,39 @@ def test_position_counts_the_brief_stage(storage, rec, tmp_path):
     assert q.status()["cardsAhead"] == 2
     q.process_next_brief()
     assert q.position(second)[0] == 2  # first is now in the image list, second still briefing
+
+
+def test_position_while_the_brief_is_being_written(storage, rec, tmp_path):
+    seen = []
+
+    def director(params, count, avoid):
+        seen.append(q.position(card_id))
+        return None
+
+    q = queue(storage, tmp_path, rec, director)
+    card_id = add_card(storage)
+    q.enqueue(card_id)
+    q.process_next_brief()
+    assert seen[0][0] == 1 and seen[0][1] is not None
+
+
+def test_enqueue_many_keeps_a_set_in_one_call(storage, rec, tmp_path):
+    director = Director()
+    q = queue(storage, tmp_path, rec, director)
+    _, cards = set_cards(storage)
+    q.enqueue_many(cards)
+    while q.process_next_brief():
+        pass
+    assert [c["count"] for c in director.calls] == [3]
+
+
+def test_set_split_across_calls_still_avoids_the_briefed_sibling(storage, rec, tmp_path):
+    director = Director()
+    q = queue(storage, tmp_path, rec, director)
+    _, (s1, s2, s3) = set_cards(storage)
+    q.enqueue(s1)
+    q.process_next_brief()          # slot 1 briefed alone (the worker woke early)
+    q.enqueue_many([s2, s3])
+    q.process_next_brief()
+    assert director.calls[-1]["count"] == 2
+    assert director.calls[-1]["avoid"] == [brief("b1")]

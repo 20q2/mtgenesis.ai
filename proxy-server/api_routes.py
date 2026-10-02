@@ -318,8 +318,8 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
                 cards = [storage.create_card(user["id"], prompt, slot_params[slot], set_id=set_id,
                                              slot=slot)
                          for slot in (1, 2, 3)]
-        for card in cards:
-            gen_queue.enqueue(card["id"])
+        # All at once, so a set's versions share one director call.
+        gen_queue.enqueue_many([card["id"] for card in cards])
         return jsonify({"setId": set_id,
                         "cards": [card_view(storage.get_card(c["id"])) for c in cards]})
 

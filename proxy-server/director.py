@@ -143,10 +143,15 @@ def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model
                 # Small context, like the rules-text call: SDXL must still fit beside the model.
                 options={"temperature": 0.9, "top_p": 0.95, "num_predict": 200 * count + 100,
                          "num_ctx": 2560})
+        except Exception as exc:  # timeout, connection refused, unknown model
+            # Art waits for the brief, so a slow or missing Ollama is not retried.
+            _log(f"🎬 Director call failed: {exc}")
+            return None
+        try:
             raw = json.loads(resp["message"]["content"])
             briefs = [_clean(b, subtype) for b in raw.get("briefs") or []]
-        except Exception as exc:  # timeouts, connection errors, bad JSON
-            _log(f"🎬 Director call failed: {exc}")
+        except Exception as exc:  # bad JSON or shape: worth one more try
+            _log(f"🎬 Director reply unreadable: {exc}")
             continue
         if len(briefs) == count and all(briefs) and _distinct(briefs, avoid):
             _log(f"🎬 Director briefs: {[b['mechanic'] for b in briefs]}")

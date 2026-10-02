@@ -50,6 +50,9 @@ TEXT_THINK = os.environ.get("MTG_TEXT_THINK") == "1"  # reasoning models: think 
 # another model, but a second resident model needs VRAM that SDXL shares on a 12 GB card.
 DIRECTOR_ENABLED = os.environ.get("MTG_DIRECTOR", "1") != "0"
 DIRECTOR_MODEL = os.environ.get("MTG_DIRECTOR_MODEL", TEXT_MODEL)
+# Art waits for the brief, so the director gets its own short timeout (a hung Ollama costs
+# one brief, not minutes per card).
+DIRECTOR_TIMEOUT_SECONDS = 20
 
 # ===== AI NIGHT =====
 ADMIN_PIN = "1234"             # change before the event; required for /admin actions

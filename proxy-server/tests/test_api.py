@@ -20,6 +20,7 @@ EVENT_SUMMARY_KEYS = {"id", "name", "status", "createdAt", "closedAt"}
 class FakeQueue:
     def __init__(self):
         self.enqueued = []
+        self.batches = []
         self.pos = (2, 25.0)
         self.position_calls = []
         self.stat = {"busy": True, "cardsAhead": 4, "generatingNow": 1,
@@ -27,6 +28,10 @@ class FakeQueue:
 
     def enqueue(self, card_id):
         self.enqueued.append(card_id)
+
+    def enqueue_many(self, card_ids):
+        self.batches.append(list(card_ids))
+        self.enqueued.extend(card_ids)
 
     def position(self, card_id):
         self.position_calls.append(card_id)
@@ -157,6 +162,7 @@ def test_generations_set(client, queue, tmp_storage):
     assert [c["card"]["manaCost"] for c in body["cards"]] == ["{1}{B}{R}", "{2}{B}{R}", "{3}{B}{R}"]
     assert [c["card"]["cmc"] for c in body["cards"]] == [3, 4, 5]
     assert queue.enqueued == [c["id"] for c in body["cards"]]
+    assert queue.batches == [[c["id"] for c in body["cards"]]]  # one batch: one director call
     assert tmp_storage.get_set(body["setId"])["commander_name"] == name
 
     other = login(client, "Beth")
