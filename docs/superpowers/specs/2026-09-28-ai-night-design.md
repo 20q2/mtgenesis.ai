@@ -2,6 +2,8 @@
 
 **Status:** Approved in brainstorming 2026-09-28; awaiting written-spec review.
 
+> **Superseded in part (2026-10-03):** a set is now one commander (three versions at one mana value), each player has three of them (3, 4 and 5 CMC), and a self-vote counts as two. See `2026-10-03-commander-rules-design.md`.
+
 ## 1. Purpose
 
 MTGenesis.AI is used at a recurring "AI Night". Each player brings 3 AI-generated versions of the same commander, and the group votes on which version becomes legal at the table.

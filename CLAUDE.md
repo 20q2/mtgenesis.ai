@@ -23,7 +23,7 @@ npm run start                        # Angular dev server on :4200
 - Backend tests: `python -m pytest tests` from `proxy-server/` (the `slow` ones import app.py and torch).
 - Rules-text e2e (needs Ollama): `python tools/e2e_rules_text.py --label <name> [--model M] [--repeat N] [--from-db]` from `proxy-server/`. It runs a fixed matrix of card requests (or the stored ones) through the real pipeline and writes rendered PNGs plus `report.md` (raw replies, final text, lint findings) to `data/e2e/<name>/`. Use it after any prompt or cleanup change.
 - Art e2e (needs the GPU; don't run while people are generating): `python tools/e2e_art.py --label <name> [--seeds N] [--art-only] [--set NAME=VALUE] [--lora REPO FILE SCALE]` from `proxy-server/`. It renders a fixed, human-heavy card matrix with fixed seeds through the real gallery pipeline and writes art/card contact sheets plus `report.md` (prompts, blown-white %, contrast) to `data/e2e/<name>/`. `--set` overrides a prompt constant in `image_generation.py` for A/B runs. Use it after any art prompt, sampler or LoRA change.
-- Set variety (card director): add `--sets N [--no-director]` to either e2e tool. It runs N fixed commander sets (`tools/e2e_sets.py`) as their 3/4/5-mana versions and writes `report-sets.md`: text overlap between versions (`director.set_overlap`) or CLIP image similarity (lower = more distinct). Compare against a `--no-director` run.
+- Set variety (card director): add `--sets N [--no-director]` to either e2e tool. It runs N fixed commanders (`tools/e2e_sets.py`) as their three versions and writes `report-sets.md`: text overlap between versions (`director.set_overlap`) or CLIP image similarity (lower = more distinct). Compare against a `--no-director` run.
 - No linter or Python test framework is configured.
 
 ## Known issue: missing frontend models
@@ -54,7 +54,7 @@ Every service and component imports from `src/app/models/` (`card.model.ts`, `ap
   - Timeout constants (`COLD_START_TIMEOUT`, etc.).
   - xformers is disabled through env vars that must be set before `diffusers` is imported.
 - **Card director (`proxy-server/director.py`)**: before text and art, `write_briefs` asks `DIRECTOR_MODEL` (default `TEXT_MODEL`) for a hidden brief per card: `identity`, `mechanic`, and `art` (subject, action, setting, framing, light). The spec is `docs/superpowers/specs/2026-10-02-card-director-design.md`.
-  - A commander set gets three briefs in one call, each with a different mechanic; a reroll gets one that avoids its siblings' mechanics.
+  - A commander set (one commander's three versions) gets three briefs in one call, each with a different mechanic; a reroll gets one that avoids its siblings' mechanics.
   - `GenerationQueue` runs it as a brief stage that the Ollama worker serves before rules text. The brief is stored in `cards.brief_json` (never in `CardView`) and passed to text and art as `card_params["brief"]`.
   - `rules_text.build_messages` swaps the random color hook for the brief's identity and mechanic; `image_generation.build_art_prompt` builds the subject from the brief's art fields instead of the request prompt.
   - It never fails a card: any problem gives no brief, and both prompts are then exactly what they were before. `MTG_DIRECTOR=0` turns it off.
@@ -72,6 +72,21 @@ Every service and component imports from `src/app/models/` (`card.model.ts`, `ap
     - To make cards stronger or weaker overall, tune `RARITY_BONUS`, `STAT_TOTAL` or the rates in `ability_value`, then compare `over_budget_*` in e2e reports.
   - `finalize_card` still replaces `~`, fixes bullets and periods (keyword lines get no period), and generates missing creature/Vehicle P/T and Vehicle crew. Stats are a deterministic curve by mana value and rarity; `*` P/T only comes from the request.
 - **CORS/ngrok headers:** every response goes through `add_ngrok_headers`. New routes should do the same and handle `OPTIONS`.
+
+### Commander rules
+
+AI Night's commander rules, enforced on `/set` and `/vote`. The spec is `docs/superpowers/specs/2026-10-03-commander-rules-design.md`.
+
+- A `sets` row is **one commander**: three versions at the same mana value, rarity, type and P/T (`sets.cmc`, `sets.rarity`). Each player has one commander at each of 3, 4 and 5 CMC, built independently in its own `CommanderPanelComponent` tab.
+- `proxy-server/commander_rules.py` (`commander_params`) turns a `count: 3` request into those shared params:
+  - colored pips worth at most 3 mana, padded with generic mana to the CMC
+  - Legendary Creature, or Legendary Artifact — Vehicle (`commanderKind`)
+  - Uncommon, Rare or Mythic
+  - P/T as a point buy: at most CMC + 1 points (Vehicles +2), whole numbers only, never X or `*`; blank means an even split that spends every point (`auto_stats`)
+- `storage.py` checks across a player's live commanders (drafts plus those locked in the open event): one per CMC, and each rarity used once. Sets with `cmc` NULL predate the rules: they still show (under "Earlier sets") but can't be locked.
+- Votes stay one per voter per commander. `vote_tally` counts the owner's own vote as 2, and `SetView.cards[].ownerVote` marks it.
+- `src/app/services/commander-rules.ts` mirrors the rules for instant form feedback, so keep it in sync with `commander_rules.py`. Normal create (`count: 1`) is unaffected.
+- Tests: `tests/test_commander_rules.py`, plus the per-CMC cases in `tests/test_storage_sets.py` and `tests/test_api.py`.
 
 ### Knowledge Pool
 
