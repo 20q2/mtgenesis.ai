@@ -34,11 +34,12 @@ describe('EventService', () => {
     http.expectOne(`${base}/events`).flush([]);
   });
 
-  it('mySet() GETs /me/sets/current', () => {
-    let result: SetView | null | undefined;
-    service.mySet().subscribe(s => (result = s));
-    http.expectOne(`${base}/me/sets/current`).flush(setView({ status: 'draft' }));
-    expect(result?.status).toBe('draft');
+  it('mySets() GETs /me/sets/current as a list, one per CMC', () => {
+    let result: SetView[] | undefined;
+    service.mySets().subscribe(s => (result = s));
+    http.expectOne(`${base}/me/sets/current`)
+      .flush([setView({ id: 's-3', status: 'draft', cmc: 3 }), setView({ id: 's-5', cmc: 5 })]);
+    expect(result?.map(s => s.cmc)).toEqual([3, 5]);
   });
 
   it('lock() and unlock() POST to /sets/<id>/lock|unlock', () => {

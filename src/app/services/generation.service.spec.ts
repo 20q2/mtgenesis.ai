@@ -26,6 +26,16 @@ describe('GenerationService', () => {
 
   afterEach(() => http.verify());
 
+  it('cardParams carries a commander kind and P/T, and leaves them out when unset', () => {
+    const card: Card = { name: 'Wagon', manaCost: '{R}', colors: ['R'], type: 'Artifact', cmc: 3,
+                         rarity: Rarity.RARE, commanderKind: 'vehicle', power: '4', toughness: '2' };
+    const params = service.cardParams(card);
+    expect(params.commanderKind).toBe('vehicle');
+    expect(params.power).toBe('4');
+    expect(params.toughness).toBe('2');
+    expect('commanderKind' in service.cardParams({ ...card, commanderKind: undefined })).toBeFalse();
+  });
+
   it('submit POSTs the request to /generations', () => {
     const req: GenerationRequest = {
       prompt: 'Fantasy art of a dragon',

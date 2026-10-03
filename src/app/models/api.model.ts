@@ -2,6 +2,7 @@
  * API request/response types.
  * Legacy types reconstructed 2026-09-28 from usages (the original was never committed).
  */
+import { CommanderKind } from './card.model';
 
 export interface CardValidationRequest {
   card: Record<string, unknown>;
@@ -66,6 +67,8 @@ export interface CardParams {
   description?: string;
   power?: string;
   toughness?: string;
+  /** Commander sets only: Legendary Creature or Legendary Artifact — Vehicle. */
+  commanderKind?: CommanderKind;
 }
 
 export interface GeneratedCardData extends CardParams { flavorText?: string; }
@@ -98,7 +101,13 @@ export interface CardView {
 /** A card on the gallery's Community tab (GET /cards/shared), with its maker. */
 export interface SharedCardView extends CardView { username: string; }
 
-export interface SetCardView extends CardView { votes: number; leader: boolean; tied: boolean; }
+/** votes are weighted: the set owner's own vote counts 2, and ownerVote marks that card. */
+export interface SetCardView extends CardView {
+  votes: number;
+  leader: boolean;
+  tied: boolean;
+  ownerVote: boolean;
+}
 
 export interface SetView {
   id: string;
@@ -109,6 +118,9 @@ export interface SetView {
   prompt: string;
   status: 'draft' | 'locked' | 'abandoned';
   lockedAt: string | null;
+  /** A set is one commander at 3, 4 or 5 mana; null for sets made before the commander rules. */
+  cmc: number | null;
+  rarity: string | null;
   cards: SetCardView[];
   myVoteCardId: string | null;
 }
@@ -136,6 +148,8 @@ export interface GenerationRequest {
   cardData: CardParams;
   count: 1 | 3;
   commanderName?: string;
+  /** Commander sets (count 3): the commander's mana value, 3, 4 or 5. */
+  cmc?: number;
 }
 
 export interface GenerationResponse { setId: string | null; cards: CardView[]; }

@@ -39,8 +39,8 @@ export function doneCard(overrides: Partial<CardView> = {}): CardView {
 }
 
 export function setCard(overrides: Partial<SetCardView> = {}): SetCardView {
-  const { votes = 0, leader = false, tied = false, ...rest } = overrides;
-  return { ...doneCard(rest), votes, leader, tied };
+  const { votes = 0, leader = false, tied = false, ownerVote = false, ...rest } = overrides;
+  return { ...doneCard(rest), votes, leader, tied, ownerVote };
 }
 
 export function setView(overrides: Partial<SetView> = {}): SetView {
@@ -54,6 +54,8 @@ export function setView(overrides: Partial<SetView> = {}): SetView {
     prompt: 'a fire elemental queen',
     status: 'locked',
     lockedAt: '2026-09-28T21:00:00+00:00',
+    cmc: 4,
+    rarity: 'rare',
     cards: [1, 2, 3].map(slot => setCard({ id: `${id}-c${slot}`, setId: id, slot })),
     myVoteCardId: null,
     ...overrides

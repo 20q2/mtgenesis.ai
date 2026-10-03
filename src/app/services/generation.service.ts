@@ -112,6 +112,7 @@ export class GenerationService {
     if (card.description) { params.description = card.description; }
     if (card.power) { params.power = card.power; }
     if (card.toughness) { params.toughness = card.toughness; }
+    if (card.commanderKind) { params.commanderKind = card.commanderKind; }
     return params;
   }
 

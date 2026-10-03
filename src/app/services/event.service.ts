@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import { EventSummary, EventView, SetView } from '../models/api.model';
 import { api } from './api.util';
 
@@ -23,9 +23,14 @@ export class EventService {
     return this.http.get<EventSummary[]>(api('/events'));
   }
 
-  /** My draft, or else my set locked in the open event, or null. */
+  /** My commanders, one per CMC: each a draft, or else locked in the open event. */
+  mySets(): Observable<SetView[]> {
+    return this.http.get<SetView[]>(api('/me/sets/current'));
+  }
+
+  /** TEMPORARY until the set builder moves to mySets() (plan Task 6). */
   mySet(): Observable<SetView | null> {
-    return this.http.get<SetView | null>(api('/me/sets/current'));
+    return this.mySets().pipe(map(sets => sets[0] ?? null));
   }
 
   lock(setId: string, commanderName: string): Observable<SetView> {

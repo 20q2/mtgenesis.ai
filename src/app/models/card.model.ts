@@ -10,7 +10,12 @@ export enum Rarity {
   MYTHIC = 'mythic'
 }
 
+/** A commander is a Legendary Creature or a Legendary Artifact — Vehicle. */
+export type CommanderKind = 'creature' | 'vehicle';
+
 export interface Card {
+  /** Commander sets only. */
+  commanderKind?: CommanderKind;
   name: string;
   manaCost: string;
   supertype?: string;
