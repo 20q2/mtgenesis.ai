@@ -15,20 +15,50 @@
 
   <ng-container *ngIf="event as ev">
     <section class="panel vote-header">
-      <div>
+      <div class="vote-title-row">
         <h2 class="page-title">{{ ev.name }}</h2>
-        <p class="muted" *ngIf="!isClosed">
-          Vote for one version of each commander. A vote on your own commander counts as two — owners, vote first.
-          You can change your vote until the host closes the event.
-        </p>
-        <p class="muted" *ngIf="isClosed">This event is closed. Votes are final.</p>
+        <span class="badge" [class.badge-gold]="!isClosed" [class.badge-muted]="isClosed">
+          {{ isClosed ? 'Closed' : 'Voting open' }}
+        </span>
       </div>
-      <span class="badge" [class.badge-gold]="!isClosed" [class.badge-muted]="isClosed">
-        {{ isClosed ? 'Closed' : 'Voting open' }}
-      </span>
+
+      <app-night-steps class="vote-steps" [current]="isClosed ? 'play' : 'vote'"></app-night-steps>
+
+      <ul *ngIf="!isClosed" class="how-to-vote" aria-label="How to vote">
+        <li><span class="material-icons" aria-hidden="true">how_to_vote</span>
+          <span><strong>Pick one favorite version of each commander.</strong> The version with the most votes is legal tonight.</span></li>
+        <li><span class="material-icons" aria-hidden="true">balance</span>
+          <span><strong>Vote in good faith:</strong> pick the version that's balanced for fair games, not just the strongest.</span></li>
+        <li><span class="material-icons" aria-hidden="true">person</span>
+          <span><strong>Your vote on your own commander counts as two,</strong> so vote on your own first, then everyone else's.</span></li>
+        <li><span class="material-icons" aria-hidden="true">edit</span>
+          <span>You can change a vote until the host closes voting.</span></li>
+      </ul>
+      <p class="muted" *ngIf="isClosed">Voting is closed and the results are final. The winning versions are legal tonight.</p>
+
+      <p *ngIf="!isClosed && progress.total" class="vote-progress" aria-live="polite">
+        You've voted on <strong>{{ progress.voted }}</strong> of {{ progress.total }} commanders
+      </p>
     </section>
 
-    <app-winners-banner *ngIf="isClosed" [sets]="ev.sets"></app-winners-banner>
+    <!-- After the vote: what I play with tonight -->
+    <section *ngIf="isClosed && legal.length" class="panel my-legal">
+      <h3 class="section-title">Your legal commanders</h3>
+      <ul class="legal-list">
+        <li *ngFor="let l of legal; trackBy: trackLegal" class="legal-item">
+          <span class="legal-mana"><i class="ms ms-cost ms-shadow ms-{{ l.set.cmc }}" aria-hidden="true"></i></span>
+          <span class="legal-text">
+            <strong>{{ l.set.commanderName }}</strong>
+            <span class="muted">{{ legalLabel(l) }}</span>
+          </span>
+          <img *ngFor="let card of l.cards" class="legal-thumb"
+               [src]="card.cardImageUrl | media | async"
+               [alt]="l.set.commanderName + ' version ' + card.slot">
+        </li>
+      </ul>
+    </section>
+
+    <app-winners-banner *ngIf="isClosed" [sets]="ev.sets" title="Tonight's legal commanders"></app-winners-banner>
 
     <div *ngIf="error" class="alert alert-error" role="alert">
       <span class="material-icons">error</span>
@@ -43,14 +73,41 @@
       </p>
     </section>
 
-    <section *ngFor="let group of ev.sets | cmcGroups; trackBy: trackGroup" class="cmc-group">
-      <h3 class="section-title cmc-heading">{{ group.label }}</h3>
-      <app-set-row *ngFor="let set of group.sets; trackBy: trackSet"
+    <!-- Rule 7: owners vote on their own first -->
+    <section *ngIf="!isClosed && progress.mine.length" class="my-commanders">
+      <div class="group-head">
+        <h3 class="section-title">Your commanders</h3>
+        <span class="mine-nudge" [class.done]="!progress.mineUnvoted">
+          <ng-container *ngIf="progress.mineUnvoted; else allMine">
+            {{ mineNudge }} · your vote counts double
+          </ng-container>
+          <ng-template #allMine>
+            <span class="material-icons" aria-hidden="true">check_circle</span> You've voted on all of yours
+          </ng-template>
+        </span>
+      </div>
+      <app-set-row *ngFor="let set of progress.mine; trackBy: trackSet"
                    [set]="set"
                    [final]="isClosed"
                    [disabled]="isClosed || voting.has(set.id)"
                    (vote)="vote(set, $event)"></app-set-row>
     </section>
+
+    <div class="other-commanders">
+      <h3 *ngIf="!isClosed && progress.mine.length && progress.others.length" class="section-title others-title">
+        Everyone else's
+      </h3>
+      <section *ngFor="let group of (isClosed ? ev.sets : progress.others) | cmcGroups; trackBy: trackGroup"
+               class="cmc-group">
+        <h3 class="section-title cmc-heading">{{ group.label }}</h3>
+        <app-set-row *ngFor="let set of group.sets; trackBy: trackSet"
+                     [set]="set"
+                     [final]="isClosed"
+                     [showVoteButtons]="!isClosed"
+                     [disabled]="isClosed || voting.has(set.id)"
+                     (vote)="vote(set, $event)"></app-set-row>
+      </section>
+    </div>
 
     <p class="muted history-link">
       <a routerLink="/events" class="night-link">Past events</a>

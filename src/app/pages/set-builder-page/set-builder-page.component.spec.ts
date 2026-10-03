@@ -67,6 +67,24 @@ describe('SetBuilderPageComponent', () => {
     expect(lineup).toContain('Not started');
   });
 
+  it('shows where the player is in the night', () => {
+    setup([three(), five()], openEvent);
+    expect(component.nightStep).toBe('build');
+    expect(fixture.nativeElement.querySelector('app-night-steps')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.next-step')).toBeNull();
+  });
+
+  it('once all three are locked in, says the next step is voting', () => {
+    const locked = (id: string, cmc: number, rarity: string) => setView({ id, status: 'locked', cmc, rarity });
+    setup([locked('a', 3, 'uncommon'), locked('b', 4, 'rare'), locked('c', 5, 'mythic')], openEvent);
+    fixture.detectChanges();
+    expect(component.nightStep).toBe('vote');
+    const next = fixture.nativeElement.querySelector('.next-step') as HTMLElement;
+    expect(next.textContent).toContain('All three commanders are locked in');
+    expect(next.querySelector('a')!.getAttribute('routerLink') ?? next.querySelector('a')!.getAttribute('ng-reflect-router-link'))
+      .toBe('/vote');
+  });
+
   it('counts the commanders locked in', () => {
     setup([three(), five()], openEvent);
     expect(component.lockedCount).toBe(1);
@@ -78,11 +96,11 @@ describe('SetBuilderPageComponent', () => {
     const rules = (fixture.nativeElement.querySelector('.ledger') as HTMLElement).textContent!.replace(/\s+/g, ' ');
     expect(rules).toContain('One at each mana value');
     expect(rules).toContain('Legendary Creature or Vehicle');
+    expect(rules).toContain('Multicolor is fine');
     expect(rules).toContain('CMC + 1 points');
     expect(rules).toContain('no X or *');
     expect(rules).toContain('One Uncommon, one Rare, one Mythic');
-    expect(rules).toContain("reroll only if one doesn't function");
-    expect(rules).toContain('counts ×2');
+    expect(rules).toContain('No tweaking');
   });
 
   it('tracks which commander holds each rarity', () => {

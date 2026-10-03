@@ -47,6 +47,15 @@
         ],
         "createdAt": "2026-09-29T19:14:52.822Z",
         "reason": "Claude: src is bound via [src]=\"... | media | async\" (same pattern as card-slot), not a missing image"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/pages/vote-page/vote-page.component.html"
+        ],
+        "createdAt": "2026-10-03T06:25:40.924Z",
+        "reason": "Claude: src is bound at runtime via [src]=\"card.cardImageUrl | media | async\" (same pattern as winners-banner); static scan can't see it"
       }
     ]
   }

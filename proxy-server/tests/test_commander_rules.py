@@ -29,8 +29,17 @@ def test_cost_padded_to_each_cmc():
     assert BASE["manaCost"] == "{W}{U}" and "cmc" not in BASE  # input untouched
 
 
+def test_pips_may_fill_the_commanders_own_mana_value():
+    # Each commander is its own design, so a 5-drop can be {W}{W}{U}{U}{B}.
+    assert commander_params({**BASE, "manaCost": "{W}{W}{U}{U}"}, 4)["manaCost"] == "{W}{W}{U}{U}"
+    assert commander_params({**BASE, "manaCost": "{W}{W}{U}{U}{B}"}, 5)["manaCost"] == "{W}{W}{U}{U}{B}"
+    assert commander_params({**BASE, "manaCost": "{W}{W}{U}{U}"}, 5)["manaCost"] == "{1}{W}{W}{U}{U}"
+    assert commander_params({**BASE, "manaCost": "{2/W}{2/U}"}, 4)["manaCost"] == "{2/W}{2/U}"
+
+
 def test_too_many_pips_is_400():
-    assert "3" in rejects({**BASE, "manaCost": "{W}{W}{U}{U}"})
+    assert rejects({**BASE, "manaCost": "{W}{W}{U}{U}"}, 3) ==         "A 3-mana commander's colored pips can add up to at most 3 mana"
+    rejects({**BASE, "manaCost": "{W}{W}{U}{U}{B}{B}"}, 5)
 
 
 def test_bad_cmc_is_400():
@@ -51,7 +60,8 @@ def test_vehicle_kind():
     p = commander_params({**vehicle, "subtype": ""}, 3)
     assert p["supertype"] == "Legendary" and p["type"] == "Artifact" and p["subtype"] == "Vehicle"
     assert "commanderKind" not in p
-    assert commander_params({**vehicle, "subtype": "Construct"}, 3)["subtype"] == "Construct Vehicle"
+    # A Vehicle commander is exactly "Legendary Artifact — Vehicle", whatever else is typed.
+    assert commander_params({**vehicle, "subtype": "Construct"}, 3)["subtype"] == "Vehicle"
     assert commander_params({**vehicle, "subtype": "Vehicle"}, 3)["subtype"] == "Vehicle"
     rejects({**BASE, "commanderKind": "planeswalker"})
 
@@ -113,3 +123,12 @@ def test_power_level_lean_unchanged():
     assert power_level.creature_stats({"cmc": 3, "subtype": "Wall"}) == (1, 4)
     assert power_level.lean(2, 2, "Goblin Warrior") == (3, 1)
     assert power_level.lean(2, 2, "Human") == (2, 2)
+
+
+def test_creature_type_must_be_a_creature_type():
+    for ok in ("Human Wizard", "Elf", "", "Dragon Spirit"):
+        assert commander_params({**BASE, "subtype": ok}, 3)["subtype"] == ok
+    assert rejects({**BASE, "subtype": "Equipment"}) == "Equipment isn't a creature type"
+    assert rejects({**BASE, "subtype": "Human Vehicle"}) == "Vehicle isn't a creature type"
+    for bad in ("Aura", "Instant", "Artifact", "Legendary", "Forest", "Saga"):
+        rejects({**BASE, "subtype": bad})

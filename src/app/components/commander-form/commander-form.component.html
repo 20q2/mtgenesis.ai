@@ -3,7 +3,7 @@
   <section class="cf-section" [attr.aria-labelledby]="'cf-colors-' + cmc">
     <div class="cf-head">
       <h4 class="cf-title" [id]="'cf-colors-' + cmc">Colors</h4>
-      <span class="cf-rule">Up to 3 mana of colored pips · generic mana fills the rest</span>
+      <span class="cf-rule">Any colors, e.g. {{ '{' }}1{{ '}' }}{{ '{' }}W{{ '}' }}{{ '{' }}U{{ '}' }} · colored pips can fill up to {{ cmc }} mana · generic mana fills the rest</span>
     </div>
 
     <div class="cost-row">
@@ -20,7 +20,9 @@
           <i class="ms ms-cost ms-shadow {{ symbolClass(pip) }}" aria-hidden="true"></i>
         </button>
       </div>
-      <span class="cost-value"><strong>{{ cmc }}</strong> mana</span>
+      <span class="cost-value">
+        <strong>{{ pipValue }}</strong> of {{ cmc }} mana colored<ng-container *ngIf="genericSymbol"> · {{ cmc - pipValue }} generic added</ng-container>
+      </span>
       <button *ngIf="pips.length" type="button" class="btn btn-ghost cost-clear" (click)="clearPips()">
         <span class="material-icons" aria-hidden="true">backspace</span> Clear
       </button>
@@ -43,7 +45,7 @@
   <section class="cf-section" [attr.aria-labelledby]="'cf-type-' + cmc">
     <div class="cf-head">
       <h4 class="cf-title" [id]="'cf-type-' + cmc">Type</h4>
-      <span class="cf-rule">Always Legendary · Vehicles get +2 points and a Crew cost</span>
+      <span class="cf-rule">Legendary Creature or Vehicle · Vehicles get +2 points and a Crew cost</span>
     </div>
     <div class="segmented" role="radiogroup" [attr.aria-labelledby]="'cf-type-' + cmc">
       <button type="button" role="radio" class="segment kind-creature"
@@ -56,23 +58,34 @@
       </button>
     </div>
 
+    <p *ngIf="kind === 'vehicle'" class="vehicle-line">
+      <i class="ms ms-artifact" aria-hidden="true"></i> Legendary Artifact — Vehicle
+      <span class="muted">· becomes a creature when crewed</span>
+    </p>
+
+    <ng-container *ngIf="kind === 'creature'">
     <label class="field-label subtype-label" [for]="'cf-subtype-' + cmc">
-      {{ kind === 'vehicle' ? 'Vehicle type' : 'Creature type' }} <span class="optional">optional</span>
+      Creature type <span class="optional">optional</span>
     </label>
     <input [id]="'cf-subtype-' + cmc"
            class="night-input"
            type="text"
            autocomplete="off"
+           [class.invalid]="!!subtypeError"
+           [attr.aria-invalid]="!!subtypeError"
+           [attr.aria-describedby]="subtypeError ? 'cf-subtype-error-' + cmc : null"
            [value]="subtype"
-           [placeholder]="kind === 'vehicle' ? 'e.g. Construct (Vehicle is added)' : 'e.g. Human Cleric'"
+           placeholder="e.g. Human Cleric"
            (input)="onSubtypeInput($any($event.target).value)">
-    <div *ngIf="kind === 'creature'" class="chips subtype-chips">
+    <span *ngIf="subtypeError" class="field-error subtype-error" [id]="'cf-subtype-error-' + cmc">{{ subtypeError }}</span>
+    <div class="chips subtype-chips">
       <button *ngFor="let type of creatureTypes"
               type="button"
               class="chip chip-sm"
               [attr.aria-pressed]="subtype === type"
               (click)="pickType(type)">{{ type }}</button>
     </div>
+    </ng-container>
   </section>
 
   <!-- Body: point buy -->
@@ -131,7 +144,7 @@
   <section class="cf-section" [attr.aria-labelledby]="'cf-rarity-' + cmc">
     <div class="cf-head">
       <h4 class="cf-title" [id]="'cf-rarity-' + cmc">Rarity</h4>
-      <span class="cf-rule">One Uncommon, one Rare and one Mythic across your three commanders</span>
+      <span class="cf-rule">Your call: one Uncommon, one Rare and one Mythic across your three commanders</span>
     </div>
     <div class="rarity-row" role="radiogroup" [attr.aria-labelledby]="'cf-rarity-' + cmc">
       <button *ngFor="let r of rarities"
@@ -156,6 +169,6 @@
     </span>
     <span class="preview-type">{{ typeLine }}</span>
     <span class="preview-pt">{{ shownStats[0] }}/{{ shownStats[1] }}</span>
-    <span class="preview-rarity rarity-{{ rarity }}"><span class="gem" aria-hidden="true"></span>{{ rarityLabel }}</span>
+    <span class="preview-rarity rarity-{{ rarity || 'none' }}"><span class="gem" aria-hidden="true"></span>{{ rarityLabel }}</span>
   </div>
 </div>

@@ -13,6 +13,14 @@
       </p>
     </div>
 
+    <app-night-steps class="intro-steps" [current]="nightStep"></app-night-steps>
+
+    <div *ngIf="nightStep === 'vote'" class="next-step" role="status">
+      <span class="material-icons" aria-hidden="true">how_to_vote</span>
+      <span>All three commanders are locked in. Next: vote on yours first, then everyone else's.</span>
+      <a routerLink="/vote" class="btn btn-gold">Go vote</a>
+    </div>
+
     <ul class="ledger" aria-label="The rules">
       <li class="ledger-item">
         <span class="lg-label">Mana</span>
@@ -23,12 +31,12 @@
             <span class="sr-only">{{ cmc }} CMC: {{ summary(cmc) }}</span>
           </span>
         </span>
-        <span class="lg-note">One at each mana value</span>
+        <span class="lg-note">One at each mana value. Multicolor is fine.</span>
       </li>
       <li class="ledger-item">
         <span class="lg-label">Type</span>
         <span class="lg-value">Legendary Creature or Vehicle</span>
-        <span class="lg-note">Vehicles get a Crew cost from the AI</span>
+        <span class="lg-note">Crew cost on Vehicles comes from the AI</span>
       </li>
       <li class="ledger-item">
         <span class="lg-label">Power / toughness</span>
@@ -57,12 +65,7 @@
       <li class="ledger-item">
         <span class="lg-label">Versions</span>
         <span class="lg-value">3 per commander</span>
-        <span class="lg-note">No tweaking: reroll only if one doesn't function at all</span>
-      </li>
-      <li class="ledger-item">
-        <span class="lg-label">Voting</span>
-        <span class="lg-value">Your own vote counts ×2</span>
-        <span class="lg-note">One vote per commander · owners vote first</span>
+        <span class="lg-note">No tweaking</span>
       </li>
     </ul>
   </section>

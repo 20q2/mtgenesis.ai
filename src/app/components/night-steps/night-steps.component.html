@@ -1,0 +1,16 @@
+<ol class="night-steps" aria-label="How tonight works">
+  <li *ngFor="let step of steps; let i = index"
+      class="night-step"
+      [attr.data-state]="stateOf(i)"
+      [attr.aria-current]="stateOf(i) === 'current' ? 'step' : null">
+    <span class="step-mark" aria-hidden="true">
+      <span *ngIf="stateOf(i) === 'done'; else num" class="material-icons">check</span>
+      <ng-template #num>{{ i + 1 }}</ng-template>
+    </span>
+    <span class="step-body">
+      <span class="step-title">{{ step.title }}</span>
+      <span class="step-text">{{ step.text }}</span>
+    </span>
+    <span class="sr-only">{{ stateOf(i) === 'done' ? '(done)' : stateOf(i) === 'current' ? '(you are here)' : '' }}</span>
+  </li>
+</ol>

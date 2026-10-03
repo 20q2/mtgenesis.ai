@@ -36,6 +36,32 @@ app-commander-panel[hidden] {
   }
 }
 
+.intro-steps {
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.4rem;
+}
+
+.next-step {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem 0.9rem;
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-gold);
+  background: color-mix(in srgb, var(--gold) 12%, #fff);
+  font-weight: 600;
+
+  .material-icons {
+    color: var(--accent-text);
+  }
+
+  .btn {
+    margin-left: auto;
+  }
+}
+
 .ledger {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

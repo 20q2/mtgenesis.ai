@@ -41,10 +41,11 @@ def commander_params(card_data: dict, cmc: int) -> dict
 `commander_params` builds the card params shared by all three versions:
 
 - **CMC:** must be in `COMMANDER_CMCS`, else 400.
-- **Mana cost:** keeps the requested colored, hybrid and Phyrexian pips and drops generic and X/Y/Z. The pips must be worth ≤ 3 mana (`{2/W}` counts 2), else 400. Generic is padded up to the CMC, for example `{W}{U}` at 4 becomes `{2}{W}{U}`. This is today's `commander_slot_params` logic, moved here.
+- **Mana cost:** keeps the requested colored, hybrid and Phyrexian pips and drops generic and X/Y/Z. The pips may be worth up to the commander's own CMC (`{2/W}` counts 2), else 400. (Was ≤ 3 for every commander, a leftover from one design printed at 3/4/5; changed 2026-10-03.) Generic is padded up to the CMC, for example `{W}{U}` at 4 becomes `{2}{W}{U}`. This is today's `commander_slot_params` logic, moved here.
 - **Kind** (`card_data["commanderKind"]`, default `"creature"`):
   - `"creature"` → `supertype "Legendary"`, `type "Creature"`. The subtype is the player's.
-  - `"vehicle"` → `supertype "Legendary"`, `type "Artifact"`. The subtype must include `Vehicle`, and `Vehicle` is appended if missing.
+  - `"vehicle"` → `supertype "Legendary"`, `type "Artifact"`, subtype exactly `Vehicle` (anything typed is ignored).
+  - A creature's subtype may only hold creature types: other cards' subtypes and type words (Equipment, Aura, Vehicle, Instant, Legendary…) are a 400 ("Equipment isn't a creature type").
   - Anything else → 400.
 - **Rarity:** lowercased, must be in `COMMANDER_RARITIES`, else 400 ("Commanders are Uncommon, Rare or Mythic").
 - **P/T:**
@@ -134,7 +135,7 @@ A user's **live** commanders are their `draft` sets plus their sets `locked` in 
 ## 7. Testing
 
 - **`tests/test_commander_rules.py`** (new):
-  - pips and padding at each CMC; pips worth > 3 rejected
+  - pips and padding at each CMC; pips worth more than the CMC rejected
   - both kinds; Vehicle subtype appended
   - each rarity accepted, common rejected
   - P/T accepted at and under budget; over budget, X, *, `1+*`, negative, toughness 0 and half-given rejected

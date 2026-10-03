@@ -4,6 +4,7 @@ import { EventView, SetView } from '../../models/api.model';
 import { Rarity, RarityOptions } from '../../models/card.model';
 import { CommanderState, rarityLabel } from '../../components/commander-panel/commander-panel.component';
 import { apiErrorMessage } from '../../services/api.util';
+import { NightStepId, nightStep } from '../../services/commander-night';
 import { COMMANDER_CMCS, COMMANDER_RARITIES } from '../../services/commander-rules';
 import { EventService } from '../../services/event.service';
 import { PageVisibilityService } from '../../services/page-visibility.service';
@@ -85,6 +86,12 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
       }
     }
     return taken;
+  }
+
+  /** Where this player is in the night: building, locking in, voting or playing. */
+  get nightStep(): NightStepId {
+    const generated = this.cmcs.filter(cmc => !!this.states[cmc]).length;
+    return nightStep(generated, this.lockedCount, this.event?.status ?? null);
   }
 
   get lockedCount(): number {

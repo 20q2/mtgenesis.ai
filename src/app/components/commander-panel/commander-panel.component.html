@@ -55,10 +55,10 @@
           </a>
           <button type="button" class="btn btn-ghost unlock" [disabled]="unlocking" (click)="unlock()">
             <span class="material-icons" aria-hidden="true">lock_open</span>
-            {{ unlocking ? 'Unlocking…' : 'Unlock to change' }}
+            {{ unlocking ? 'Unlocking…' : 'Unlock' }}
           </button>
         </div>
-        <p class="muted ls-note">Unlocking clears the votes on this commander.</p>
+        <p class="muted ls-note">Unlock only to fix a mistake: the rules say no tweaking, and unlocking clears this commander's votes.</p>
       </div>
     </ng-container>
 
@@ -68,13 +68,24 @@
                           [initialCard]="loadedCard"
                           (cardChange)="onCardChange($event)"></app-commander-form>
 
+      <ul class="checklist" aria-label="Rules check" aria-live="polite">
+        <li *ngFor="let item of checklist; trackBy: trackItem" [class.ok]="item.ok" [class.fail]="!item.ok">
+          <span class="material-icons check-icon" aria-hidden="true">{{ item.ok ? 'check_circle' : 'cancel' }}</span>
+          <span class="check-text">
+            <span class="check-label">{{ item.label }}</span>
+            <span class="check-detail">{{ item.detail }}</span>
+          </span>
+          <span class="sr-only">{{ item.ok ? 'passes' : 'needs a fix' }}</span>
+        </li>
+      </ul>
+
       <div class="generate-row">
         <button type="button"
                 class="btn btn-gold generate-set"
                 [disabled]="!canGenerate()"
                 (click)="generate()">
           <span class="material-icons">auto_awesome</span>
-          {{ submitting ? 'Submitting…' : (setId ? 'Start over: 3 new versions' : 'Generate 3 versions') }}
+          {{ submitting ? 'Submitting…' : (setId ? 'Start over (mistakes only)' : 'Generate 3 versions') }}
         </button>
         <span class="muted" *ngIf="generateHint() as hint">{{ hint }}</span>
       </div>
@@ -95,6 +106,7 @@
       </span>
     </div>
 
+    <p class="swipe-hint muted" *ngIf="setId"><span class="material-icons" aria-hidden="true">swipe</span> Swipe to compare all 3 versions</p>
     <div class="slots">
       <app-card-slot *ngFor="let view of slots; let i = index; trackBy: trackSlot"
                      [view]="view"
@@ -114,7 +126,7 @@
         {{ locking ? 'Locking…' : 'Lock in' }}
       </button>
       <span class="muted lock-reason">
-        {{ lockDisabledReason() || 'Happy with these? Lock in and the table votes on which version is legal.' }}
+        {{ lockDisabledReason() || 'Lock in posts these 3 versions for the vote. The table picks which one is legal tonight.' }}
       </span>
     </div>
   </section>

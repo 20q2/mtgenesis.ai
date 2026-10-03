@@ -21,7 +21,7 @@ export class WinnersBannerComponent {
   label(outcome: SetOutcome): string {
     switch (outcome.kind) {
       case 'winner': return versionLabel(outcome.cards);
-      case 'tie': return `Tied: ${versionLabel(outcome.cards)} — host decides`;
+      case 'tie': return `Tied: ${versionLabel(outcome.cards)}. Ask the host to pick`;
       default: return 'No votes';
     }
   }

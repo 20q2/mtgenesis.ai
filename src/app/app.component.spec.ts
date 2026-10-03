@@ -40,7 +40,7 @@ describe('AppComponent (shell)', () => {
   it('shows the nav links and the username when logged in', () => {
     const el: HTMLElement = fixture.nativeElement;
     const links = Array.from(el.querySelectorAll('nav.nav-links a')).map(a => a.textContent!.trim());
-    expect(links).toEqual(['Create', 'Commander Set', 'Gallery', 'Vote', 'Knowledge Pool']);
+    expect(links).toEqual(['Create', 'Commanders', 'Gallery', 'Vote', 'Knowledge Pool']);
     expect(el.querySelector('.username')!.textContent).toContain('Alice');
   });
 

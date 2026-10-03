@@ -5,14 +5,19 @@ import { CardView, EventView, GeneratedCardData, SetView } from '../../models/ap
 import { Card, Rarity, RarityOptions } from '../../models/card.model';
 import { apiErrorMessage } from '../../services/api.util';
 import { isFinished, isPending } from '../../services/card-status';
-import { MAX_PIP_VALUE, commanderPipValue, commanderStatsError } from '../../services/commander-rules';
+import { COMMANDER_NAME_MAX, ChecklistItem, commanderChecklist } from '../../services/commander-rules';
 import { EventService } from '../../services/event.service';
 import { GenerationService } from '../../services/generation.service';
 import { ManaService } from '../../services/mana.service';
 
-export const COMMANDER_NAME_MAX = 40;
+export { COMMANDER_NAME_MAX };
 export const UNLOCK_CONFIRM = 'This clears votes on this commander';
 /** Rule 6: a reroll is only for a version that doesn't work at all. */
+/** Rule 5: generate once, no tweaking. Starting over is for a design mistake. */
+export const START_OVER_CONFIRM =
+  "The rules say no tweaking: you generate once, and reroll a version only if it doesn't work. "
+  + 'Start this commander over only to fix a mistake in its design. Start over? '
+  + '(Its current versions stay in your Gallery.)';
 export const REROLL_CONFIRM =
   'Rerolls are only for a version that doesn\'t function under any circumstance. Reroll it?';
 
@@ -115,20 +120,13 @@ export class CommanderPanelComponent implements OnChanges, OnDestroy {
     return this.slots.some(s => !!s && isPending(s.status));
   }
 
-  /** True when the chosen pips are worth more than the cheapest commander's mana value. */
-  get tooManyPips(): boolean {
-    return commanderPipValue(this.formCard?.manaCost ?? '') > MAX_PIP_VALUE;
+  /** The rules this design must meet, re-checked on every change (the server checks again). */
+  get checklist(): ChecklistItem[] {
+    return commanderChecklist(this.commanderName.value, this.formCard, this.cmc, this.takenRarities);
   }
 
-  /** The CMC of the other commander that already uses the chosen rarity, if any. */
-  get rarityTakenAt(): number | undefined {
-    return this.formCard ? this.takenRarities[this.formCard.rarity] : undefined;
-  }
-
-  get statsError(): string | null {
-    const card = this.formCard;
-    return card ? commanderStatsError(card.power ?? '', card.toughness ?? '', this.cmc,
-                                      card.commanderKind ?? 'creature') : null;
+  trackItem(_index: number, item: ChecklistItem): string {
+    return item.id;
   }
 
   /** What the versions print (the first version's card): shown read-only once locked in. */
@@ -159,22 +157,16 @@ export class CommanderPanelComponent implements OnChanges, OnDestroy {
   }
 
   canGenerate(): boolean {
-    return !this.submitting && !this.hasPending() && !this.isLocked && !this.tooManyPips
-      && this.rarityTakenAt === undefined && !this.statsError;
+    return !this.submitting && !this.hasPending() && !this.isLocked && this.checklist.every(item => item.ok);
   }
 
   generateHint(): string | null {
     if (this.isLocked) {
       return 'This commander is locked in. Unlock it to start over.';
     }
-    if (this.tooManyPips) {
-      return `Colored pips can add up to at most ${MAX_PIP_VALUE} mana.`;
-    }
-    if (this.rarityTakenAt !== undefined) {
-      return `Your ${this.rarityTakenAt} CMC commander is locked in as ${rarityLabel(this.formCard!.rarity)}.`;
-    }
-    if (this.statsError) {
-      return this.statsError;
+    const failing = this.checklist.find(item => !item.ok);
+    if (failing) {
+      return failing.detail;
     }
     if (this.hasPending()) {
       return 'Wait for all 3 versions to finish before starting over.';
@@ -200,7 +192,7 @@ export class CommanderPanelComponent implements OnChanges, OnDestroy {
       return;
     }
     if (this.setStatus === 'draft' && this.slots.some(s => !!s)
-        && !window.confirm('Start this commander over? Its current versions stay in your Gallery.')) {
+        && !window.confirm(START_OVER_CONFIRM)) {
       return;
     }
 

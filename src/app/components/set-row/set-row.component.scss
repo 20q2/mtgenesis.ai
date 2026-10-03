@@ -142,3 +142,49 @@
     padding: 0.5rem 0.9rem;
   }
 }
+
+/* Which commander this is: its mana value and rarity */
+.row-cmc {
+  display: inline-flex;
+  font-size: 1.35rem;
+}
+
+.row-meta {
+  --rarity: var(--rarity-common);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+
+  &.rarity-uncommon { --rarity: var(--rarity-uncommon); }
+  &.rarity-rare { --rarity: var(--rarity-rare); }
+  &.rarity-mythic { --rarity: var(--rarity-mythic); }
+
+  .gem {
+    width: 9px;
+    height: 9px;
+    transform: rotate(45deg);
+    border-radius: 2px;
+    background: linear-gradient(135deg, #fff 0%, var(--rarity) 45%, color-mix(in srgb, var(--rarity) 55%, #000) 100%);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  }
+}
+
+/* Phones show the versions as a carousel: say there are three */
+.swipe-hint {
+  display: none;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.82rem;
+
+  .material-icons {
+    font-size: 1rem;
+  }
+
+  @media (max-width: 700px) {
+    display: flex;
+  }
+}

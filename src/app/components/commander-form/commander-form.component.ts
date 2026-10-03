@@ -2,7 +2,7 @@ import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from
 import { GeneratedCardData } from '../../models/api.model';
 import { Card, CommanderKind, CommonSubtypes, Rarity, RarityOptions } from '../../models/card.model';
 import {
-  COMMANDER_RARITIES, MAX_PIP_VALUE, autoStats, commanderCost, commanderPipValue, statPoints
+  COMMANDER_RARITIES, autoStats, commanderCost, commanderPipValue, creatureTypeError, statPoints
 } from '../../services/commander-rules';
 import { ManaService } from '../../services/mana.service';
 
@@ -40,7 +40,8 @@ export class CommanderFormComponent implements OnChanges {
   pips: string[] = [];
   kind: CommanderKind = 'creature';
   subtype = '';
-  rarity: Rarity = Rarity.UNCOMMON;
+  /** Null until the player picks: they decide which commander gets which rarity. */
+  rarity: Rarity | null = null;
   /** Auto: the server spends every point (the split shown is the one it will pick). */
   auto = true;
   power = 0;
@@ -103,11 +104,17 @@ export class CommanderFormComponent implements OnChanges {
   }
 
   get rarityLabel(): string {
-    return this.rarities.find(r => r.value === this.rarity)?.label ?? this.rarity;
+    return this.rarities.find(r => r.value === this.rarity)?.label ?? 'No rarity yet';
   }
 
   canAdd(color: string): boolean {
-    return this.pipValue + 1 <= MAX_PIP_VALUE && color.length > 0;
+    // The pips may fill this commander's whole mana value.
+    return this.pipValue + 1 <= this.cmc && color.length > 0;
+  }
+
+  /** Why the typed creature type isn't one (e.g. "Equipment isn't a creature type"), or null. */
+  get subtypeError(): string | null {
+    return this.kind === 'creature' ? creatureTypeError(this.subtype) : null;
   }
 
   addPip(color: string): void {
@@ -199,7 +206,7 @@ export class CommanderFormComponent implements OnChanges {
       subtype: this.subtypeOut,
       colors: this.mana.extractColorsFromManaCost(this.pips.join('')),
       cmc: this.cmc,
-      rarity: this.rarity,
+      rarity: (this.rarity ?? '') as Rarity,
       commanderKind: this.kind,
       power: this.auto ? '' : String(power),
       toughness: this.auto ? '' : String(toughness),
@@ -213,8 +220,8 @@ export class CommanderFormComponent implements OnChanges {
 
   /** The subtype as sent: a Vehicle always says Vehicle. */
   private get subtypeOut(): string {
-    const sub = this.subtype.replace(/\s*\bVehicle\b/i, '').trim();
-    return this.kind === 'vehicle' ? `${sub} Vehicle`.trim() : sub;
+    // A Vehicle commander is exactly Artifact — Vehicle; a creature keeps its typed types.
+    return this.kind === 'vehicle' ? 'Vehicle' : this.subtype.replace(/\s+/g, ' ').trim();
   }
 
   /** "a legendary dragon, large and imposing": the image model reads the type, sized by CMC. */
@@ -246,14 +253,10 @@ export class CommanderFormComponent implements OnChanges {
     }
   }
 
-  /** Moves off a rarity another commander is locked in with. */
+  /** Clears a rarity another commander has since locked in with (the player picks again). */
   private ensureFreeRarity(): void {
-    if (this.takenAt(this.rarity) === undefined) {
-      return;
-    }
-    const free = COMMANDER_RARITIES.find(r => this.takenAt(r) === undefined);
-    if (free) {
-      this.rarity = free;
+    if (this.rarity && this.takenAt(this.rarity) !== undefined) {
+      this.rarity = null;
     }
   }
 

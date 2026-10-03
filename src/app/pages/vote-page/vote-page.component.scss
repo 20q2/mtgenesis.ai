@@ -29,3 +29,151 @@
 .cmc-heading {
   margin: 0 0 0.6rem;
 }
+
+/* ===== Header: the night, how to vote, progress ===== */
+.vote-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.vote-steps {
+  margin: 0.75rem 0 0.5rem;
+}
+
+.how-to-vote {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.15rem 1.5rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+
+  @media (max-width: 720px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    padding: 0.5rem 0;
+    border-top: 1px solid var(--line);
+    font-size: 0.92rem;
+    color: var(--text-muted);
+  }
+
+  strong {
+    color: var(--text);
+  }
+
+  .material-icons {
+    flex: none;
+    font-size: 1.15rem;
+    color: var(--accent-text);
+  }
+}
+
+.vote-progress {
+  margin: 0.75rem 0 0;
+  font-weight: 600;
+  color: var(--text-muted);
+
+  strong {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    color: var(--text);
+  }
+}
+
+/* ===== My commanders first ===== */
+.my-commanders {
+  margin-top: 1.25rem;
+}
+
+.group-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.6rem;
+
+  .section-title {
+    margin: 0;
+  }
+}
+
+.mine-nudge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-gold);
+  background: color-mix(in srgb, var(--gold) 14%, #fff);
+  color: var(--accent-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+
+  &.done {
+    border-color: color-mix(in srgb, var(--success) 40%, transparent);
+    background: var(--success-bg);
+    color: var(--success);
+  }
+
+  .material-icons {
+    font-size: 1rem;
+  }
+}
+
+.others-title {
+  margin: 1.5rem 0 0;
+}
+
+/* ===== After the vote: my legal commanders ===== */
+.my-legal {
+  margin-bottom: 1rem;
+}
+
+.legal-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legal-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.legal-mana {
+  flex: none;
+  font-size: 1.6rem;
+}
+
+.legal-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+
+  strong {
+    font-family: var(--font-display);
+  }
+
+  .muted {
+    font-size: 0.85rem;
+  }
+}
+
+.legal-thumb {
+  width: 54px;
+  border-radius: 4px;
+  box-shadow: var(--shadow-1);
+}

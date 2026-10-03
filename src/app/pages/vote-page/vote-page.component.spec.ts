@@ -11,6 +11,8 @@ import { MediaPipe } from '../../pipes/media.pipe';
 import { EventService } from '../../services/event.service';
 import { MediaService } from '../../services/media.service';
 import { PageVisibilityService } from '../../services/page-visibility.service';
+import { UserService } from '../../services/user.service';
+import { NightStepsComponent } from '../../components/night-steps/night-steps.component';
 import { fakeVisibility } from '../../testing/fake-visibility';
 import { eventView, setCard, setView } from '../../testing/fixtures';
 import { VOTE_POLL_MS, VotePageComponent } from './vote-page.component';
@@ -44,20 +46,27 @@ describe('VotePageComponent', () => {
     });
   }
 
-  function setup(current: EventView | null) {
-    events = jasmine.createSpyObj<EventService>('EventService', ['current', 'vote', 'get']);
+  function setup(current: EventView | null, me = 'u-me', latest: EventView | null = null) {
+    events = jasmine.createSpyObj<EventService>('EventService', ['current', 'vote', 'get', 'list']);
+    events.list.and.returnValue(of([]));
     events.current.and.returnValue(of(current));
+    if (latest) {
+      events.list.and.returnValue(of([{ id: latest.id, name: latest.name, status: latest.status,
+                                        createdAt: latest.createdAt, closedAt: latest.closedAt }]));
+      events.get.and.returnValue(of(latest));
+    }
     const media = jasmine.createSpyObj<MediaService>('MediaService', ['src']);
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
     visibility = fakeVisibility();
     TestBed.configureTestingModule({
       imports: [RouterTestingModule],
       declarations: [VotePageComponent, SetRowComponent, WinnersBannerComponent, CardSlotComponent, MediaPipe,
-                     CmcGroupsPipe],
+                     CmcGroupsPipe, NightStepsComponent],
       providers: [
         { provide: EventService, useValue: events },
         { provide: MediaService, useValue: media },
-        { provide: PageVisibilityService, useValue: visibility }
+        { provide: PageVisibilityService, useValue: visibility },
+        { provide: UserService, useValue: { currentUser: () => ({ id: me, username: 'Me' }) } }
       ]
     });
     fixture = TestBed.createComponent(VotePageComponent);
@@ -90,10 +99,43 @@ describe('VotePageComponent', () => {
     expect(groups[2].textContent).toContain('Old Set');
   });
 
-  it("explains the vote rules, including the owner's double vote", () => {
+  it("explains how to vote: one per commander, in good faith, per CMC, owner x2, owners first", () => {
     setup(eventView({ sets: [setA()] }));
-    expect(el().querySelector('.vote-header')!.textContent).toContain(
-      'Vote for one version of each commander. A vote on your own commander counts as two — owners, vote first.');
+    const rules = el().querySelector('.how-to-vote')!.textContent!.replace(/\s+/g, ' ');
+    expect(rules).toContain('Pick one favorite version of each commander');
+    expect(rules).toContain('good faith');
+    expect(rules).toContain('balanced');
+    expect(rules).toContain('counts as two');
+    expect(rules).toContain('vote on your own first');
+    expect(el().querySelector('app-night-steps')).not.toBeNull();
+  });
+
+  it('puts my own commanders first and nudges me to vote on them', () => {
+    setup(eventView({ sets: [setB({ cmc: 3 }), setA({ cmc: 4, userId: 'u-me' })] }));
+    const mine = el().querySelector('.my-commanders') as HTMLElement;
+    expect(mine.textContent).toContain('Your commanders');
+    expect(mine.textContent).toContain("Zur'ka");
+    expect(mine.textContent).not.toContain('Grimbold');
+    expect(el().querySelector('.mine-nudge')!.textContent).toContain('Vote on yours first');
+    expect(el().querySelector('.mine-nudge')!.textContent).toContain('counts double');
+    const others = el().querySelector('.other-commanders') as HTMLElement;
+    expect(others.textContent).toContain('Grimbold');
+  });
+
+  it("counts the commanders I've voted on", () => {
+    setup(eventView({ sets: [setA({ myVoteCardId: 'a1' }), setB()] }));
+    expect(el().querySelector('.vote-progress')!.textContent!.replace(/\s+/g, ' '))
+      .toContain("You've voted on 1 of 2 commanders");
+  });
+
+  it('after the vote, lists my legal commanders', () => {
+    setup(eventView({ status: 'closed', closedAt: '2026-09-28T23:00:00+00:00',
+                      sets: [setA({ userId: 'u-me', cmc: 3 }), setB({ cmc: 4 })] }));
+    const legal = el().querySelector('.my-legal') as HTMLElement;
+    expect(legal.textContent).toContain('Your legal commanders');
+    expect(legal.textContent).toContain("Zur'ka");
+    expect(legal.textContent).toContain('Version 1');
+    expect(legal.textContent).not.toContain('Grimbold');
   });
 
   it("marks the owner's pick as owner ×2", () => {
@@ -150,10 +192,9 @@ describe('VotePageComponent', () => {
     expect(cardEl('a2').textContent).toContain('1 vote');
   });
 
-  it('a closed event disables all vote buttons and renders the winner names', () => {
+  it('a closed event hides the vote buttons and renders the winner names', () => {
     setup(eventView({ status: 'closed', closedAt: '2026-09-28T23:00:00+00:00', sets: [setA(), setB()] }));
-    expect(voteButtons().length).toBe(6);
-    expect(voteButtons().every(b => b.disabled)).toBeTrue();
+    expect(voteButtons().length).toBe(0);
 
     const banner = el().querySelector('.winners-banner') as HTMLElement;
     expect(banner).not.toBeNull();
@@ -161,6 +202,9 @@ describe('VotePageComponent', () => {
     expect(banner.textContent).toContain('Version 1');
     expect(banner.textContent).toContain('Grimbold the Unbowed');
     expect(banner.textContent).toContain('Tied');
+    expect(banner.textContent).toContain('Ask the host to pick');
+    expect(banner.textContent).toContain("Tonight's legal commanders");
+    expect(banner.textContent).toContain('One winning version per commander');
   });
 
   it('does not vote on a closed event', () => {
@@ -202,6 +246,25 @@ describe('VotePageComponent', () => {
     expect(events.vote).toHaveBeenCalledTimes(1);
   });
 
+  it("after a reload once voting has closed, shows the latest event's results", () => {
+    const closed = eventView({ id: 'e-9', name: 'AI Night 9', status: 'closed', closedAt: '2026-10-03T23:00:00+00:00',
+                               sets: [setA({ userId: 'u-me', cmc: 3 })] });
+    setup(null, 'u-me', closed);
+    expect(events.get).toHaveBeenCalledWith('e-9');
+    expect(el().textContent).toContain('AI Night 9');
+    expect(el().querySelector('.my-legal')).not.toBeNull();
+    expect(el().textContent).not.toContain('No event open');
+  });
+
+  it('shows each commander row with its mana value and rarity', () => {
+    setup(eventView({ sets: [setA({ cmc: 4, rarity: 'rare' })] }));
+    const head = el().querySelector('app-set-row .set-row-header') as HTMLElement;
+    expect(head.querySelector('.row-cmc i.ms-4')).not.toBeNull();
+    expect(head.textContent).toContain('4 CMC');
+    expect(head.textContent).toContain('Rare');
+    expect(el().querySelector('app-set-row .swipe-hint')!.textContent).toContain('Swipe to compare all 3 versions');
+  });
+
   it('with no event says "No event open" and links to past events', () => {
     setup(null);
     expect(el().textContent).toContain('No event open');
@@ -223,7 +286,7 @@ describe('VotePageComponent', () => {
 
     expect(events.get).toHaveBeenCalledWith('e-1');
     expect(el().querySelector('.winners-banner')).not.toBeNull();
-    expect(voteButtons().every(b => b.disabled)).toBeTrue();
+    expect(voteButtons().length).toBe(0);
     fixture.destroy();
   }));
 

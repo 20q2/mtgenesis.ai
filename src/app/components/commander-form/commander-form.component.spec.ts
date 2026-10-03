@@ -26,12 +26,12 @@ describe('CommanderFormComponent', () => {
 
   afterEach(() => fixture.destroy());
 
-  it('starts as a Legendary Creature, Uncommon, auto body, colorless', () => {
+  it('starts as a Legendary Creature with no rarity picked yet, auto body, colorless', () => {
     setup();
     expect(last.supertype).toBe('Legendary');
     expect(last.type).toBe('Creature');
     expect(last.commanderKind).toBe('creature');
-    expect(last.rarity).toBe(Rarity.UNCOMMON);
+    expect(last.rarity as string).toBe('');  // the player decides which commander gets which rarity
     expect(last.cmc).toBe(3);
     expect([last.power, last.toughness]).toEqual(['', '']);
     expect(last.manaCost).toBe('');
@@ -63,6 +63,20 @@ describe('CommanderFormComponent', () => {
       expect(last.manaCost).toBe('{W}{W}{U}');
     });
 
+    it("a 5 CMC commander's pips can fill all 5 mana", () => {
+      setup(5);
+      ['W', 'W', 'U', 'U', 'B'].forEach(c => click(`.pip-add-${c}`));
+      expect(last.manaCost).toBe('{W}{W}{U}{U}{B}');
+      expect(component.fullCost).toBe('{W}{W}{U}{U}{B}');
+      expect((el().querySelector('.pip-add-R') as HTMLButtonElement).disabled).toBeTrue();
+      expect(el().querySelector('.cost-value')!.textContent!.replace(/\s+/g, ' ')).toContain('5 of 5 mana colored');
+    });
+
+    it('says any colors can be combined', () => {
+      setup(3);
+      expect(el().querySelector('.cf-section .cf-rule')!.textContent).toContain('Any colors');
+    });
+
     it('removes a pip when it is clicked in the cost, and clears all', () => {
       setup();
       ['W', 'U', 'B'].forEach(c => click(`.pip-add-${c}`));
@@ -74,15 +88,25 @@ describe('CommanderFormComponent', () => {
   });
 
   describe('kind', () => {
-    it('Vehicle makes a Legendary Artifact — Vehicle with 2 more points', () => {
+    it('Vehicle makes exactly a Legendary Artifact — Vehicle with 2 more points', () => {
       setup(3);
       component.subtype = 'Construct';
       click('.kind-vehicle');
       expect(last.type).toBe('Artifact');
-      expect(last.subtype).toBe('Construct Vehicle');
+      expect(last.subtype).toBe('Vehicle');
       expect(last.commanderKind).toBe('vehicle');
       expect(component.points).toBe(6);
       expect(el().querySelector('.subtype-chips')).toBeNull();
+      expect(el().querySelector('#cf-subtype-3')).toBeNull();  // no type field: it is just Vehicle
+      expect(el().querySelector('.vehicle-line')!.textContent).toContain('Legendary Artifact — Vehicle');
+    });
+
+    it('flags a creature type that is not a creature type', () => {
+      setup(3);
+      component.onSubtypeInput('Human Equipment');
+      fixture.detectChanges();
+      expect(component.subtypeError).toBe("Equipment isn't a creature type");
+      expect(el().querySelector('.subtype-error')!.textContent).toContain("Equipment isn't a creature type");
     });
 
     it('Creature puts it back', () => {
@@ -169,7 +193,16 @@ describe('CommanderFormComponent', () => {
       const uncommon = el().querySelector('.rarity-uncommon') as HTMLButtonElement;
       expect(uncommon.disabled).toBeTrue();
       expect(uncommon.textContent).toContain('Locked at 3 CMC');
-      expect(last.rarity).toBe(Rarity.RARE);  // moved off the taken default
+      expect(last.rarity as string).toBe('');
+    });
+
+    it('clears a picked rarity that another commander then locks in', () => {
+      setup(4);
+      click('.rarity-uncommon');
+      expect(last.rarity).toBe(Rarity.UNCOMMON);
+      fixture.componentRef.setInput('takenRarities', { uncommon: 3 });
+      fixture.detectChanges();
+      expect(last.rarity as string).toBe('');
     });
 
     it('picks a rarity', () => {
@@ -193,6 +226,7 @@ describe('CommanderFormComponent', () => {
     setup(4);
     component.subtype = 'Human Cleric';
     click('.pip-add-B');
+    click('.rarity-uncommon');
     const preview = el().querySelector('.preview')!.textContent!.replace(/\s+/g, ' ');
     expect(preview).toContain('Legendary Creature — Human Cleric');
     expect(preview).toContain('2/3');

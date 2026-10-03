@@ -8,7 +8,7 @@ import { Card, Rarity } from '../../models/card.model';
 import { EventService } from '../../services/event.service';
 import { GenerationService } from '../../services/generation.service';
 import { cardView, doneCard, eventView, setCard, setView } from '../../testing/fixtures';
-import { CommanderPanelComponent, CommanderState, REROLL_CONFIRM } from './commander-panel.component';
+import { CommanderPanelComponent, CommanderState, REROLL_CONFIRM, START_OVER_CONFIRM } from './commander-panel.component';
 
 describe('CommanderPanelComponent', () => {
   let fixture: ComponentFixture<CommanderPanelComponent>;
@@ -196,16 +196,61 @@ describe('CommanderPanelComponent', () => {
     expect(generateButton().disabled).toBeTrue(); // the new versions are pending
   });
 
-  it('disables Generate with a reason when the pips cost more than 3', () => {
-    setup(null, openEvent);
+  it('starting a generated commander over reminds that the rules say no tweaking', () => {
+    setup(draft(), openEvent);
+    gen.submit.and.returnValue(of({ setId: 's-2', cards: [] }));
+    component.onCardChange(formCard());
+    const confirmSpy = spyOn(window, 'confirm').and.returnValue(false);
+    component.generate();
+    expect(confirmSpy).toHaveBeenCalledWith(START_OVER_CONFIRM);
+    expect(START_OVER_CONFIRM).toContain('no tweaking');
+    expect(gen.submit).not.toHaveBeenCalled();
+    fixture.detectChanges();
+    expect(generateButton().textContent).toContain('Start over (mistakes only)');
+  });
+
+  it('says what Lock in does', () => {
+    setup(draft(), openEvent);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.lock-reason').textContent)
+      .toContain('Lock in posts these 3 versions for the vote');
+  });
+
+  it('disables Generate with a reason when the pips cost more than the mana value', () => {
+    setup(null, openEvent);  // 4 CMC
     component.commanderName.setValue('Zur');
-    component.onCardChange(formCard({ manaCost: '{W}{W}{U}{U}' }));
+    component.onCardChange(formCard({ manaCost: '{W}{W}{U}{U}{B}' }));
     fixture.detectChanges();
     expect(component.canGenerate()).toBeFalse();
     expect(generateButton().disabled).toBeTrue();
-    expect(component.generateHint()).toContain('at most 3');
+    expect(component.generateHint()).toBe('Colored pips add up to 5 mana');
     component.generate();
     expect(gen.submit).not.toHaveBeenCalled();
+  });
+
+  it('allows four pips on a 4 CMC commander', () => {
+    setup(null, openEvent);
+    component.commanderName.setValue('Zur');
+    component.onCardChange(formCard({ manaCost: '{W}{W}{U}{U}' }));
+    expect(component.canGenerate()).toBeTrue();
+  });
+
+  it('shows a live checklist that ticks as the design changes', () => {
+    setup(null, openEvent);
+    fixture.detectChanges();
+    const rows = () => Array.from<HTMLElement>(fixture.nativeElement.querySelectorAll('.checklist li'));
+    expect(rows().length).toBe(5);
+    expect(rows()[0].classList).toContain('fail');  // no name yet
+    component.commanderName.setValue('Zur');
+    component.onCardChange(formCard());
+    fixture.detectChanges();
+    expect(rows().every(r => r.classList.contains('ok'))).toBeTrue();
+    expect(rows()[1].textContent).toContain('Costs exactly 4 mana');
+    component.onCardChange(formCard({ subtype: 'Equipment' }));
+    fixture.detectChanges();
+    expect(rows()[2].classList).toContain('fail');
+    expect(rows()[2].textContent).toContain("Equipment isn't a creature type");
+    expect(generateButton().disabled).toBeTrue();
   });
 
   it('disables Generate with a hint when the rarity is taken', () => {
@@ -227,9 +272,11 @@ describe('CommanderPanelComponent', () => {
   it('requires a commander name', () => {
     setup(null, openEvent);
     component.commanderName.setValue('   ');
+    component.onCardChange(formCard());
+    expect(component.canGenerate()).toBeFalse();
+    expect(component.generateHint()).toBe('Give your commander a name');
     component.generate();
     expect(gen.submit).not.toHaveBeenCalled();
-    expect(component.error).toBe('Enter a commander name.');
   });
 
   it('a 409 on generate shows the server error text', () => {
@@ -290,6 +337,7 @@ describe('CommanderPanelComponent', () => {
       expect(summary.textContent).toContain('2/2');
       expect(summary.textContent).toContain('Rare');
       expect(fixture.nativeElement.querySelector('app-commander-form')).toBeNull();
+      expect(summary.querySelector('.ls-note')!.textContent).toContain('only to fix a mistake');
       expect(component.costSymbols(lockedCard.manaCost)).toEqual(['{1}', '{W}', '{U}']);
       expect(component.symbolClass('{W}')).toBe('ms-w');
       expect(summary.querySelector('.ls-cost i.ms-1')).not.toBeNull();

@@ -177,7 +177,7 @@ def test_generations_set(client, queue, tmp_storage):
     other = login(client, "Beth")
     for extra in [{}, {"commanderName": ""}, {"commanderName": "   "},
                   {"commanderName": "x" * 41},
-                  {"commanderName": "Ok", "cardData": {**SET_DATA, "manaCost": "{B}{B}{R}{R}"}}]:
+                  {"commanderName": "Ok", "cardData": {**SET_DATA, "manaCost": "{B}{B}{R}{R}{R}"}}]:
         res = client.post("/api/v1/generations", headers=H(other),
                           json={"prompt": "p", "cardData": SET_DATA, "count": 3, "cmc": 4, **extra})
         assert res.status_code == 400, extra

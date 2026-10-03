@@ -1,9 +1,16 @@
 <article class="set-row panel">
   <header class="set-row-header">
+    <span *ngIf="set.cmc" class="row-cmc" [attr.aria-label]="set.cmc + ' CMC'">
+      <i class="ms ms-cost ms-shadow ms-{{ set.cmc }}" aria-hidden="true"></i>
+    </span>
     <h3 class="commander">{{ set.commanderName }}</h3>
+    <span *ngIf="set.cmc" class="row-meta rarity-{{ set.rarity }}">
+      {{ set.cmc }} CMC<ng-container *ngIf="rarityLabel"> · <span class="gem" aria-hidden="true"></span>{{ rarityLabel }}</ng-container>
+    </span>
     <span class="by muted">by {{ set.username }}</span>
   </header>
 
+  <p class="swipe-hint muted"><span class="material-icons" aria-hidden="true">swipe</span> Swipe to compare all 3 versions</p>
   <div class="cards">
     <div *ngFor="let card of set.cards; trackBy: trackCard"
          class="vote-card"

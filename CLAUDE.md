@@ -79,13 +79,13 @@ AI Night's commander rules, enforced on `/set` and `/vote`. The spec is `docs/su
 
 - A `sets` row is **one commander**: three versions at the same mana value, rarity, type and P/T (`sets.cmc`, `sets.rarity`). Each player has one commander at each of 3, 4 and 5 CMC, built independently in its own `CommanderPanelComponent` tab.
 - `proxy-server/commander_rules.py` (`commander_params`) turns a `count: 3` request into those shared params:
-  - colored pips worth at most 3 mana, padded with generic mana to the CMC
-  - Legendary Creature, or Legendary Artifact — Vehicle (`commanderKind`)
+  - colored pips worth up to the commander's CMC, padded with generic mana to it
+  - Legendary Creature (creature types only), or exactly Legendary Artifact — Vehicle (`commanderKind`)
   - Uncommon, Rare or Mythic
   - P/T as a point buy: at most CMC + 1 points (Vehicles +2), whole numbers only, never X or `*`; blank means an even split that spends every point (`auto_stats`)
 - `storage.py` checks across a player's commanders: one draft per CMC and one locked per CMC in the open event; each rarity once among the locked ones (drafts may share a rarity while the player reassigns them). Sets with `cmc` NULL predate the rules: they still show (under "Earlier sets") but can't be locked.
 - Votes stay one per voter per commander. `vote_tally` counts the owner's own vote as 2 (not on legacy sets), and `SetView.cards[].ownerVote` marks it.
-- `src/app/services/commander-rules.ts` mirrors the rules for instant form feedback, so keep it in sync with `commander_rules.py`. Normal create (`count: 1`) is unaffected.
+- `src/app/services/commander-rules.ts` mirrors the rules for instant form feedback, so keep it in sync with `commander_rules.py` (including `NOT_CREATURE_TYPES`). Its `commanderChecklist` drives the live rules checklist on `/set`; Generate stays disabled until every line passes. Normal create (`count: 1`) is unaffected.
 - Tests: `tests/test_commander_rules.py`, plus the per-CMC cases in `tests/test_storage_sets.py` and `tests/test_api.py`.
 
 ### Knowledge Pool

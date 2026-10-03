@@ -1,5 +1,6 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { SetCardView, SetView } from '../../models/api.model';
+import { RarityOptions } from '../../models/card.model';
 
 /**
  * One locked set: commander name, "by <username>", and its 3 versions with vote
@@ -18,6 +19,10 @@ export class SetRowComponent {
   /** Final results: the leader is labelled "Winner" instead of "Leading". */
   @Input() final = false;
   @Output() vote = new EventEmitter<SetCardView>();
+
+  get rarityLabel(): string {
+    return RarityOptions.find(r => r.value === this.set.rarity)?.label ?? '';
+  }
 
   isMine(card: SetCardView): boolean {
     return !!this.set.myVoteCardId && this.set.myVoteCardId === card.id;

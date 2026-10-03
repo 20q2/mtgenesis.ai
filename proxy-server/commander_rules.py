@@ -15,8 +15,14 @@ from storage import StorageError
 COMMANDER_CMCS = (3, 4, 5)
 COMMANDER_RARITIES = ("uncommon", "rare", "mythic")
 VEHICLE_BONUS = 2
-# Pips are capped by the cheapest commander's mana value.
-MAX_PIP_VALUE = COMMANDER_CMCS[0]
+# Words that can't be in a creature commander's type line: other cards' subtypes and type words.
+NOT_CREATURE_TYPES = frozenset("""
+    vehicle equipment fortification aura saga curse shrine class room cartouche background role
+    treasure food clue blood gold map powerstone incubator attraction contraption
+    plains island swamp mountain forest desert gate lair locus mine tower cave sphere
+    creature artifact enchantment instant sorcery land planeswalker battle kindred tribal
+    legendary basic snow world ongoing elite host
+""".split())
 
 _MANA_SYMBOL_RE = re.compile(r"\{([^}]+)\}")
 _WHOLE_NUMBER_RE = re.compile(r"\d+")
@@ -34,13 +40,14 @@ def auto_stats(cmc: int, is_vehicle: bool, subtype: str) -> tuple[int, int]:
 
 
 def _cost(mana_cost: str, cmc: int) -> str:
-    """Keeps colored/hybrid/Phyrexian pips, drops generic and X, pads generic up to cmc."""
+    """Keeps colored/hybrid/Phyrexian pips, drops generic and X, pads generic up to cmc.
+    Each commander is its own design, so its pips may fill its whole mana value."""
     pips = [s for s in _MANA_SYMBOL_RE.findall(mana_cost or "")
             if not s.isdigit() and s.upper() not in ("X", "Y", "Z")]
     pip_value = sum(2 if s.startswith("2/") else 1 for s in pips)
-    if pip_value > MAX_PIP_VALUE:
-        raise StorageError(400, f"A commander's colored pips can add up to at most "
-                                f"{MAX_PIP_VALUE} mana")
+    if pip_value > cmc:
+        raise StorageError(400, f"A {cmc}-mana commander's colored pips can add up to at most "
+                                f"{cmc} mana")
     generic = cmc - pip_value
     return (f"{{{generic}}}" if generic else "") + "".join(f"{{{s}}}" for s in pips)
 
@@ -63,6 +70,15 @@ def _stats(card_data: dict, cmc: int, is_vehicle: bool, subtype: str) -> tuple[i
     return p, t
 
 
+def _creature_type(subtype) -> str:
+    """The creature type line, whitespace tidied; 400 when a word isn't a creature type."""
+    subtype = " ".join(str(subtype or "").split())
+    for word in subtype.split():
+        if word.lower() in NOT_CREATURE_TYPES:
+            raise StorageError(400, f"{word} isn't a creature type")
+    return subtype
+
+
 def commander_params(card_data: dict, cmc: int) -> dict:
     """The card params shared by all three versions of a commander at this mana value.
     Raises StorageError 400 with a player-facing message when a rule is broken."""
@@ -76,9 +92,8 @@ def commander_params(card_data: dict, cmc: int) -> dict:
         raise StorageError(400, "Commanders are Uncommon, Rare or Mythic")
 
     is_vehicle = kind == "vehicle"
-    subtype = (card_data.get("subtype") or "").strip()
-    if is_vehicle and not re.search(r"\bvehicle\b", subtype, re.I):
-        subtype = f"{subtype} Vehicle".strip()
+    # A Legendary Creature of creature types, or exactly a Legendary Artifact — Vehicle.
+    subtype = "Vehicle" if is_vehicle else _creature_type(card_data.get("subtype"))
     power, toughness = _stats(card_data, cmc, is_vehicle, subtype)
 
     out = {k: v for k, v in card_data.items() if k != "commanderKind"}

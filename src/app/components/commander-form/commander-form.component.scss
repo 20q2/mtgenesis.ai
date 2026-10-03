@@ -454,3 +454,33 @@
     margin-left: 0;
   }
 }
+
+.vehicle-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  font-family: var(--font-display);
+
+  .muted {
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+  }
+}
+
+.subtype-error {
+  display: block;
+  margin-top: 0.35rem;
+}
+
+/* No rarity picked yet: an empty gem, so nothing looks chosen */
+.preview .preview-rarity.rarity-none .gem {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  box-shadow: none;
+}

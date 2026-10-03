@@ -237,3 +237,92 @@
     font-size: 0.82rem;
   }
 }
+
+/* Live rules check above Generate: a line per rule, ticking as the design changes */
+.checklist {
+  display: grid;
+  gap: 0.15rem;
+  margin: 1rem 0 0;
+  padding: 0.6rem 0.75rem;
+  list-style: none;
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    padding: 0.3rem 0;
+  }
+
+  .check-icon {
+    flex: none;
+    font-size: 1.15rem;
+    transition: color var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);
+  }
+
+  .ok .check-icon {
+    color: var(--success);
+  }
+
+  .fail .check-icon {
+    color: var(--danger);
+    transform: scale(1.05);
+  }
+
+  .check-text {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 0.5rem;
+    min-width: 0;
+  }
+
+  .check-label {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .check-detail {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+  }
+
+  .fail .check-detail {
+    color: var(--danger);
+  }
+}
+
+/* Phones show the versions as a carousel: say there are three */
+.swipe-hint {
+  display: none;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.82rem;
+
+  .material-icons {
+    font-size: 1rem;
+  }
+
+  @media (max-width: 700px) {
+    display: flex;
+  }
+}
+
+@media (max-width: 480px) {
+  .locked-summary .ls-facts {
+    gap: 0.35rem;
+
+    dt {
+      font-size: 0.68rem;
+    }
+
+    dd {
+      font-size: 1.05rem;
+      overflow-wrap: anywhere;
+    }
+  }
+}
