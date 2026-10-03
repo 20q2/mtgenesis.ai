@@ -5,10 +5,10 @@
 </div>
 
 <div class="set-layout" [class.has-set]="!!setId">
-  <!-- Form: commander name, card details, Generate -->
+  <!-- Design: name, then the designer (or the locked summary) -->
   <section class="panel form-panel">
     <div class="commander-field">
-      <label [for]="'commanderName-' + cmc" class="field-label">{{ cmc }} CMC commander name</label>
+      <label [for]="'commanderName-' + cmc" class="field-label">Commander name</label>
       <input [id]="'commanderName-' + cmc"
              class="night-input commander-name"
              type="text"
@@ -20,40 +20,76 @@
     </div>
     <div class="name-actions" *ngIf="canChangeName">
       <span class="muted name-hint">
-        {{ renaming ? 'Generate again to use the new name.' : 'The name is part of the rendered cards.' }}
+        {{ renaming ? 'Generate again to use the new name.' : 'The name is printed on all 3 versions.' }}
       </span>
       <button type="button" class="btn btn-ghost change-name" (click)="toggleRename()">
         {{ renaming ? 'Cancel' : 'Change name' }}
       </button>
     </div>
 
-    <app-card-form [modelsReady]="true"
-                   [commanderMode]="true"
-                   [commanderCmc]="cmc"
-                   [takenRarities]="takenRarities"
-                   [idSuffix]="'-' + cmc"
-                   [showName]="false"
-                   [showGenerate]="false"
-                   (cardChange)="onCardChange($event)"></app-card-form>
+    <ng-container *ngIf="lockedCard as card; else designer">
+      <div class="locked-summary">
+        <p class="ls-status">
+          <span class="material-icons" aria-hidden="true">lock</span>
+          Locked into <strong>{{ event?.name || 'the event' }}</strong>
+        </p>
+        <div class="ls-line">
+          <span class="ls-cost">
+            <i *ngFor="let s of costSymbols(card.manaCost)" class="ms ms-cost ms-shadow {{ symbolClass(s) }}"
+               aria-hidden="true"></i>
+            <span class="sr-only">{{ card.manaCost }}</span>
+          </span>
+          <span class="ls-type">{{ typeLineOf(card) }}</span>
+        </div>
+        <dl class="ls-facts">
+          <div><dt>Mana value</dt><dd>{{ cmc }}</dd></div>
+          <div><dt>Power / toughness</dt><dd>{{ card.power }}/{{ card.toughness }}</dd></div>
+          <div>
+            <dt>Rarity</dt>
+            <dd class="ls-rarity rarity-{{ card.rarity }}"><span class="gem" aria-hidden="true"></span>{{ rarityName(card.rarity) }}</dd>
+          </div>
+        </dl>
+        <div class="ls-actions">
+          <a routerLink="/vote" class="btn btn-gold">
+            <span class="material-icons" aria-hidden="true">how_to_vote</span> Go vote
+          </a>
+          <button type="button" class="btn btn-ghost unlock" [disabled]="unlocking" (click)="unlock()">
+            <span class="material-icons" aria-hidden="true">lock_open</span>
+            {{ unlocking ? 'Unlocking…' : 'Unlock to change' }}
+          </button>
+        </div>
+        <p class="muted ls-note">Unlocking clears the votes on this commander.</p>
+      </div>
+    </ng-container>
 
-    <div class="generate-row">
-      <button type="button"
-              class="btn btn-gold generate-set"
-              [disabled]="!canGenerate()"
-              (click)="generate()">
-        <span class="material-icons">auto_awesome</span>
-        {{ submitting ? 'Submitting…' : 'Generate 3 versions' }}
-      </button>
-      <span class="muted" *ngIf="generateHint() as hint">{{ hint }}</span>
-    </div>
+    <ng-template #designer>
+      <app-commander-form [cmc]="cmc"
+                          [takenRarities]="takenRarities"
+                          [initialCard]="loadedCard"
+                          (cardChange)="onCardChange($event)"></app-commander-form>
+
+      <div class="generate-row">
+        <button type="button"
+                class="btn btn-gold generate-set"
+                [disabled]="!canGenerate()"
+                (click)="generate()">
+          <span class="material-icons">auto_awesome</span>
+          {{ submitting ? 'Submitting…' : (setId ? 'Start over: 3 new versions' : 'Generate 3 versions') }}
+        </button>
+        <span class="muted" *ngIf="generateHint() as hint">{{ hint }}</span>
+      </div>
+    </ng-template>
   </section>
 
-  <!-- The 3 versions and lock controls -->
+  <!-- The 3 versions and Lock in -->
   <section class="panel slots-panel">
     <div class="slots-header">
-      <h3 class="section-title">
-        {{ setId ? (setName || 'Your commander') : 'Your 3 versions' }}
-      </h3>
+      <div>
+        <h3 class="section-title">{{ setId ? (setName || 'Your commander') : 'Your 3 versions' }}</h3>
+        <p class="muted slots-sub" *ngIf="!isLocked">
+          Each version is a different take. Reroll one only if it doesn't function at all.
+        </p>
+      </div>
       <span *ngIf="isLocked" class="badge badge-gold locked-badge">
         <span class="material-icons">lock</span> Locked
       </span>
@@ -65,31 +101,21 @@
                      [label]="slotLabel(i)"
                      [showReroll]="!!setId && !isLocked"
                      [canReroll]="canRerollSlot(view)"
+                     [rerollLabel]="rerollLabel"
                      (reroll)="onReroll($event)"></app-card-slot>
     </div>
 
-    <div class="lock-bar" *ngIf="setId">
-      <ng-container *ngIf="!isLocked; else lockedControls">
-        <button type="button"
-                class="btn btn-gold lock"
-                [disabled]="!!lockDisabledReason() || locking"
-                (click)="lock()">
-          <span class="material-icons">lock</span>
-          {{ locking ? 'Locking…' : 'Lock in' }}
-        </button>
-        <span class="muted lock-reason" *ngIf="lockDisabledReason() as reason">{{ reason }}</span>
-      </ng-container>
-
-      <ng-template #lockedControls>
-        <span class="muted">
-          Locked into <strong>{{ event?.name || 'the event' }}</strong>.
-          <a routerLink="/vote" class="night-link">Go vote</a>
-        </span>
-        <button type="button" class="btn btn-ghost unlock" [disabled]="unlocking" (click)="unlock()">
-          <span class="material-icons">lock_open</span>
-          {{ unlocking ? 'Unlocking…' : 'Unlock' }}
-        </button>
-      </ng-template>
+    <div class="lock-bar" *ngIf="setId && !isLocked">
+      <button type="button"
+              class="btn btn-gold lock"
+              [disabled]="!!lockDisabledReason() || locking"
+              (click)="lock()">
+        <span class="material-icons">lock</span>
+        {{ locking ? 'Locking…' : 'Lock in' }}
+      </button>
+      <span class="muted lock-reason">
+        {{ lockDisabledReason() || 'Happy with these? Lock in and the table votes on which version is legal.' }}
+      </span>
     </div>
   </section>
 </div>

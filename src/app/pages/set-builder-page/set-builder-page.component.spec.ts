@@ -61,17 +61,46 @@ describe('SetBuilderPageComponent', () => {
     expect(component.summary(3)).toBe('Uncommon · Draft');
     expect(component.summary(4)).toBe('Not started');
     expect(component.summary(5)).toBe('Mythic · Locked');
-    const strip = fixture.nativeElement.querySelector('.summary-strip').textContent;
-    expect(strip).toContain('3 CMC');
-    expect(strip).toContain('Mythic · Locked');
+    const lineup = fixture.nativeElement.querySelector('.lineup').textContent;
+    expect(lineup).toContain('Mythic · Locked');
+    expect(lineup).toContain('Zur');  // the commander's name
+    expect(lineup).toContain('Not started');
+  });
+
+  it('counts the commanders locked in', () => {
+    setup([three(), five()], openEvent);
+    expect(component.lockedCount).toBe(1);
+    expect(fixture.nativeElement.querySelector('.progress').textContent.replace(/\s+/g, ' ')).toContain('1 of 3 locked in');
+  });
+
+  it('lays out the rules: mana values, type, body, rarity, versions and the double self-vote', () => {
+    setup([], openEvent);
+    const rules = (fixture.nativeElement.querySelector('.ledger') as HTMLElement).textContent!.replace(/\s+/g, ' ');
+    expect(rules).toContain('One at each mana value');
+    expect(rules).toContain('Legendary Creature or Vehicle');
+    expect(rules).toContain('CMC + 1 points');
+    expect(rules).toContain('no X or *');
+    expect(rules).toContain('One Uncommon, one Rare, one Mythic');
+    expect(rules).toContain("reroll only if one doesn't function");
+    expect(rules).toContain('counts ×2');
+  });
+
+  it('tracks which commander holds each rarity', () => {
+    setup([three(), five()], openEvent);
+    expect(component.rarityHolders('uncommon')).toEqual([{ cmc: 3, locked: false }]);
+    expect(component.rarityHolders('mythic')).toEqual([{ cmc: 5, locked: true }]);
+    expect(component.rarityHolders('rare')).toEqual([]);
+    const tracker = fixture.nativeElement.querySelector('.rarity-track').textContent.replace(/\s+/g, ' ');
+    expect(tracker).toContain('Uncommon 3 CMC');
+    expect(tracker).toContain('Rare open');
   });
 
   it('a panel state change updates the summary and the others\' taken rarities', () => {
     setup([three()], openEvent);
-    component.onStateChange(4, { status: 'draft', rarity: Rarity.RARE });
+    component.onStateChange(4, { status: 'draft', rarity: Rarity.RARE, name: 'Mother' });
     expect(component.summary(4)).toBe('Rare · Draft');
     expect(component.takenRaritiesFor(5)).toEqual({});
-    component.onStateChange(4, { status: 'locked', rarity: Rarity.RARE });
+    component.onStateChange(4, { status: 'locked', rarity: Rarity.RARE, name: 'Mother' });
     expect(component.taken[5]).toEqual({ rare: 4 });
     component.onStateChange(4, null);
     expect(component.taken[5]).toEqual({});

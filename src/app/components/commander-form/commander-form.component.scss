@@ -1,0 +1,456 @@
+/* The commander designer. Uses the global system (.field-label, .night-input, .chip, .btn,
+   tokens); sections are separated by hairlines, never nested cards. */
+:host {
+  display: block;
+}
+
+.commander-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.cf-section {
+  padding: 1rem 0;
+  border-top: 1px solid var(--line);
+
+  &:first-child {
+    padding-top: 0.25rem;
+    border-top: 0;
+  }
+}
+
+.cf-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.cf-title {
+  margin: 0;
+  font-family: var(--font-caps);
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.cf-rule {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/* ===== Colors ===== */
+.cost-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.cost-tray {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-height: 44px;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  font-size: 1.35rem;
+}
+
+.cost-pip {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast) ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    opacity: 0.7;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}
+
+.cost-value {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+
+  strong {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    color: var(--text);
+  }
+}
+
+.cost-clear {
+  margin-left: auto;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.85rem;
+}
+
+.pip-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.pip-add {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-raised);
+  font-size: 1.3rem;
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) ease, opacity var(--dur-fast) ease;
+
+  &:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-2);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}
+
+/* ===== Type ===== */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  margin-bottom: 0.8rem;
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+}
+
+.segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 36px;
+  padding: 0.3rem 1rem;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
+
+  &[aria-checked='true'] {
+    background: var(--surface-raised);
+    color: var(--text);
+    box-shadow: var(--shadow-1), inset 0 0 0 1px var(--line-gold);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}
+
+.subtype-label {
+  display: block;
+}
+
+.subtype-chips {
+  margin-top: 0.5rem;
+}
+
+/* ===== Body ===== */
+.body-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.stepper {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  grid-template-rows: auto auto;
+  justify-content: center;
+  align-items: center;
+  gap: 0.2rem 0.45rem;
+
+  .stepper-label {
+    grid-column: 1 / -1;
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+}
+
+.step {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-raised);
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease, transform var(--dur-fast) var(--ease-out);
+
+  .material-icons {
+    font-size: 1.15rem;
+  }
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--gold) 16%, #fff);
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.94);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}
+
+.step-value {
+  min-width: 1.6ch;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The card's own P/T box */
+.pt-badge {
+  display: grid;
+  place-items: center;
+  min-width: 84px;
+  padding: 0.35rem 0.9rem;
+  border-radius: 12px 4px 12px 4px;
+  border: 2px solid var(--gold-deep);
+  background: linear-gradient(180deg, #fffaf0, #efe4cc);
+  box-shadow: var(--shadow-gold);
+
+  .pt-value {
+    font-family: var(--font-display);
+    font-size: 1.9rem;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &.is-auto .pt-value {
+    color: var(--text-muted);
+  }
+}
+
+.points-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+}
+
+.points-meter {
+  display: flex;
+  gap: 5px;
+}
+
+.point {
+  width: 12px;
+  height: 12px;
+  transform: rotate(45deg);
+  border-radius: 2px;
+  border: 1px solid var(--line-strong);
+  transition: background-color var(--dur) var(--ease-out), border-color var(--dur) ease;
+
+  &.point-power {
+    background: var(--mana-r);
+    border-color: color-mix(in srgb, var(--mana-r) 70%, #000);
+  }
+
+  &.point-toughness {
+    background: var(--mana-u);
+    border-color: color-mix(in srgb, var(--mana-u) 70%, #000);
+  }
+
+  &.point-free {
+    background: transparent;
+  }
+}
+
+.points-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pt-auto {
+  margin-left: auto;
+
+  .material-icons {
+    font-size: 1rem;
+  }
+}
+
+/* ===== Rarity ===== */
+.rarity-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.rarity-gem {
+  --rarity: var(--rarity-uncommon);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-height: 56px;
+  padding: 0.45rem 0.4rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease;
+
+  &.rarity-rare { --rarity: var(--rarity-rare); }
+  &.rarity-mythic { --rarity: var(--rarity-mythic); }
+
+  .gem-note {
+    font-size: 0.72rem;
+    font-weight: 500;
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--text);
+    border-color: color-mix(in srgb, var(--rarity) 60%, transparent);
+  }
+
+  &[aria-checked='true'] {
+    color: var(--text);
+    border-color: var(--rarity);
+    background: color-mix(in srgb, var(--rarity) 16%, #fff);
+
+    .gem {
+      transform: rotate(45deg) scale(1.25);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 2px 10px color-mix(in srgb, var(--rarity) 80%, transparent);
+    }
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}
+
+/* A small cut gem in the rarity's color, like a set symbol */
+.gem {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  transform: rotate(45deg);
+  border-radius: 2px;
+  background: linear-gradient(135deg, #fff 0%, var(--rarity) 45%, color-mix(in srgb, var(--rarity) 55%, #000) 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) ease;
+}
+
+/* ===== Preview: the type line every version prints ===== */
+.preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.4rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-gold);
+  background: linear-gradient(180deg, #fffaf0, #f3ead7);
+
+  .preview-cost {
+    display: inline-flex;
+    gap: 0.12rem;
+    font-size: 1.05rem;
+  }
+
+  .preview-type {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    color: var(--text);
+  }
+
+  .preview-pt {
+    margin-left: auto;
+    font-family: var(--font-display);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .preview-rarity {
+    --rarity: var(--rarity-uncommon);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+
+    &.rarity-rare { --rarity: var(--rarity-rare); }
+    &.rarity-mythic { --rarity: var(--rarity-mythic); }
+  }
+}
+
+@media (max-width: 480px) {
+  .body-row {
+    grid-template-columns: 1fr 1fr;
+
+    .pt-badge {
+      grid-column: 1 / -1;
+      grid-row: 1;
+      justify-self: center;
+    }
+  }
+
+  .preview .preview-pt {
+    margin-left: 0;
+  }
+}

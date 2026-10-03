@@ -26,6 +26,7 @@ import { CmcGroupsPipe } from './pipes/cmc-groups.pipe';
 import { TiltDirective } from './directives/tilt.directive';
 import { CardSlotComponent } from './components/card-slot/card-slot.component';
 import { CommanderPanelComponent } from './components/commander-panel/commander-panel.component';
+import { CommanderFormComponent } from './components/commander-form/commander-form.component';
 import { SetRowComponent } from './components/set-row/set-row.component';
 import { WinnersBannerComponent } from './components/winners-banner/winners-banner.component';
 import { PoolAdminComponent } from './components/pool-admin/pool-admin.component';
@@ -47,6 +48,7 @@ import { PoolSubmitComponent } from './components/pool-submit/pool-submit.compon
     QueueBadgeComponent,
     CardSlotComponent,
     CommanderPanelComponent,
+    CommanderFormComponent,
     SetRowComponent,
     WinnersBannerComponent,
     PoolAdminComponent,

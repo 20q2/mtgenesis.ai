@@ -1,7 +1,8 @@
 import { Rarity } from '../models/card.model';
 import { setView } from '../testing/fixtures';
 import {
-  COMMANDER_CMCS, COMMANDER_RARITIES, commanderPipValue, commanderStatsError, groupByCmc, statPoints
+  COMMANDER_CMCS, COMMANDER_RARITIES, autoStats, commanderCost, commanderPipValue, commanderStatsError, groupByCmc,
+  statPoints
 } from './commander-rules';
 
 const WHOLE_NUMBERS = 'P/T must be whole numbers — X and * aren\'t allowed';
@@ -48,6 +49,22 @@ describe('commander rules', () => {
   it('rejects toughness 0 and a missing half', () => {
     expect(commanderStatsError('2', '0', 3, 'creature')).not.toBeNull();
     expect(commanderStatsError('', '3', 3, 'creature')).not.toBeNull();
+  });
+
+  it('commanderCost keeps the pips and pads generic to the CMC, like the server', () => {
+    expect(commanderCost('{W}{U}', 4)).toBe('{2}{W}{U}');
+    expect(commanderCost('{X}{4}{B}{B}', 5)).toBe('{3}{B}{B}');
+    expect(commanderCost('', 3)).toBe('{3}');
+    expect(commanderCost('{W}{U}{B}', 3)).toBe('{W}{U}{B}');
+    expect(commanderCost('{2/W}{G}', 3)).toBe('{2/W}{G}');
+  });
+
+  it('autoStats spends every point and leans by creature type, like the server', () => {
+    expect(autoStats(3, 'creature', 'Human')).toEqual([2, 2]);
+    expect(autoStats(4, 'creature', 'Human')).toEqual([2, 3]);
+    expect(autoStats(5, 'creature', 'Goblin')).toEqual([4, 2]);
+    expect(autoStats(5, 'vehicle', 'Vehicle')).toEqual([4, 4]);
+    expect(autoStats(4, 'creature', 'Wall')).toEqual([1, 4]);
   });
 
   it('groupByCmc orders 3, 4, 5 then Earlier sets, skipping empty groups', () => {

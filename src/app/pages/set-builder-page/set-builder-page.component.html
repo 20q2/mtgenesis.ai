@@ -1,12 +1,70 @@
 <div class="page set-page">
   <section class="panel intro">
-    <h2 class="page-title">Commanders</h2>
-    <p class="muted">
-      Make three commanders: one each at 3, 4 and 5 mana, a Legendary Creature or Vehicle.
-      Each gets <strong>CMC + 1 points</strong> of power and toughness (Vehicles +2), and between them
-      they are one <strong>Uncommon</strong>, one <strong>Rare</strong> and one <strong>Mythic</strong>.
-      Each commander is generated as 3 versions. Lock each one in, and everyone votes on which version is legal tonight.
-    </p>
+    <div class="intro-head">
+      <div>
+        <h2 class="page-title">Your commanders</h2>
+        <p class="lede">
+          Build one commander at each mana value. Each comes out as 3 versions; lock it in and the table
+          votes on which version is legal tonight.
+        </p>
+      </div>
+      <p class="progress" aria-live="polite">
+        <strong>{{ lockedCount }}</strong> of 3 locked in
+      </p>
+    </div>
+
+    <ul class="ledger" aria-label="The rules">
+      <li class="ledger-item">
+        <span class="lg-label">Mana</span>
+        <span class="lg-value lg-mana">
+          <span *ngFor="let cmc of cmcs" class="lg-mana-slot" [class.done]="states[cmc]?.status === 'locked'"
+                [class.started]="!!states[cmc]">
+            <i class="ms ms-cost ms-{{ cmc }}" aria-hidden="true"></i>
+            <span class="sr-only">{{ cmc }} CMC: {{ summary(cmc) }}</span>
+          </span>
+        </span>
+        <span class="lg-note">One at each mana value</span>
+      </li>
+      <li class="ledger-item">
+        <span class="lg-label">Type</span>
+        <span class="lg-value">Legendary Creature or Vehicle</span>
+        <span class="lg-note">Vehicles get a Crew cost from the AI</span>
+      </li>
+      <li class="ledger-item">
+        <span class="lg-label">Power / toughness</span>
+        <span class="lg-value">CMC + 1 points</span>
+        <span class="lg-note">Vehicles +2 · spend fewer if you like · no X or *</span>
+      </li>
+      <li class="ledger-item">
+        <span class="lg-label">Rarity</span>
+        <span class="lg-value rarity-track">
+          <span *ngFor="let r of rarities" class="track rarity-{{ r.value }}"
+                [class.held]="rarityHolders(r.value).length > 0">
+            <span class="gem" aria-hidden="true"></span>
+            {{ r.label }}
+            <span class="track-holder">
+              <ng-container *ngIf="rarityHolders(r.value).length; else open">
+                <ng-container *ngFor="let h of rarityHolders(r.value); let last = last">
+                  <span class="material-icons" *ngIf="h.locked" aria-label="locked">lock</span>{{ h.cmc }} CMC{{ last ? '' : ' & ' }}
+                </ng-container>
+              </ng-container>
+              <ng-template #open>open</ng-template>
+            </span>
+          </span>
+        </span>
+        <span class="lg-note">One Uncommon, one Rare, one Mythic</span>
+      </li>
+      <li class="ledger-item">
+        <span class="lg-label">Versions</span>
+        <span class="lg-value">3 per commander</span>
+        <span class="lg-note">No tweaking: reroll only if one doesn't function at all</span>
+      </li>
+      <li class="ledger-item">
+        <span class="lg-label">Voting</span>
+        <span class="lg-value">Your own vote counts ×2</span>
+        <span class="lg-note">One vote per commander · owners vote first</span>
+      </li>
+    </ul>
   </section>
 
   <div *ngIf="error" class="alert alert-error" role="alert">
@@ -18,21 +76,28 @@
   <p class="muted" *ngIf="loading">Loading your commanders…</p>
 
   <ng-container *ngIf="!loading">
-    <div class="summary-strip" role="tablist" aria-label="Your commanders">
+    <div class="lineup" role="tablist" aria-label="Your commanders">
       <button *ngFor="let cmc of cmcs"
               type="button"
               role="tab"
-              class="summary-tab"
+              class="slot-tab"
               [id]="'commander-tab-' + cmc"
               [attr.aria-selected]="activeCmc === cmc"
               [attr.aria-controls]="'commander-panel-' + cmc"
+              [attr.tabindex]="activeCmc === cmc ? 0 : -1"
               [class.active]="activeCmc === cmc"
               [class.locked]="states[cmc]?.status === 'locked'"
-              (click)="selectCmc(cmc)">
-        <span class="tab-cmc">{{ cmc }} CMC</span>
-        <span class="tab-state">
-          <span *ngIf="states[cmc]?.status === 'locked'" class="material-icons" aria-hidden="true">lock</span>
-          {{ summary(cmc) }}
+              [class.empty]="!states[cmc]"
+              (click)="selectCmc(cmc)"
+              (keydown)="onTabKey($event)">
+        <span class="slot-mana"><i class="ms ms-cost ms-shadow ms-{{ cmc }}" aria-hidden="true"></i></span>
+        <span class="slot-text">
+          <span class="slot-name">{{ states[cmc]?.name || cmc + ' CMC commander' }}</span>
+          <span class="slot-state rarity-{{ states[cmc]?.rarity || 'none' }}">
+            <span class="gem" *ngIf="states[cmc]" aria-hidden="true"></span>
+            <span class="material-icons" *ngIf="states[cmc]?.status === 'locked'" aria-hidden="true">lock</span>
+            {{ summary(cmc) }}
+          </span>
         </span>
       </button>
     </div>

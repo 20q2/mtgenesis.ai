@@ -23,6 +23,7 @@ export class CardSlotComponent implements OnDestroy {
   @Input() view: CardView | null = null;
   @Input() canReroll = false;
   @Input() showReroll = true;
+  @Input() rerollLabel = 'Reroll';
   /** Shown when there is no card yet, e.g. "Version 2". */
   @Input() label = '';
   @Output() reroll = new EventEmitter<CardView>();

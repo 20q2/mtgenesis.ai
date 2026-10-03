@@ -1,10 +1,10 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { EMPTY, Subscription, catchError, switchMap } from 'rxjs';
 import { EventView, SetView } from '../../models/api.model';
-import { Rarity } from '../../models/card.model';
+import { Rarity, RarityOptions } from '../../models/card.model';
 import { CommanderState, rarityLabel } from '../../components/commander-panel/commander-panel.component';
 import { apiErrorMessage } from '../../services/api.util';
-import { COMMANDER_CMCS } from '../../services/commander-rules';
+import { COMMANDER_CMCS, COMMANDER_RARITIES } from '../../services/commander-rules';
 import { EventService } from '../../services/event.service';
 import { PageVisibilityService } from '../../services/page-visibility.service';
 
@@ -23,6 +23,7 @@ const TAB_KEY = 'mtgenesis.setBuilder.tab';
 })
 export class SetBuilderPageComponent implements OnInit, OnDestroy {
   readonly cmcs = COMMANDER_CMCS;
+  readonly rarities = RarityOptions.filter(r => COMMANDER_RARITIES.includes(r.value as Rarity));
 
   /** Each commander as loaded (null: not started), handed to its panel once. */
   sets: Record<number, SetView | null> = { 3: null, 4: null, 5: null };
@@ -86,6 +87,17 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
     return taken;
   }
 
+  get lockedCount(): number {
+    return this.cmcs.filter(cmc => this.states[cmc]?.status === 'locked').length;
+  }
+
+  /** The commanders (by CMC) using this rarity: drafts may share one until one is locked. */
+  rarityHolders(rarity: string): { cmc: number; locked: boolean }[] {
+    return this.cmcs
+      .filter(cmc => this.states[cmc]?.rarity === rarity)
+      .map(cmc => ({ cmc, locked: this.states[cmc]!.status === 'locked' }));
+  }
+
   /** 'Rare · Locked', 'Uncommon · Draft' or 'Not started'. */
   summary(cmc: number): string {
     const state = this.states[cmc];
@@ -113,6 +125,19 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  /** Arrow keys, Home and End move between the commander tabs (the ARIA tabs pattern). */
+  onTabKey(event: KeyboardEvent): void {
+    const index = this.cmcs.indexOf(this.activeCmc);
+    const next = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: this.cmcs.length - 1 }[event.key];
+    if (next === undefined) {
+      return;
+    }
+    event.preventDefault();
+    const cmc = this.cmcs[(next + this.cmcs.length) % this.cmcs.length];
+    this.selectCmc(cmc);
+    (document.getElementById(`commander-tab-${cmc}`) as HTMLElement | null)?.focus();
+  }
+
   clearError(): void {
     this.error = null;
   }
@@ -120,7 +145,7 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
 
 function stateOf(set: SetView): CommanderState | null {
   return (set.status === 'draft' || set.status === 'locked') && set.rarity
-    ? { status: set.status, rarity: set.rarity as Rarity } : null;
+    ? { status: set.status, rarity: set.rarity as Rarity, name: set.commanderName } : null;
 }
 
 function readTab(): number | null {

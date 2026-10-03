@@ -192,7 +192,7 @@ describe('CommanderPanelComponent', () => {
     fixture.detectChanges();
 
     expect(component.slots.map(s => s!.id)).toEqual(['n1', 'n2', 'n3']);
-    expect(emitted).toEqual([{ status: 'draft', rarity: Rarity.MYTHIC }]);
+    expect(emitted).toEqual([{ status: 'draft', rarity: Rarity.MYTHIC, name: "Zur'ka, Élan of Ash" }]);
     expect(generateButton().disabled).toBeTrue(); // the new versions are pending
   });
 
@@ -256,7 +256,7 @@ describe('CommanderPanelComponent', () => {
     expect(fixture.nativeElement.querySelector('.locked-badge')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('button.unlock')).not.toBeNull();
     expect(component.canRerollSlot(component.slots[0])).toBeFalse();
-    expect(emitted).toEqual([{ status: 'locked', rarity: Rarity.RARE }]);
+    expect(emitted).toEqual([{ status: 'locked', rarity: Rarity.RARE, name: "Zur'ka" }]);
   });
 
   it('asks for confirmation before unlocking', () => {
@@ -272,7 +272,42 @@ describe('CommanderPanelComponent', () => {
     component.unlock();
     expect(events.unlock).toHaveBeenCalledWith('s-1');
     expect(component.setStatus).toBe('draft');
-    expect(emitted).toEqual([{ status: 'draft', rarity: Rarity.RARE }]);
+    expect(emitted).toEqual([{ status: 'draft', rarity: Rarity.RARE, name: "Zur'ka" }]);
+  });
+
+  describe('locked commander', () => {
+    const lockedCard = { name: "Zur'ka", manaCost: '{1}{W}{U}', colors: ['W', 'U'], type: 'Creature',
+                         supertype: 'Legendary', subtype: 'Human Cleric', rarity: 'rare', cmc: 3,
+                         power: '2', toughness: '2' };
+
+    it('shows a read-only summary instead of the designer', () => {
+      const cards = [1, 2, 3].map(slot => setCard({ id: `c${slot}`, slot, setId: 's-1', card: lockedCard }));
+      setup(setView({ id: 's-1', status: 'locked', commanderName: "Zur'ka", cmc: 3, rarity: 'rare', cards }),
+            openEvent, {}, 3);
+      const summary = fixture.nativeElement.querySelector('.locked-summary') as HTMLElement;
+      expect(summary).not.toBeNull();
+      expect(summary.textContent).toContain('Legendary Creature — Human Cleric');
+      expect(summary.textContent).toContain('2/2');
+      expect(summary.textContent).toContain('Rare');
+      expect(fixture.nativeElement.querySelector('app-commander-form')).toBeNull();
+      expect(component.costSymbols(lockedCard.manaCost)).toEqual(['{1}', '{W}', '{U}']);
+      expect(component.symbolClass('{W}')).toBe('ms-w');
+      expect(summary.querySelector('.ls-cost i.ms-1')).not.toBeNull();
+    });
+  });
+
+  it("hands a draft's saved choices to the designer", () => {
+    const saved = { name: "Zur'ka", manaCost: '{2}{B}', colors: ['B'], type: 'Creature', rarity: 'rare', cmc: 4,
+                    power: '3', toughness: '2' };
+    const cards = [1, 2, 3].map(slot => setCard({ id: `c${slot}`, slot, setId: 's-1', card: saved }));
+    setup(draft(cards), openEvent);
+    expect(component.loadedCard).toEqual(saved);
+    expect(fixture.nativeElement.querySelector('app-commander-form')).not.toBeNull();
+  });
+
+  it('labels Reroll as only for broken versions', () => {
+    setup(draft(), openEvent);
+    expect(component.rerollLabel).toBe('Reroll (only if broken)');
   });
 
   describe('commander name (the vote-page title must match the rendered cards)', () => {

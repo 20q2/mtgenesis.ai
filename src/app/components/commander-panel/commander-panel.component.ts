@@ -1,13 +1,14 @@
 import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges } from '@angular/core';
 import { FormControl } from '@angular/forms';
 import { Subscription, finalize } from 'rxjs';
-import { CardView, EventView, SetView } from '../../models/api.model';
+import { CardView, EventView, GeneratedCardData, SetView } from '../../models/api.model';
 import { Card, Rarity, RarityOptions } from '../../models/card.model';
 import { apiErrorMessage } from '../../services/api.util';
 import { isFinished, isPending } from '../../services/card-status';
 import { MAX_PIP_VALUE, commanderPipValue, commanderStatsError } from '../../services/commander-rules';
 import { EventService } from '../../services/event.service';
 import { GenerationService } from '../../services/generation.service';
+import { ManaService } from '../../services/mana.service';
 
 export const COMMANDER_NAME_MAX = 40;
 export const UNLOCK_CONFIRM = 'This clears votes on this commander';
@@ -16,7 +17,7 @@ export const REROLL_CONFIRM =
   'Rerolls are only for a version that doesn\'t function under any circumstance. Reroll it?';
 
 /** What the page needs to know about a commander: its status and rarity, or null for none. */
-export interface CommanderState { status: 'draft' | 'locked'; rarity: Rarity; }
+export interface CommanderState { status: 'draft' | 'locked'; rarity: Rarity; name: string; }
 
 /**
  * One of a player's three commanders (docs/superpowers/specs/2026-10-03-commander-rules-design.md
@@ -42,6 +43,7 @@ export class CommanderPanelComponent implements OnChanges, OnDestroy {
   @Output() stateChange = new EventEmitter<CommanderState | null>();
 
   readonly maxNameLength = COMMANDER_NAME_MAX;
+  readonly rerollLabel = 'Reroll (only if broken)';
   readonly commanderName = new FormControl('', { nonNullable: true });
 
   /** Latest values from the card form. */
@@ -54,6 +56,8 @@ export class CommanderPanelComponent implements OnChanges, OnDestroy {
   setRarity: Rarity | null = null;
   /** True after "Change name": the field is editable for the next Generate. */
   renaming = false;
+  /** The saved commander's first version, to fill the designer in with on load. */
+  loadedCard: GeneratedCardData | null = null;
   /** Current card per slot (index 0..2 = version 1..3). */
   slots: (CardView | null)[] = [null, null, null];
 
@@ -65,7 +69,8 @@ export class CommanderPanelComponent implements OnChanges, OnDestroy {
 
   private watches: (Subscription | undefined)[] = [];
 
-  constructor(private generation: GenerationService, private events: EventService) {}
+  constructor(private generation: GenerationService, private events: EventService,
+              private mana: ManaService) {}
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['set']) {
@@ -124,6 +129,29 @@ export class CommanderPanelComponent implements OnChanges, OnDestroy {
     const card = this.formCard;
     return card ? commanderStatsError(card.power ?? '', card.toughness ?? '', this.cmc,
                                       card.commanderKind ?? 'creature') : null;
+  }
+
+  /** What the versions print (the first version's card): shown read-only once locked in. */
+  get lockedCard(): GeneratedCardData | null {
+    return this.isLocked ? this.slots[0]?.card ?? null : null;
+  }
+
+  typeLineOf(card: GeneratedCardData): string {
+    const main = [card.supertype, card.type].filter(Boolean).join(' ');
+    return card.subtype ? `${main} — ${card.subtype}` : main;
+  }
+
+  rarityName(rarity: string | null | undefined): string {
+    return rarity ? rarityLabel(rarity) : '';
+  }
+
+  costSymbols(cost: string | null | undefined): string[] {
+    return this.mana.extractManaSymbols(cost ?? '');
+  }
+
+  /** The mana-font class for a symbol: ms-w, ms-2, ms-wu. */
+  symbolClass(symbol: string): string {
+    return `ms-${this.mana.getSymbolClass(symbol)}`;
   }
 
   slotLabel(index: number): string {
@@ -305,13 +333,15 @@ export class CommanderPanelComponent implements OnChanges, OnDestroy {
   private emitState(): void {
     const live = this.setStatus === 'draft' || this.setStatus === 'locked';
     this.stateChange.emit(live && this.setRarity
-      ? { status: this.setStatus as CommanderState['status'], rarity: this.setRarity } : null);
+      ? { status: this.setStatus as CommanderState['status'], rarity: this.setRarity, name: this.setName ?? '' }
+      : null);
   }
 
   private applySet(set: SetView | null): void {
     this.stopWatches();
     this.renaming = false;
     if (!set || set.status === 'abandoned') {
+      this.loadedCard = null;
       this.setId = null;
       this.setStatus = null;
       this.setName = null;
@@ -324,6 +354,7 @@ export class CommanderPanelComponent implements OnChanges, OnDestroy {
     this.setName = set.commanderName ?? '';
     this.setRarity = (set.rarity as Rarity | null) ?? this.setRarity;
     this.commanderName.setValue(this.setName);
+    this.loadedCard = set.cards?.[0]?.card ?? this.loadedCard;
     this.slots = [null, null, null];
     for (const view of set.cards ?? []) {
       this.placeCard(view);

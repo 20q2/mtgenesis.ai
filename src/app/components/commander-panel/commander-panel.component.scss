@@ -135,3 +135,105 @@
     font-size: 1.05rem;
   }
 }
+
+.slots-sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+}
+
+/* A locked commander: what it prints, read-only */
+.locked-summary {
+  padding-top: 0.25rem;
+
+  .ls-status {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 0 0.9rem;
+    color: var(--accent-text);
+    font-weight: 600;
+
+    .material-icons {
+      font-size: 1.1rem;
+    }
+  }
+
+  .ls-line {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.75rem;
+    padding: 0.6rem 0.85rem;
+    border-radius: var(--r-md);
+    border: 1px solid var(--line-gold);
+    background: linear-gradient(180deg, #fffaf0, #f3ead7);
+  }
+
+  .ls-cost {
+    display: inline-flex;
+    gap: 0.12rem;
+    font-size: 1.15rem;
+  }
+
+  .ls-type {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+  }
+
+  .ls-facts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+    margin: 1rem 0;
+
+    div {
+      padding: 0.5rem 0;
+      border-top: 1px solid var(--line);
+    }
+
+    dt {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    dd {
+      margin: 0.2rem 0 0;
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      font-variant-numeric: tabular-nums;
+    }
+  }
+
+  .ls-rarity {
+    --rarity: var(--rarity-uncommon);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+
+    &.rarity-rare { --rarity: var(--rarity-rare); }
+    &.rarity-mythic { --rarity: var(--rarity-mythic); }
+
+    .gem {
+      width: 11px;
+      height: 11px;
+      transform: rotate(45deg);
+      border-radius: 2px;
+      background: linear-gradient(135deg, #fff 0%, var(--rarity) 45%, color-mix(in srgb, var(--rarity) 55%, #000) 100%);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+    }
+  }
+
+  .ls-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+
+  .ls-note {
+    margin: 0.6rem 0 0;
+    font-size: 0.82rem;
+  }
+}

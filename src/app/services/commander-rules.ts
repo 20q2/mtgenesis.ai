@@ -20,6 +20,29 @@ export function commanderPipValue(manaCost: string): number {
     .reduce((sum, s) => sum + (s.startsWith('2/') ? 2 : 1), 0);
 }
 
+/** The cost the server prints: the colored pips, padded with generic mana up to the CMC. */
+export function commanderCost(manaCost: string, cmc: number): string {
+  const pips = ((manaCost || '').match(/\{[^}]+\}/g) || [])
+    .filter(s => !/^\{\d+\}$/.test(s) && !/^\{[XYZ]\}$/i.test(s));
+  const generic = cmc - commanderPipValue(pips.join(''));
+  return (generic > 0 ? `{${generic}}` : '') + pips.join('');
+}
+
+/** The split the server picks for a blank P/T: every point spent, leaning by creature type
+ *  (mirrors power_level.lean). */
+export function autoStats(cmc: number, kind: CommanderKind, subtype: string): [number, number] {
+  const points = statPoints(cmc, kind);
+  let power = Math.floor(points / 2);
+  let toughness = points - power;
+  const sub = (subtype || '').toLowerCase();
+  if (/\b(wall|treefolk|golem|construct|turtle)\b/.test(sub) && power > 1) {
+    power--; toughness++;
+  } else if (/\b(goblin|berserker|warrior|dragon|demon|cat|rogue)\b/.test(sub) && toughness > 1) {
+    power++; toughness--;
+  }
+  return [power, toughness];
+}
+
 /** Total power + toughness a commander may have: CMC + 1, plus 2 for a Vehicle. */
 export function statPoints(cmc: number, kind: CommanderKind): number {
   return cmc + 1 + (kind === 'vehicle' ? VEHICLE_BONUS : 0);
