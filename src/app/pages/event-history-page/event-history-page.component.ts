@@ -2,6 +2,7 @@ import { Component, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { EMPTY, Subscription, catchError, switchMap, tap } from 'rxjs';
 import { EventSummary, EventView, SetView } from '../../models/api.model';
+import { CmcGroup } from '../../services/commander-rules';
 import { apiErrorMessage } from '../../services/api.util';
 import { EventService } from '../../services/event.service';
 
@@ -52,6 +53,10 @@ export class EventHistoryPageComponent implements OnInit, OnDestroy {
 
   trackSet(_index: number, set: SetView): string {
     return set.id;
+  }
+
+  trackGroup(_index: number, group: CmcGroup): string {
+    return group.label;
   }
 
   private fail(err: unknown, fallback: string) {

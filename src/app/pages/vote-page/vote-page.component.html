@@ -18,7 +18,8 @@
       <div>
         <h2 class="page-title">{{ ev.name }}</h2>
         <p class="muted" *ngIf="!isClosed">
-          One vote per set &mdash; your own set included. You can change your vote until the host closes the event.
+          Vote for one version of each commander. A vote on your own commander counts as two — owners, vote first.
+          You can change your vote until the host closes the event.
         </p>
         <p class="muted" *ngIf="isClosed">This event is closed. Votes are final.</p>
       </div>
@@ -37,16 +38,19 @@
 
     <section *ngIf="!ev.sets.length" class="panel">
       <p class="muted">
-        No sets locked in yet.
-        <a routerLink="/set" class="night-link">Build and lock in your commander set</a>.
+        No commanders locked in yet.
+        <a routerLink="/set" class="night-link">Build and lock in your commanders</a>.
       </p>
     </section>
 
-    <app-set-row *ngFor="let set of ev.sets; trackBy: trackSet"
-                 [set]="set"
-                 [final]="isClosed"
-                 [disabled]="isClosed || voting.has(set.id)"
-                 (vote)="vote(set, $event)"></app-set-row>
+    <section *ngFor="let group of ev.sets | cmcGroups; trackBy: trackGroup" class="cmc-group">
+      <h3 class="section-title cmc-heading">{{ group.label }}</h3>
+      <app-set-row *ngFor="let set of group.sets; trackBy: trackSet"
+                   [set]="set"
+                   [final]="isClosed"
+                   [disabled]="isClosed || voting.has(set.id)"
+                   (vote)="vote(set, $event)"></app-set-row>
+    </section>
 
     <p class="muted history-link">
       <a routerLink="/events" class="night-link">Past events</a>

@@ -7,6 +7,7 @@ import { of } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { EventSummary } from '../../models/api.model';
 import { WinnersBannerComponent } from '../../components/winners-banner/winners-banner.component';
+import { CmcGroupsPipe } from '../../pipes/cmc-groups.pipe';
 import { MediaPipe } from '../../pipes/media.pipe';
 import { MediaService } from '../../services/media.service';
 import { eventView, setCard, setView } from '../../testing/fixtures';
@@ -27,7 +28,7 @@ describe('AdminPageComponent', () => {
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
-      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe],
+      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe, CmcGroupsPipe],
       schemas: [NO_ERRORS_SCHEMA],
       providers: [{ provide: MediaService, useValue: media }]
     });
@@ -174,7 +175,7 @@ describe('AdminPageComponent', () => {
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
-      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe],
+      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe, CmcGroupsPipe],
       schemas: [NO_ERRORS_SCHEMA],
       providers: [{ provide: MediaService, useValue: media }]
     });
@@ -197,7 +198,7 @@ describe('AdminPageComponent', () => {
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
-      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe],
+      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe, CmcGroupsPipe],
       schemas: [NO_ERRORS_SCHEMA],
       providers: [{ provide: MediaService, useValue: media }]
     });

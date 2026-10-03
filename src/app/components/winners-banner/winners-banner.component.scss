@@ -71,3 +71,16 @@
 .outcome-none .winner-version {
   color: var(--text-faint);
 }
+
+.winners-group + .winners-group {
+  margin-top: 0.85rem;
+}
+
+.cmc-heading {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}

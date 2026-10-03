@@ -23,6 +23,7 @@
 
       <div class="vote-bar">
         <span class="count">{{ card.votes }} {{ card.votes === 1 ? 'vote' : 'votes' }}</span>
+        <span *ngIf="card.ownerVote" class="owner-x2 muted" title="The owner's own vote counts as two">owner ×2</span>
         <button *ngIf="showVoteButtons"
                 type="button"
                 class="btn vote-button"

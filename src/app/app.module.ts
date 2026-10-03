@@ -22,6 +22,7 @@ import { AdminPageComponent } from './pages/admin-page/admin-page.component';
 import { PoolPageComponent } from './pages/pool-page/pool-page.component';
 import { QueueBadgeComponent } from './components/queue-badge/queue-badge.component';
 import { MediaPipe } from './pipes/media.pipe';
+import { CmcGroupsPipe } from './pipes/cmc-groups.pipe';
 import { TiltDirective } from './directives/tilt.directive';
 import { CardSlotComponent } from './components/card-slot/card-slot.component';
 import { CommanderPanelComponent } from './components/commander-panel/commander-panel.component';
@@ -51,6 +52,7 @@ import { PoolSubmitComponent } from './components/pool-submit/pool-submit.compon
     PoolAdminComponent,
     PoolSubmitComponent,
     MediaPipe,
+    CmcGroupsPipe,
     TiltDirective
   ],
   imports: [

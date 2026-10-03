@@ -49,9 +49,14 @@
       <p class="muted">No sets were locked in.</p>
     </section>
 
-    <app-set-row *ngFor="let set of ev.sets; trackBy: trackSet"
-                 [set]="set"
-                 [showVoteButtons]="false"
-                 [final]="ev.status === 'closed'"></app-set-row>
+    <div class="set-rows">
+      <section *ngFor="let group of ev.sets | cmcGroups; trackBy: trackGroup" class="cmc-group">
+        <h3 class="section-title cmc-heading">{{ group.label }}</h3>
+        <app-set-row *ngFor="let set of group.sets; trackBy: trackSet"
+                     [set]="set"
+                     [showVoteButtons]="false"
+                     [final]="ev.status === 'closed'"></app-set-row>
+      </section>
+    </div>
   </ng-container>
 </div>

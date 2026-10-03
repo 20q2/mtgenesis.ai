@@ -4,6 +4,7 @@ import {
   EMPTY, Observable, Subject, Subscription, catchError, finalize, of, startWith, switchMap
 } from 'rxjs';
 import { EventView, SetCardView, SetView } from '../../models/api.model';
+import { CmcGroup } from '../../services/commander-rules';
 import { apiErrorMessage } from '../../services/api.util';
 import { EventService } from '../../services/event.service';
 import { PageVisibilityService } from '../../services/page-visibility.service';
@@ -90,6 +91,10 @@ export class VotePageComponent implements OnInit, OnDestroy {
 
   trackSet(_index: number, set: SetView): string {
     return set.id;
+  }
+
+  trackGroup(_index: number, group: CmcGroup): string {
+    return group.label;
   }
 
   private load(): Observable<EventView | null> {

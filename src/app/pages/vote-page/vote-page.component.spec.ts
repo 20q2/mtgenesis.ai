@@ -6,6 +6,7 @@ import { EventView, SetView } from '../../models/api.model';
 import { CardSlotComponent } from '../../components/card-slot/card-slot.component';
 import { SetRowComponent } from '../../components/set-row/set-row.component';
 import { WinnersBannerComponent } from '../../components/winners-banner/winners-banner.component';
+import { CmcGroupsPipe } from '../../pipes/cmc-groups.pipe';
 import { MediaPipe } from '../../pipes/media.pipe';
 import { EventService } from '../../services/event.service';
 import { MediaService } from '../../services/media.service';
@@ -51,7 +52,8 @@ describe('VotePageComponent', () => {
     visibility = fakeVisibility();
     TestBed.configureTestingModule({
       imports: [RouterTestingModule],
-      declarations: [VotePageComponent, SetRowComponent, WinnersBannerComponent, CardSlotComponent, MediaPipe],
+      declarations: [VotePageComponent, SetRowComponent, WinnersBannerComponent, CardSlotComponent, MediaPipe,
+                     CmcGroupsPipe],
       providers: [
         { provide: EventService, useValue: events },
         { provide: MediaService, useValue: media },
@@ -75,6 +77,39 @@ describe('VotePageComponent', () => {
     expect(rows[0].textContent).toContain('Zur\'ka, Élan of Ash');
     expect(rows[0].textContent).toContain('by Alice');
     expect(voteButtons().length).toBe(6);
+  });
+
+  it('groups commanders under 3, 4 and 5 CMC headings, then Earlier sets', () => {
+    const legacy = setView({ id: 'sL', username: 'Cy', commanderName: 'Old Set', cmc: null });
+    setup(eventView({ sets: [setA({ cmc: 5 }), setB({ cmc: 3 }), legacy] }));
+    const groups = Array.from(el().querySelectorAll('.cmc-group')) as HTMLElement[];
+    expect(groups.map(g => g.querySelector('.cmc-heading')!.textContent!.trim()))
+      .toEqual(['3 CMC', '5 CMC', 'Earlier sets']);
+    expect(groups[0].textContent).toContain('Grimbold the Unbowed');
+    expect(groups[1].textContent).toContain("Zur'ka, Élan of Ash");
+    expect(groups[2].textContent).toContain('Old Set');
+  });
+
+  it("explains the vote rules, including the owner's double vote", () => {
+    setup(eventView({ sets: [setA()] }));
+    expect(el().querySelector('.vote-header')!.textContent).toContain(
+      'Vote for one version of each commander. A vote on your own commander counts as two — owners, vote first.');
+  });
+
+  it("marks the owner's pick as owner ×2", () => {
+    const owned = setA();
+    owned.cards[1] = { ...owned.cards[1], ownerVote: true, votes: 2 };
+    setup(eventView({ sets: [owned] }));
+    expect(cardEl('a2').textContent).toContain('owner ×2');
+    expect(cardEl('a1').textContent).not.toContain('owner ×2');
+  });
+
+  it('groups the winners by CMC once the event is closed', () => {
+    setup(eventView({ status: 'closed', closedAt: '2026-09-28T23:00:00+00:00',
+                      sets: [setA({ cmc: 4 }), setB({ cmc: 3 })] }));
+    const titles = Array.from(el().querySelectorAll('.winners-banner .cmc-heading'))
+      .map(h => h.textContent!.trim());
+    expect(titles).toEqual(['3 CMC', '4 CMC']);
   });
 
   it('a vote click calls EventService.vote and then refreshes', () => {
