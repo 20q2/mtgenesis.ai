@@ -20,6 +20,9 @@ SET_SPECS = [
      "subtype": "Human Wizard", "rarity": "mythic", "cmc": 5},
     {"name": "The Bronze Warden", "manaCost": "", "colors": [], "type": "Creature",
      "subtype": "Golem", "rarity": "uncommon", "cmc": 4},
+    # A Vehicle commander: crew text and the Vehicle's +2 stat points (spec 2026-10-03 §7).
+    {"name": "The Iron Pilgrim", "manaCost": "{R}", "colors": ["R"], "type": "Artifact",
+     "subtype": "Vehicle", "rarity": "rare", "cmc": 5, "commanderKind": "vehicle"},
 ]
 
 
