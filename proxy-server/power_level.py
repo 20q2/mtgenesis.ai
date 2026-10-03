@@ -59,14 +59,19 @@ def creature_stats(card: dict) -> tuple[int, int]:
     subtype = (card.get('subtype') or '').lower()
     if 'vehicle' in subtype:
         total += 1  # vehicles need crewing, so they get a slightly better body
-    power = total // 2
-    toughness = total - power
-    # Evasive or aggressive creature types lean toward power, defensive ones toward toughness
-    if re.search(r'\b(wall|treefolk|golem|construct|turtle)\b', subtype) and power > 1:
-        power, toughness = power - 1, toughness + 1
-    elif re.search(r'\b(goblin|berserker|warrior|dragon|demon|cat|rogue)\b', subtype) and toughness > 1:
-        power, toughness = power + 1, toughness - 1
+    power, toughness = lean(total // 2, total - total // 2, subtype)
     return max(power, 0), max(toughness, 1)
+
+
+def lean(power: int, toughness: int, subtype: str) -> tuple[int, int]:
+    """Moves one point toward power for evasive or aggressive creature types, and toward
+    toughness for defensive ones. The total stays the same."""
+    subtype = (subtype or '').lower()
+    if re.search(r'\b(wall|treefolk|golem|construct|turtle)\b', subtype) and power > 1:
+        return power - 1, toughness + 1
+    if re.search(r'\b(goblin|berserker|warrior|dragon|demon|cat|rogue)\b', subtype) and toughness > 1:
+        return power + 1, toughness - 1
+    return power, toughness
 
 
 def body_value(power: int, toughness: int) -> float:
