@@ -183,30 +183,6 @@ def clean_commander_name(name) -> str:
     return name
 
 
-COMMANDER_SLOT_CMC = {1: 3, 2: 4, 3: 5}
-_MANA_SYMBOL_RE = re.compile(r"\{([^}]+)\}")
-
-
-def commander_slot_params(params: dict, slot: int) -> dict:
-    """A commander set slot's card params: a Legendary Creature costing 3, 4 or 5 mana.
-
-    Keeps the requested colored/hybrid/Phyrexian pips, drops generic and {X}, and pads
-    generic to the slot's mana value. Typed P/T is dropped so the stat curve sets each
-    version's body. Pips worth more than 3 mana are a StorageError 400."""
-    pips = [s for s in _MANA_SYMBOL_RE.findall(params.get("manaCost") or "")
-            if not s.isdigit() and s.upper() not in ("X", "Y", "Z")]
-    pip_value = sum(2 if s.startswith("2/") else 1 for s in pips)
-    if pip_value > COMMANDER_SLOT_CMC[1]:
-        raise StorageError(400, f"A commander set's colored pips can add up to at most "
-                                f"{COMMANDER_SLOT_CMC[1]} mana (the first version costs 3)")
-    cmc = COMMANDER_SLOT_CMC[slot]
-    generic = cmc - pip_value
-    cost = (f"{{{generic}}}" if generic else "") + "".join(f"{{{s}}}" for s in pips)
-    out = {k: v for k, v in params.items() if k not in ("power", "toughness")}
-    out.update(type="Creature", supertype="Legendary", manaCost=cost, cmc=cmc)
-    return out
-
-
 def _rarity_taken(rarity: str, cmc: int) -> str:
     return f"You already have a {rarity.capitalize()} commander ({cmc} CMC)"
 

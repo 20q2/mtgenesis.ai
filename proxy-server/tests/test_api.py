@@ -13,7 +13,10 @@ CARD_VIEW_KEYS = {"id", "userId", "setId", "slot", "replaced", "status", "error"
                   "artReady", "queuePosition", "etaSeconds", "card", "cardImageUrl",
                   "artImageUrl", "createdAt", "shared", "poolEntryId"}
 SET_VIEW_KEYS = {"id", "userId", "username", "eventId", "commanderName", "prompt", "status",
-                 "lockedAt", "cards", "myVoteCardId"}
+                 "lockedAt", "cards", "myVoteCardId", "cmc", "rarity"}
+# A commander request: pips only, a commander rarity, P/T left to the point buy.
+SET_DATA = {"name": "Placeholder", "manaCost": "{B}{R}", "colors": ["B", "R"], "type": "Creature",
+            "subtype": "Human Wizard", "rarity": "rare"}
 EVENT_SUMMARY_KEYS = {"id", "name", "status", "createdAt", "closedAt"}
 
 
@@ -67,10 +70,14 @@ def H(user_id):
 ADMIN = {"X-Admin-Pin": PIN}
 
 
-def generate_set(client, user_id, name="Zur the Ashen"):
+def set_request(name="Zur the Ashen", cmc=4, **card):
+    return {"prompt": "a fiery lich", "cardData": {**SET_DATA, **card}, "count": 3,
+            "commanderName": name, "cmc": cmc}
+
+
+def generate_set(client, user_id, name="Zur the Ashen", cmc=4, **card):
     res = client.post("/api/v1/generations", headers=H(user_id),
-                      json={"prompt": "a fiery lich", "cardData": CARD_DATA, "count": 3,
-                            "commanderName": name})
+                      json=set_request(name, cmc, **card))
     assert res.status_code == 200, res.get_json()
     return res.get_json()
 
@@ -159,8 +166,10 @@ def test_generations_set(client, queue, tmp_storage):
     assert all(c["card"]["name"] == name for c in body["cards"])
     assert all(c["card"]["type"] == "Creature" for c in body["cards"])
     assert all(c["card"]["supertype"] == "Legendary" for c in body["cards"])
-    assert [c["card"]["manaCost"] for c in body["cards"]] == ["{1}{B}{R}", "{2}{B}{R}", "{3}{B}{R}"]
-    assert [c["card"]["cmc"] for c in body["cards"]] == [3, 4, 5]
+    # three versions of one commander: identical params
+    assert all(c["card"]["manaCost"] == "{2}{B}{R}" and c["card"]["cmc"] == 4 for c in body["cards"])
+    assert all(c["card"]["rarity"] == "rare" for c in body["cards"])
+    assert all((c["card"]["power"], c["card"]["toughness"]) == ("2", "3") for c in body["cards"])
     assert queue.enqueued == [c["id"] for c in body["cards"]]
     assert queue.batches == [[c["id"] for c in body["cards"]]]  # one batch: one director call
     assert tmp_storage.get_set(body["setId"])["commander_name"] == name
@@ -168,19 +177,18 @@ def test_generations_set(client, queue, tmp_storage):
     other = login(client, "Beth")
     for extra in [{}, {"commanderName": ""}, {"commanderName": "   "},
                   {"commanderName": "x" * 41},
-                  {"commanderName": "Ok", "cardData": {**CARD_DATA, "manaCost": "{B}{B}{R}{R}"}}]:
+                  {"commanderName": "Ok", "cardData": {**SET_DATA, "manaCost": "{B}{B}{R}{R}"}}]:
         res = client.post("/api/v1/generations", headers=H(other),
-                          json={"prompt": "p", "cardData": CARD_DATA, "count": 3, **extra})
+                          json={"prompt": "p", "cardData": SET_DATA, "count": 3, "cmc": 4, **extra})
         assert res.status_code == 400, extra
-    assert tmp_storage.current_set(other) is None
+    assert tmp_storage.current_sets(other) == []
 
 
 def test_pending_cap(client, queue, tmp_storage):
     uid = login(client, "Andrew")
     generate_set(client, uid)
     res = client.post("/api/v1/generations", headers=H(uid),
-                      json={"prompt": "p", "cardData": CARD_DATA, "count": 3,
-                            "commanderName": "Again"})
+                      json=set_request("Again"))
     assert res.status_code == 429 and "error" in res.get_json()
     res = client.post("/api/v1/generations", headers=H(uid),
                       json={"prompt": "p", "cardData": CARD_DATA, "count": 1})
@@ -194,10 +202,9 @@ def test_pending_cap(client, queue, tmp_storage):
                            json={"prompt": "p", "cardData": CARD_DATA,
                                  "count": 1}).status_code == 200
     res = client.post("/api/v1/generations", headers=H(other),
-                      json={"prompt": "p", "cardData": CARD_DATA, "count": 3,
-                            "commanderName": "Zur"})
+                      json=set_request("Zur"))
     assert res.status_code == 429
-    assert tmp_storage.current_set(other) is None
+    assert tmp_storage.current_sets(other) == []
 
 
 def test_card_view_positions(client, queue, tmp_storage):
@@ -310,7 +317,9 @@ def test_lock_vote_flow(client, queue, tmp_storage):
     assert locked["status"] == "locked" and locked["eventId"] == event["id"]
     assert locked["username"] == "Andrew" and locked["lockedAt"]
     assert [c["slot"] for c in locked["cards"]] == [1, 2, 3]
-    assert all(set(c) == CARD_VIEW_KEYS | {"votes", "leader", "tied"} for c in locked["cards"])
+    assert all(set(c) == CARD_VIEW_KEYS | {"votes", "leader", "tied", "ownerVote"}
+               for c in locked["cards"])
+    assert locked["cmc"] == 4 and locked["rarity"] == "rare"
 
     target = body["cards"][2]["id"]
     res = client.post("/api/v1/votes", headers=H(voter), json={"setId": set_id, "cardId": target})
@@ -341,12 +350,13 @@ def test_lock_vote_flow(client, queue, tmp_storage):
     assert client.get("/api/v1/events/current",
                       headers=H(str(uuid.uuid4()))).status_code == 401
 
-    # the owner self-votes for another card -> tie
+    # the owner self-votes for another card: their vote counts 2, so it leads
     client.post("/api/v1/votes", headers=H(owner),
                 json={"setId": set_id, "cardId": body["cards"][0]["id"]})
-    tied = client.get("/api/v1/events/current", headers=H(owner)).get_json()["sets"][0]
-    assert [c["tied"] for c in tied["cards"]] == [True, False, True]
-    assert not any(c["leader"] for c in tied["cards"])
+    after = client.get("/api/v1/events/current", headers=H(owner)).get_json()["sets"][0]
+    assert [c["votes"] for c in after["cards"]] == [2, 0, 1]
+    assert [c["leader"] for c in after["cards"]] == [True, False, False]
+    assert [c["ownerVote"] for c in after["cards"]] == [True, False, False]
 
 
 def assert_votes_rejected_without_user(client, set_id, card_id):
@@ -426,10 +436,13 @@ def test_close_event_freezes(client, queue, tmp_storage):
 def test_me_sets_current(client, queue, tmp_storage):
     uid = login(client, "Andrew")
     res = client.get("/api/v1/me/sets/current", headers=H(uid))
-    assert res.status_code == 200 and res.get_json() is None
+    assert res.status_code == 200 and res.get_json() == []
     body = generate_set(client, uid)
-    view = client.get("/api/v1/me/sets/current", headers=H(uid)).get_json()
+    views = client.get("/api/v1/me/sets/current", headers=H(uid)).get_json()
+    assert len(views) == 1
+    view = views[0]
     assert set(view) == SET_VIEW_KEYS
+    assert view["cmc"] == 4 and view["rarity"] == "rare"
     assert view["id"] == body["setId"] and view["status"] == "draft"
     assert view["commanderName"] == "Zur the Ashen" and view["prompt"] == "a fiery lich"
     assert view["userId"] == uid and view["username"] == "Andrew"
@@ -487,8 +500,7 @@ def test_generations_prompt_cap(client, queue):
                       json={"prompt": too_long, "cardData": CARD_DATA, "count": 1})
     assert res.status_code == 400
     assert str(MAX_PROMPT_CHARS) in res.get_json()["error"]
-    res = client.post(url, headers=H(uid), json={"prompt": too_long, "cardData": CARD_DATA,
-                                                 "count": 3, "commanderName": "Zur"})
+    res = client.post(url, headers=H(uid), json={**set_request("Zur"), "prompt": too_long})
     assert res.status_code == 400
     assert queue.enqueued == []
     # Exactly the cap (after trimming) is fine.
@@ -598,3 +610,63 @@ def test_event_views_support_conditional_get(client, queue, tmp_storage, which):
     assert after.status_code == 200
     assert after.headers["ETag"] != etag
     assert after.get_json()["sets"][0]["myVoteCardId"] == body["cards"][1]["id"]
+
+
+def test_me_sets_current_is_a_list(client, queue, tmp_storage):
+    uid = login(client, "Andrew")
+    five = generate_set(client, uid, "Five", cmc=5, rarity="mythic")
+    finish_cards(tmp_storage, five["cards"])  # under the pending cap for the next set
+    generate_set(client, uid, "Three", cmc=3, rarity="uncommon")
+    views = client.get("/api/v1/me/sets/current", headers=H(uid)).get_json()
+    assert [v["cmc"] for v in views] == [3, 5]
+    assert [v["commanderName"] for v in views] == ["Three", "Five"]
+
+
+def test_commander_set_requires_cmc(client, queue, tmp_storage):
+    uid = login(client, "Andrew")
+    for cmc in (None, 6, "4", 2):
+        body = set_request()
+        if cmc is None:
+            del body["cmc"]
+        else:
+            body["cmc"] = cmc
+        res = client.post("/api/v1/generations", headers=H(uid), json=body)
+        assert res.status_code == 400, cmc
+    assert queue.enqueued == []
+
+
+def test_invalid_commander_request_keeps_draft(client, queue, tmp_storage):
+    uid = login(client, "Andrew")
+    body = generate_set(client, uid)
+    finish_cards(tmp_storage, body["cards"])
+    for bad in ({"power": "*", "toughness": "*"}, {"power": "3", "toughness": "3"},
+                {"rarity": "common"}, {"commanderKind": "planeswalker"}):
+        res = client.post("/api/v1/generations", headers=H(uid), json=set_request(**bad))
+        assert res.status_code == 400, bad
+        assert "error" in res.get_json()
+    sets = tmp_storage.current_sets(uid)
+    assert [(s["id"], s["status"]) for s in sets] == [(body["setId"], "draft")]
+    assert tmp_storage.count_pending(uid) == 0
+    assert len(queue.enqueued) == 3
+
+
+def test_vehicle_commander(client, queue, tmp_storage):
+    uid = login(client, "Andrew")
+    body = generate_set(client, uid, "Wagon", cmc=3, commanderKind="vehicle", subtype="",
+                        power="4", toughness="2")
+    for c in body["cards"]:
+        card = c["card"]
+        assert card["type"] == "Artifact" and card["supertype"] == "Legendary"
+        assert "Vehicle" in card["subtype"]
+        assert (card["power"], card["toughness"]) == ("4", "2")
+        assert "commanderKind" not in card
+
+
+def test_rarity_conflict_is_409(client, queue, tmp_storage):
+    uid = login(client, "Andrew")
+    first = generate_set(client, uid, "Three", cmc=3, rarity="rare")
+    finish_cards(tmp_storage, first["cards"])
+    res = client.post("/api/v1/generations", headers=H(uid),
+                      json=set_request("Four", cmc=4, rarity="rare"))
+    assert res.status_code == 409
+    assert res.get_json()["error"] == "You already have a Rare commander (3 CMC)"

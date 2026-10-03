@@ -29,10 +29,10 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request, send_file
 
+from commander_rules import COMMANDER_CMCS, commander_params
 from generation_queue import GenerationQueue
 from storage import (MEDAL_POINTS, PENDING_STATUSES, POOL_DEFAULT_ENTRIES, Storage,
-                     StorageError, clean_commander_name, commander_slot_params, leader_flags,
-                     pool_cutoff, pool_ranking)
+                     StorageError, clean_commander_name, leader_flags, pool_cutoff, pool_ranking)
 
 try:  # the power heuristic is advisory: pools still work without it
     import power_level
@@ -180,6 +180,7 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         pool_entry_ids = storage.open_pool_entry_ids()
         cards = storage.set_cards(row["id"])
         flags = leader_flags(storage.vote_tally(row["id"]), [c["id"] for c in cards])
+        owner_pick = storage.owner_vote(row["id"])
         owner = storage.get_user(row["user_id"])
         return {
             "id": row["id"],
@@ -190,7 +191,11 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
             "prompt": row["prompt"],
             "status": row["status"],
             "lockedAt": row["locked_at"],
-            "cards": [{**card_view(c, pool_entry_ids), **flags[c["id"]]} for c in cards],
+            "cmc": row["cmc"],
+            "rarity": row["rarity"],
+            # votes are weighted: the owner's own vote counts 2 (ownerVote marks that card)
+            "cards": [{**card_view(c, pool_entry_ids), **flags[c["id"]],
+                       "ownerVote": c["id"] == owner_pick} for c in cards],
             "myVoteCardId": storage.user_vote(voter_id, row["id"]) if voter_id else None,
         }
 
@@ -282,8 +287,8 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     @bp.get("/me/sets/current")
     def my_current_set():
         user = require_user()
-        row = storage.current_set(user["id"])
-        return jsonify(set_view(row, user["id"]) if row else None)
+        # One per mana value: the player's three commanders (spec 2026-10-03 §4).
+        return jsonify([set_view(row, user["id"]) for row in storage.current_sets(user["id"])])
 
     # ----- generation -----
     @bp.post("/generations")
@@ -304,9 +309,12 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
             raise StorageError(400, "count must be 1 or 3")
         commander_name = clean_commander_name(data.get("commanderName")) if count == 3 else None
         if count == 3:
-            params = {**card_data, "name": commander_name}
-            # One 3-, 4- and 5-mana version; checked before the old draft is abandoned.
-            slot_params = {slot: commander_slot_params(params, slot) for slot in (1, 2, 3)}
+            cmc = data.get("cmc")
+            if type(cmc) is not int or cmc not in COMMANDER_CMCS:
+                raise StorageError(400, "cmc must be 3, 4 or 5")
+            # Three versions of one commander share these params; a broken rule is a 400
+            # before the old draft at this mana value is abandoned.
+            params = commander_params({**card_data, "name": commander_name}, cmc)
 
         with create_lock:
             check_pending_cap(user["id"], count)
@@ -314,9 +322,9 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
                 set_id = None
                 cards = [storage.create_card(user["id"], prompt, card_data)]
             else:
-                set_id = storage.create_set(user["id"], commander_name, prompt, params)["id"]
-                cards = [storage.create_card(user["id"], prompt, slot_params[slot], set_id=set_id,
-                                             slot=slot)
+                set_id = storage.create_set(user["id"], commander_name, prompt, params,
+                                            cmc=cmc, rarity=params["rarity"])["id"]
+                cards = [storage.create_card(user["id"], prompt, params, set_id=set_id, slot=slot)
                          for slot in (1, 2, 3)]
         # All at once, so a set's versions share one director call.
         gen_queue.enqueue_many([card["id"] for card in cards])

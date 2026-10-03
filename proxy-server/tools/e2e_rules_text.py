@@ -17,7 +17,7 @@ Needs Ollama running. Usage (from proxy-server/):
     python tools/e2e_rules_text.py --label director-on --sets 4 --repeat 2
     python tools/e2e_rules_text.py --label director-off --sets 4 --repeat 2 --no-director
 
---sets N runs N commander sets (tools/e2e_sets.py) as their 3/4/5-mana versions, with the
+--sets N runs N commander sets (tools/e2e_sets.py) as their three versions, with the
 card director's briefs unless --no-director, and adds report-sets.md: the briefs, the three
 texts and how much they overlap (director.set_overlap; lower = more distinct versions).
 """
