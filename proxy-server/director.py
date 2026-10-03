@@ -3,18 +3,21 @@ Card director: a short brief per card that steers both the rules text and the ar
 
 Spec: docs/superpowers/specs/2026-10-02-card-director-design.md.
 The brief says who the card is (identity), what its abilities revolve around (mechanic)
-and what its painting shows (art). A commander set gets three briefs in one call, each
-with a different mechanic. Players never see a brief. Any failure returns None, and the
+and what its painting shows (art). Each brief gets random on-color ingredients (two design
+hooks, an ability shape, sometimes a twist) so similar cards still come out different. A
+commander set gets three briefs in one call, each with a different mechanic. Players never
+see a brief. Any failure returns None, and the
 card is then generated exactly as it was before the director existed.
 """
 from __future__ import annotations
 
 import itertools
 import json
+import random
 import re
 
 import power_level as power
-from rules_text import COLOR_HOOKS, COLORLESS_HOOKS, type_line
+from rules_text import COLOR_HOOKS, COLORLESS_HOOKS, DESIGN_GUIDE, POWER_GUIDE, type_line
 
 MECHANIC_MAX_OVERLAP = 0.5   # content-word Jaccard at or above this = "the same mechanic"
 ART_FIELDS = ("subject", "action", "setting", "framing", "light")
@@ -22,6 +25,22 @@ IDENTITY_MAX_WORDS = 20
 MECHANIC_MAX_WORDS = 15
 ART_MAX_WORDS = 12
 ATTEMPTS = 2
+
+# Ingredients: which kind of ability carries the mechanic, and an optional twist. Drawn per
+# brief (no repeats within a set) so the model can't settle on the same few favorites. The
+# shape skips the director and goes to the rules-text writer with the brief: shown to the
+# director it made mechanics read like rules text ("When you cast a spell, ...").
+SHAPES = ("a trigger when it enters", "an attack or combat damage trigger",
+          "a trigger when it dies or leaves the battlefield", "an activated ability with a real cost",
+          "a static ability", "a trigger at the beginning of your upkeep or end step",
+          "a trigger when you cast a spell")
+LAND_SHAPES = ("a trigger when it enters", "an activated ability with a real cost", "a static ability")
+# No "named counter type" (the model wrote "Whenever an Ash Counter exists, ...") and no
+# "choice between two modes" (it stacked two effects on one ability and went over budget).
+TWISTS = ("add a real drawback or extra cost",
+          "interact with opponents' creatures or cards", "scale with something you count",
+          "involve the graveyard")
+TWIST_CHANCE = 0.5
 
 _STOPWORDS = {"the", "and", "for", "with", "your", "you", "each", "that", "this", "from",
               "into", "are", "its", "when", "whenever", "card", "cards", "creature", "creatures"}
@@ -32,9 +51,14 @@ _UNSAFE_ART = re.compile(r"\b(?:nude|naked|topless|shirtless|bare[- ]chest(?:ed)
 SYSTEM_PROMPT = """You are the creative director for a custom Magic: The Gathering card. From the card's name, type line, colors, cost and rarity, invent who or what this card is and what its rules text should revolve around, then describe its painting.
 Return JSON only: {"briefs": [{"identity": "...", "mechanic": "...", "art": {"subject": "...", "action": "...", "setting": "...", "framing": "...", "light": "..."}}]}.
 - identity: who or what the card is, in at most 20 words. Draw on the name and subtype.
-- mechanic: a short theme for its abilities, at most 8 words, not rules text (for example "sacrifice tokens to drain opponents"). It must fit the card's colors (see "good at") and the power budget: cheap or common cards get small, simple mechanics.
+- mechanic: a short theme for its abilities, at most 8 words, not rules text (for example "sacrifice tokens to drain opponents"). Build it from that brief's ingredients: one of its themes, with its twist if it has one. It must fit the power budget: cheap or common cards get small, simple mechanics.
+- The mechanic grows out of who the card is: a Gravecaller raises the dead, a Stormherald rewards casting spells. Fuse the name and subtype with the ingredients into one flavorful idea.
+- Use only real Magic game objects: creatures, tokens, counters, cards, life, mana, the graveyard, the library. Never invent new zones, realms or rules.
 - art: a painting brief. subject starts with who they are (for people: age and gender, e.g. "an old elf woman"), names the creature type, then what it looks like; action is what it is doing; setting is where; framing is the camera (for example "low angle, close"); light is the light source and mood. Each at most 12 words. Never put the card's name in the art fields. For people, describe their clothing or armor, never bare skin or their body.
-Make each brief specific to this card. Avoid generic fantasy filler."""
+Make each brief specific to this card. Avoid generic fantasy filler.
+
+The rules-text writer turns your mechanic into abilities under these rules, so design within them:
+""" + POWER_GUIDE + "\n\n" + DESIGN_GUIDE
 
 
 def _log(message: str) -> None:
@@ -73,7 +97,63 @@ def _schema(count: int) -> dict:
             "required": ["briefs"]}
 
 
-def _messages(card: dict, count: int, avoid: list[dict]) -> list[dict]:
+def _shapes(card: dict) -> tuple[str, ...]:
+    """Ability shapes that make sense for the card type (none for spells and planeswalkers)."""
+    card_type = (card.get("type") or "").lower()
+    subtype = (card.get("subtype") or "").lower().split()
+    if any(t in card_type for t in ("instant", "sorcery", "planeswalker")):
+        return ()
+    if "land" in card_type:
+        return LAND_SHAPES
+    if "creature" in card_type or {"vehicle", "equipment", "aura"} & set(subtype):
+        return SHAPES
+    return tuple(s for s in SHAPES if "attack" not in s)
+
+
+def draw_ingredients(card: dict, count: int, rng: random.Random) -> list[dict]:
+    """Per brief: two on-color design hooks, an ability shape (None for spells and
+    planeswalkers) and sometimes a twist. Within a set no hook, shape or twist repeats while
+    there are fresh ones left. Multicolor cards take a hook from each of two of their colors."""
+    card = card or {}
+    colors = [c for c in (card.get("colors") or []) if c in "WUBRG"]
+    used: set[str] = set()
+
+    def pick(pool: list[str], taken: list[str]) -> str:
+        fresh = [h for h in pool if h not in used and h not in taken]
+        choice = rng.choice(fresh or [h for h in pool if h not in taken] or pool)
+        used.add(choice)
+        return choice
+
+    shapes = list(_shapes(card))
+    rng.shuffle(shapes)
+    twists = list(TWISTS)
+    rng.shuffle(twists)
+    result = []
+    for n in range(count):
+        if not colors:
+            pools = [COLORLESS_HOOKS, COLORLESS_HOOKS]
+        elif len(colors) == 1:
+            pools = [COLOR_HOOKS[colors[0]]] * 2
+        else:
+            pools = [COLOR_HOOKS[c] for c in rng.sample(colors, 2)]
+        hooks: list[str] = []
+        for pool in pools:
+            hooks.append(pick(pool, hooks))
+        shape = shapes[n % len(shapes)] if shapes else None
+        twist = twists.pop() if twists and rng.random() < TWIST_CHANCE else None
+        result.append({"hooks": hooks, "shape": shape, "twist": twist})
+    return result
+
+
+def _describe(n: int, ingredients: dict) -> str:
+    parts = [f"Brief {n}: build the mechanic on one of these themes: {'; '.join(ingredients['hooks'])}."]
+    if ingredients["twist"]:
+        parts.append(f"Twist: {ingredients['twist']}.")
+    return " ".join(parts)
+
+
+def _messages(card: dict, count: int, avoid: list[dict], rng: random.Random | None = None,
+              ingredients: list[dict] | None = None) -> list[dict]:
     card = card or {}
     colors = [c for c in (card.get("colors") or []) if c in "WUBRG"]
     facts = [f"Name: {(card.get('name') or '').strip() or 'Untitled'}",
@@ -83,9 +163,10 @@ def _messages(card: dict, count: int, avoid: list[dict]) -> list[dict]:
              f"Mana cost: {card.get('manaCost') or '{0}'} (mana value {card.get('cmc', 0)})",
              f"Rarity: {(card.get('rarity') or 'common').lower()}",
              power.describe_budget(card)]
-    hooks = [h for c in colors for h in COLOR_HOOKS[c]] or COLORLESS_HOOKS
-    facts.append(f"Its colors are good at: {'; '.join(hooks)}. The mechanic must fit these.")
-    asks = [f"Write {count} brief{'s' if count > 1 else ''}."]
+    ingredients = ingredients or draw_ingredients(card, count, rng or random.Random())
+    asks = [f"Write {count} brief{'s' if count > 1 else ''}, in this order. Ingredients, rolled at "
+            "random so this card is unlike any other:"]
+    asks += [_describe(n, ing) for n, ing in enumerate(ingredients, 1)]
     if count > 1:
         asks.append("Each brief must use a different mechanic.")
         asks.append("All briefs show the same character: give every brief the same art.subject "
@@ -163,15 +244,20 @@ def _same_character(briefs: list[dict], avoid: list[dict]) -> None:
         b["art"]["subject"] = subject
 
 
-def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model: str) -> list[dict] | None:
+def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model: str,
+                 rng: random.Random | None = None) -> list[dict] | None:
     """`count` briefs for the card (one per commander-set version), each with a mechanic
-    different from the others and from `avoid`. None if two attempts fail; never raises."""
+    different from the others and from `avoid`. None if two attempts fail; never raises.
+    `rng` draws the ingredients (seed it for repeatable runs); a retry draws fresh ones."""
     avoid = avoid or []
+    rng = rng or random.Random()
     subtype = (card or {}).get("subtype") or ""
     for _ in range(ATTEMPTS):
+        ingredients = draw_ingredients(card, count, rng)
         try:
             resp = client.chat(
-                model=model, messages=_messages(card, count, avoid), format=_schema(count),
+                model=model, messages=_messages(card, count, avoid, ingredients=ingredients),
+                format=_schema(count),
                 think=False, keep_alive="30m",
                 # Small context, like the rules-text call: SDXL must still fit beside the model.
                 options={"temperature": 0.9, "top_p": 0.95, "num_predict": 200 * count + 100,
@@ -188,6 +274,9 @@ def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model
             continue
         if len(briefs) == count and all(briefs) and _distinct(briefs, avoid):
             _same_character(briefs, avoid)
+            for b, ing in zip(briefs, ingredients):
+                if ing["shape"]:
+                    b["shape"] = ing["shape"]
             _log(f"🎬 Director briefs: {[b['mechanic'] for b in briefs]}")
             return briefs
         _log("🎬 Director reply rejected (missing fields or repeated mechanics)")

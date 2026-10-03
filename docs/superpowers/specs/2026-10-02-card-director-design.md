@@ -39,7 +39,13 @@ The art fields are at most 12 words each.
 - **Input:**
   - the card's name, type line, colors, mana cost and mana value, rarity, and subtype
   - `power.describe_budget(card)`, so the mechanic fits the card's cost
-  - what the card's colors are good at (`rules_text.COLOR_HOOKS`, or `COLORLESS_HOOKS`), which the mechanic must fit; the mechanic is asked for as a short theme (about 8 words), not rules text
+  - random ingredients for each brief (`draw_ingredients`), from which the mechanic is built; the mechanic is asked for as a short theme (about 8 words), not rules text, that grows out of the name and subtype. Added 2026-10-03: the model kept choosing the same few hooks from the full color list.
+    - **hooks:** two on-color hooks (`rules_text.COLOR_HOOKS`, or `COLORLESS_HOOKS`) to choose from; a multicolor card takes one from each of two of its colors
+    - **shape:** the kind of ability that carries the mechanic (`SHAPES`: enters, attack or combat damage, dies or leaves, activated with a real cost, static, upkeep or end step, casting a spell). Lands use `LAND_SHAPES`, other noncreature permanents skip the attack shape, and instants, sorceries and planeswalkers get none. The shape is not shown to the director (it made mechanics read like rules text); it is stored on the brief as `shape` and the rules-text prompt says `Carry the mechanic on <shape>.`
+    - **twist:** half the time (`TWIST_CHANCE`), one of `TWISTS` (a drawback, interacting with opponents, scaling with a count, the graveyard). Two were dropped after e2e runs: "named counter" produced nonsense like "Whenever an Ash Counter exists", and "choice of modes" stacked effects and went over budget.
+    - the director is told to use only real Magic game objects and never invent zones, realms or rules (it once split the battlefield into "two realms")
+    - within a set, no hook, shape or twist repeats while fresh ones remain. `write_briefs` takes an optional seeded `rng`, and a retry draws new ingredients.
+  - the rules-text prompt's power and design guidance (`rules_text.POWER_GUIDE`, `DESIGN_GUIDE`, shared constants), so a mechanic is priced and designed the way its rules text will be
   - for `count > 1`, an instruction that every brief uses a different mechanic and shows the same character (one appearance), varying only action, setting, framing and light
   - with `avoid`, the briefs to differ from
 - **Call:** Ollama with a JSON `format` schema, `think=False`, a small `num_ctx` (as for rules text; see CLAUDE.md on keeping the context small), and model `DIRECTOR_MODEL`.
@@ -74,7 +80,7 @@ A **brief stage** runs before text and art.
 ## 5. How the brief feeds the models
 
 **Rules text** (`rules_text.build_messages`), when the card has a brief:
-- The `Design hook to consider ...` line is replaced by: `Card idea: <identity>. Build the abilities around this mechanic, scaled to the power budget: <mechanic>.`
+- The `Design hook to consider ...` line is replaced by: `Card idea: <identity>. Build the abilities around this mechanic, scaled to the power budget: <mechanic>.` When the brief has a `shape`, the next line is `Carry the mechanic on <shape>.`
 - The `Concept:` line is omitted.
 - Everything else is unchanged: the system prompt, ability count, type-specific requirements, cleanup, lint, the power budget and its retries, and `FORBIDDEN` patterns.
 
@@ -121,6 +127,7 @@ It needs the GPU, so run it only when the site is not live.
   - `avoid`
   - the art word filter
   - `None` on garbage, missing fields, exceptions or a timeout
+- **`tests/test_director_ingredients.py`:** hooks stay on-color (one per color for two colors); no repeats within a set; colorless sets with too few hooks; no shape for spells and planeswalkers; twist frequency; seeded determinism; both guides in the system prompt; the prompt fits `num_ctx`.
 - **Queue** (`tests/test_generation_queue.py`):
   - briefs are served before rules text
   - the image worker waits for the brief stage

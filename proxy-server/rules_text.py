@@ -468,6 +468,17 @@ def error_count(issues) -> int:
 
 # ===== Prompt =====
 
+# Shared with the card director (director.py), so both prompts price and design cards alike.
+POWER_GUIDE = """Power level (the most common mistake is making cheap cards far too strong):
+- Price effects like a Limited designer. Typical costs: "draw a card" ~1 mana; "draw two cards" ~3; 2 damage to a creature ~1; 3 damage to any target ~2; "destroy target creature" ~4 at common (3 at rare); "counter target spell" ~2; a +2/+2 pump until end of turn ~1; one 1/1 token ~1; flying ~1 on a creature.
+- A creature's body is already paid for: the power/toughness you are given is about what its mana value buys, so its abilities must fit in the stated power budget.
+- An effect that repeats (Whenever..., At the beginning of your upkeep..., {T}: ...) costs about twice a one-time effect (When this creature enters...). A 2-mana card never makes tokens or draws cards every turn.
+- Rarity: commons do one simple thing and are modest; uncommons are a bit stronger or do two related things; rares can be strong and build-around; mythics can be splashy. Protection, hexproof and indestructible are uncommon or higher.
+- Never: extra turns, casting spells without paying their mana cost, "destroy all" below rare, loops, removal that repeats every turn, or more than three tokens from one ability. A repeating ability makes at most one token.
+- Avoid filler: paying mana to add mana, "you may add {U}" on attack, or restating what a keyword already does. Every ability should matter in a game."""
+
+DESIGN_GUIDE = """Design: make it feel like a real card from a premier set. Build every ability around one idea that fits the card's name, colors and concept, and do not copy the examples. Prefer specific, flavorful effects, but a small effect done well beats a big one: most real cards are simple. Keep it concise: real cards rarely exceed 60 words."""
+
 SYSTEM_PROMPT = """You are a senior Magic: The Gathering card designer. You write the rules text for one new card at a time, in exact modern Oracle templating, and every card you write is legal, playable and has a clear, memorable hook.
 
 Output JSON only: {"abilities": ["...", "..."]}. Each array item is ONE ability exactly as printed in the text box. Never include the card name as a header, the mana cost, the type line, power/toughness, flavor text, reminder text, explanations or labels.
@@ -510,15 +521,7 @@ Rare Equipment: {"abilities": ["Equipped creature gets +1/+0 and has \\"Whenever
 Mythic planeswalker: {"abilities": ["+1: Scry 2, then draw a card.", "−2: Return target creature to its owner's hand.", "−7: You get an emblem with \\"Instant and sorcery spells you cast cost {2} less to cast.\\""]}
 Uncommon land: {"abilities": ["This land enters tapped.", "{T}: Add {U} or {R}.", "{2}, {T}, Sacrifice this land: Draw a card."]}
 
-Power level (the most common mistake is making cheap cards far too strong):
-- Price effects like a Limited designer. Typical costs: "draw a card" ~1 mana; "draw two cards" ~3; 2 damage to a creature ~1; 3 damage to any target ~2; "destroy target creature" ~4 at common (3 at rare); "counter target spell" ~2; a +2/+2 pump until end of turn ~1; one 1/1 token ~1; flying ~1 on a creature.
-- A creature's body is already paid for: the power/toughness you are given is about what its mana value buys, so its abilities must fit in the stated power budget.
-- An effect that repeats (Whenever..., At the beginning of your upkeep..., {T}: ...) costs about twice a one-time effect (When this creature enters...). A 2-mana card never makes tokens or draws cards every turn.
-- Rarity: commons do one simple thing and are modest; uncommons are a bit stronger or do two related things; rares can be strong and build-around; mythics can be splashy. Protection, hexproof and indestructible are uncommon or higher.
-- Never: extra turns, casting spells without paying their mana cost, "destroy all" below rare, loops, removal that repeats every turn, or more than three tokens from one ability. A repeating ability makes at most one token.
-- Avoid filler: paying mana to add mana, "you may add {U}" on attack, or restating what a keyword already does. Every ability should matter in a game.
-
-Design: make it feel like a real card from a premier set. Build every ability around one idea that fits the card's name, colors and concept, and do not copy the examples. Prefer specific, flavorful effects, but a small effect done well beats a big one: most real cards are simple. Keep it concise: real cards rarely exceed 60 words."""
+""" + POWER_GUIDE + "\n\n" + DESIGN_GUIDE
 
 
 # Design hooks per color. One is suggested at random so similar requests still diverge.
@@ -644,6 +647,8 @@ def build_messages(prompt: str, card: dict | None, rng) -> list[dict]:
     if brief:
         musts.append(f"Card idea: {brief['identity']}. Build the abilities around this mechanic, "
                      f"scaled to the power budget: {brief['mechanic']}.")
+        if brief.get('shape'):  # director.SHAPES, drawn at random per brief
+            musts.append(f"Carry the mechanic on {brief['shape']}.")
     else:
         musts.append(f'Design hook to consider, scaled to the power budget: {hook}.')
 

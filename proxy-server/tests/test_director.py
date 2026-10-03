@@ -167,15 +167,15 @@ def test_director_has_its_own_short_timeout():
 
 
 def test_colors_strengths_are_in_the_prompt():
+    # Two of the colors' hooks per brief, drawn at random (test_director_ingredients.py).
     from rules_text import COLOR_HOOKS, COLORLESS_HOOKS
     client = StubClient([brief()])
     run(client)
     user = client.calls[0]["messages"][-1]["content"]
-    assert all(hook in user for hook in COLOR_HOOKS["B"])
-    assert "must fit" in user
+    assert sum(hook in user for hook in COLOR_HOOKS["B"]) == 2
     client = StubClient([brief(subject="a bronze golem")])
     run(client, card={**CARD, "colors": [], "manaCost": "{3}", "subtype": "Golem"})
-    assert all(hook in client.calls[0]["messages"][-1]["content"] for hook in COLORLESS_HOOKS)
+    assert sum(hook in client.calls[0]["messages"][-1]["content"] for hook in COLORLESS_HOOKS) == 2
 
 
 def test_mechanic_is_asked_for_as_a_short_theme():
