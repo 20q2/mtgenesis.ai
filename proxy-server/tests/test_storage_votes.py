@@ -9,7 +9,7 @@ PARAMS = {"name": "Zur", "manaCost": "{2}{B}", "colors": ["B"], "type": "Creatur
 
 
 def locked_set(storage, user_id):
-    s = storage.create_set(user_id, "Zur", "p", PARAMS)
+    s = storage.create_set(user_id, "Zur", "p", PARAMS, cmc=3, rarity="rare")
     cards = [storage.create_card(user_id, "p", PARAMS, set_id=s["id"], slot=slot)
              for slot in (1, 2, 3)]
     for c in cards:
@@ -44,14 +44,35 @@ def test_self_vote_allowed(tmp_storage, owner, voter):
     s, (c1, c2, _) = locked_set(tmp_storage, owner)
     tmp_storage.cast_vote(owner, s["id"], c1)
     tmp_storage.cast_vote(voter, s["id"], c1)
-    assert tmp_storage.vote_tally(s["id"]) == {c1: 2}
+    assert tmp_storage.vote_tally(s["id"]) == {c1: 3}  # the owner's vote counts 2
     assert tmp_storage.user_vote(owner, s["id"]) == c1
+
+
+def test_self_vote_counts_two(tmp_storage, owner, voter):
+    s, (c1, c2, c3) = locked_set(tmp_storage, owner)
+    assert tmp_storage.owner_vote(s["id"]) is None
+    tmp_storage.cast_vote(owner, s["id"], c1)
+    tmp_storage.cast_vote(voter, s["id"], c2)
+    tally = tmp_storage.vote_tally(s["id"])
+    assert tally == {c1: 2, c2: 1}
+    assert leader_flags(tally, [c1, c2, c3])[c1]["leader"] is True
+    assert tmp_storage.owner_vote(s["id"]) == c1
+
+
+def test_self_vote_weight_moves_with_vote_change(tmp_storage, owner, voter):
+    s, (c1, c2, _) = locked_set(tmp_storage, owner)
+    tmp_storage.cast_vote(owner, s["id"], c1)
+    tmp_storage.cast_vote(voter, s["id"], c2)
+    tmp_storage.cast_vote(owner, s["id"], c2)
+    assert tmp_storage.vote_tally(s["id"]) == {c2: 3}
+    tmp_storage.close_event(tmp_storage.current_event()["id"])
+    assert tmp_storage.vote_tally(s["id"]) == {c2: 3}
 
 
 def test_vote_rejections(tmp_storage, owner, voter):
     event = tmp_storage.current_event() or tmp_storage.create_event("Night")
     # a draft set with a rerolled (replaced) card
-    draft = tmp_storage.create_set(owner, "Zur", "p", PARAMS)
+    draft = tmp_storage.create_set(owner, "Zur", "p", PARAMS, cmc=3, rarity="rare")
     cards = [tmp_storage.create_card(owner, "p", PARAMS, set_id=draft["id"], slot=slot)
              for slot in (1, 2, 3)]
     for c in cards:
@@ -67,7 +88,7 @@ def test_vote_rejections(tmp_storage, owner, voter):
     tmp_storage.lock_set(draft["id"], owner)
 
     other_owner = tmp_storage.login("Other")["id"]
-    other_set = tmp_storage.create_set(other_owner, "Else", "p", PARAMS)
+    other_set = tmp_storage.create_set(other_owner, "Else", "p", PARAMS, cmc=3, rarity="rare")
     foreign = tmp_storage.create_card(other_owner, "p", PARAMS, set_id=other_set["id"], slot=1)
 
     with pytest.raises(StorageError) as exc:  # card not in the set

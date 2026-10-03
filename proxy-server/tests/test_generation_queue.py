@@ -35,7 +35,7 @@ def _user_id(storage):
 
 def add_set(storage, commander_name):
     """A draft commander set owned by the test user; returns its id."""
-    return storage.create_set(_user_id(storage), commander_name, "p", {})["id"]
+    return storage.create_set(_user_id(storage), commander_name, "p", {}, cmc=4, rarity="rare")["id"]
 
 
 def add_card(storage, prompt="a storm dragon", card_params=None, set_id=None, slot=None,

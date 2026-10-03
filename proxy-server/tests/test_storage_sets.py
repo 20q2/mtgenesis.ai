@@ -6,9 +6,10 @@ PARAMS = {"name": "Zur", "manaCost": "{2}{B}{R}", "colors": ["B", "R"], "type": 
           "rarity": "mythic", "cmc": 4}
 
 
-def make_set(storage, user_id, name="Zur the Ashen", status="done"):
-    s = storage.create_set(user_id, name, "a fiery lich", PARAMS)
-    cards = [storage.create_card(user_id, "a fiery lich", PARAMS, set_id=s["id"], slot=slot)
+def make_set(storage, user_id, name="Zur the Ashen", status="done", cmc=4, rarity="mythic"):
+    params = {**PARAMS, "cmc": cmc, "rarity": rarity}
+    s = storage.create_set(user_id, name, "a fiery lich", params, cmc=cmc, rarity=rarity)
+    cards = [storage.create_card(user_id, "a fiery lich", params, set_id=s["id"], slot=slot)
              for slot in (1, 2, 3)]
     if status is not None:
         for c in cards:
@@ -64,42 +65,43 @@ def test_get_missing(tmp_storage):
 
 
 def test_create_set_abandons_previous_draft(tmp_storage, user):
-    s1 = tmp_storage.create_set(user["id"], "First", "p", PARAMS)
+    s1 = tmp_storage.create_set(user["id"], "First", "p", PARAMS, cmc=4, rarity="mythic")
     assert s1["status"] == "draft" and s1["event_id"] is None and s1["card_params"] == PARAMS
-    s2 = tmp_storage.create_set(user["id"], "Second", "p", PARAMS)
+    s2 = tmp_storage.create_set(user["id"], "Second", "p", PARAMS, cmc=4, rarity="mythic")
     assert tmp_storage.get_set(s1["id"])["status"] == "abandoned"
-    assert tmp_storage.current_set(user["id"]) == s2
+    assert tmp_storage.current_sets(user["id"]) == [s2]
+    assert s2["cmc"] == 4 and s2["rarity"] == "mythic"
 
 
-def test_current_set_none_and_locked(tmp_storage, user):
-    assert tmp_storage.current_set(user["id"]) is None
+def test_current_sets_none_and_locked(tmp_storage, user):
+    assert tmp_storage.current_sets(user["id"]) == []
     tmp_storage.create_event("Night")
     s, _ = make_set(tmp_storage, user["id"])
     tmp_storage.lock_set(s["id"], user["id"])
-    assert tmp_storage.current_set(user["id"])["id"] == s["id"]
-    # a new draft takes precedence over the locked set
-    d = tmp_storage.create_set(user["id"], "Next", "p", PARAMS)
-    assert tmp_storage.current_set(user["id"])["id"] == d["id"]
+    assert [c["id"] for c in tmp_storage.current_sets(user["id"])] == [s["id"]]
+    # a draft at another CMC is listed beside the locked commander, in CMC order
+    d = tmp_storage.create_set(user["id"], "Next", "p", PARAMS, cmc=3, rarity="rare")
+    assert [c["id"] for c in tmp_storage.current_sets(user["id"])] == [d["id"], s["id"]]
     assert tmp_storage.get_set(s["id"])["status"] == "locked"
 
 
-def test_current_set_ignores_locked_in_closed_event(tmp_storage, user):
+def test_current_sets_ignores_locked_in_closed_event(tmp_storage, user):
     event = tmp_storage.create_event("Night")
     s, _ = make_set(tmp_storage, user["id"])
     tmp_storage.lock_set(s["id"], user["id"])
     tmp_storage.close_event(event["id"])
-    assert tmp_storage.current_set(user["id"]) is None
+    assert tmp_storage.current_sets(user["id"]) == []
 
 
 def test_commander_name_validation(tmp_storage, user):
     for bad in ["", "   ", "x" * 41, None]:
         with pytest.raises(StorageError) as exc:
-            tmp_storage.create_set(user["id"], bad, "p", PARAMS)
+            tmp_storage.create_set(user["id"], bad, "p", PARAMS, cmc=4, rarity="mythic")
         assert exc.value.status == 400
-    s = tmp_storage.create_set(user["id"], "Zur'ka, Élan of Ash", "p", PARAMS)
+    s = tmp_storage.create_set(user["id"], "Zur'ka, Élan of Ash", "p", PARAMS, cmc=4, rarity="mythic")
     assert tmp_storage.get_set(s["id"])["commander_name"] == "Zur'ka, Élan of Ash"
     assert tmp_storage.create_set(user["id"], "  " + "x" * 40 + " ", "p",
-                                  PARAMS)["commander_name"] == "x" * 40
+                                  PARAMS, cmc=4, rarity="mythic")["commander_name"] == "x" * 40
 
 
 def test_reroll_replaces_slot(tmp_storage, user):
@@ -188,10 +190,8 @@ def test_lock_preconditions(tmp_storage, user, other):
     assert locked["event_id"] == event["id"]
     assert locked["locked_at"] is not None
 
-    s2, _ = make_set(tmp_storage, user["id"], name="Another")
-    with pytest.raises(StorageError) as exc:  # second locked set in the same event
-        tmp_storage.lock_set(s2["id"], user["id"])
-    assert exc.value.status == 409
+    s2, _ = make_set(tmp_storage, user["id"], name="Another", cmc=3, rarity="rare")
+    assert tmp_storage.lock_set(s2["id"], user["id"])["status"] == "locked"  # another CMC
 
     with pytest.raises(StorageError) as exc:  # already locked
         tmp_storage.lock_set(s["id"], user["id"])
@@ -200,7 +200,7 @@ def test_lock_preconditions(tmp_storage, user, other):
 
 def test_lock_requires_three_current_cards(tmp_storage, user):
     tmp_storage.create_event("Night")
-    s = tmp_storage.create_set(user["id"], "Zur", "p", PARAMS)
+    s = tmp_storage.create_set(user["id"], "Zur", "p", PARAMS, cmc=4, rarity="mythic")
     c = tmp_storage.create_card(user["id"], "p", PARAMS, set_id=s["id"], slot=1)
     tmp_storage.update_card(c["id"], status="done")
     with pytest.raises(StorageError) as exc:
@@ -266,14 +266,136 @@ def test_unlock_clears_votes_and_returns_to_draft(tmp_storage, user, other):
     assert tmp_storage.get_set(s["id"])["status"] == "locked"
 
 
-def test_unlock_abandons_other_draft(tmp_storage, user):
+def plant(storage, set_id, **cols):
+    """Writes set columns directly, for states create_set refuses to make."""
+    assignments = ", ".join(f"{k} = ?" for k in cols)
+    storage._conn().execute(f"UPDATE sets SET {assignments} WHERE id = ?", (*cols.values(), set_id))
+
+
+def test_unlock_abandons_only_same_cmc_draft(tmp_storage, user):
     tmp_storage.create_event("Night")
     s, _ = make_set(tmp_storage, user["id"])
     tmp_storage.lock_set(s["id"], user["id"])
-    newer = tmp_storage.create_set(user["id"], "Newer", "p", PARAMS)
+    d3 = tmp_storage.create_set(user["id"], "Three", "p", PARAMS, cmc=3, rarity="uncommon")
+    d5 = tmp_storage.create_set(user["id"], "Five", "p", PARAMS, cmc=5, rarity="rare")
+    # A same-CMC draft can't be created while 4 is locked, so plant one.
+    same = tmp_storage.create_set(user["id"], "Same", "p", PARAMS, cmc=5, rarity="rare")
+    plant(tmp_storage, same["id"], cmc=4, rarity="mythic")
+    plant(tmp_storage, d5["id"], status="draft")
     tmp_storage.unlock_set(s["id"], user["id"])
-    assert tmp_storage.get_set(newer["id"])["status"] == "abandoned"
-    assert tmp_storage.current_set(user["id"])["id"] == s["id"]
+    assert tmp_storage.get_set(same["id"])["status"] == "abandoned"
+    assert tmp_storage.get_set(d3["id"])["status"] == "draft"
+    assert tmp_storage.get_set(d5["id"])["status"] == "draft"
+    assert [c["id"] for c in tmp_storage.current_sets(user["id"])] == [d3["id"], s["id"], d5["id"]]
+
+
+def test_drafts_at_different_cmcs_coexist(tmp_storage, user):
+    for cmc, rarity in ((3, "uncommon"), (4, "rare"), (5, "mythic")):
+        tmp_storage.create_set(user["id"], f"C{cmc}", "p", PARAMS, cmc=cmc, rarity=rarity)
+    sets = tmp_storage.current_sets(user["id"])
+    assert [c["cmc"] for c in sets] == [3, 4, 5]
+    assert all(c["status"] == "draft" for c in sets)
+
+
+def test_regenerate_same_cmc_same_rarity_ok(tmp_storage, user):
+    first = tmp_storage.create_set(user["id"], "One", "p", PARAMS, cmc=4, rarity="rare")
+    second = tmp_storage.create_set(user["id"], "Two", "p", PARAMS, cmc=4, rarity="rare")
+    assert tmp_storage.get_set(first["id"])["status"] == "abandoned"
+    assert tmp_storage.current_sets(user["id"]) == [second]
+
+
+def test_rarity_conflict_on_create(tmp_storage, user, other):
+    event = tmp_storage.create_event("Night")
+    draft = tmp_storage.create_set(user["id"], "Three", "p", PARAMS, cmc=3, rarity="rare")
+    with pytest.raises(StorageError) as exc:
+        tmp_storage.create_set(user["id"], "Four", "p", PARAMS, cmc=4, rarity="rare")
+    assert exc.value.status == 409
+    assert exc.value.message == "You already have a Rare commander (3 CMC)"
+    assert tmp_storage.get_set(draft["id"])["status"] == "draft"
+    # another player's Rare is no conflict
+    tmp_storage.create_set(other["id"], "Theirs", "p", PARAMS, cmc=4, rarity="rare")
+
+    # locked in the open event: still a conflict
+    s, _ = make_set(tmp_storage, user["id"], cmc=3, rarity="rare")
+    tmp_storage.lock_set(s["id"], user["id"])
+    with pytest.raises(StorageError) as exc:
+        tmp_storage.create_set(user["id"], "Four", "p", PARAMS, cmc=4, rarity="rare")
+    assert exc.value.status == 409
+
+    # locked in a closed event: no conflict
+    tmp_storage.close_event(event["id"])
+    tmp_storage.create_set(user["id"], "Four", "p", PARAMS, cmc=4, rarity="rare")
+
+
+def test_abandoned_set_frees_its_rarity(tmp_storage, user):
+    tmp_storage.create_set(user["id"], "Three", "p", PARAMS, cmc=3, rarity="rare")
+    tmp_storage.create_set(user["id"], "Three again", "p", PARAMS, cmc=3, rarity="mythic")
+    assert tmp_storage.create_set(user["id"], "Four", "p", PARAMS, cmc=4,
+                                  rarity="rare")["status"] == "draft"
+
+
+def test_locked_cmc_blocks_new_draft(tmp_storage, user):
+    tmp_storage.create_event("Night")
+    s, _ = make_set(tmp_storage, user["id"])
+    tmp_storage.lock_set(s["id"], user["id"])
+    with pytest.raises(StorageError) as exc:
+        tmp_storage.create_set(user["id"], "Again", "p", PARAMS, cmc=4, rarity="mythic")
+    assert exc.value.status == 409
+    assert exc.value.message == "Your 4 CMC commander is locked in — unlock it to start over"
+
+
+def test_lock_rules_per_cmc(tmp_storage, user):
+    tmp_storage.create_event("Night")
+    three, _ = make_set(tmp_storage, user["id"], cmc=3, rarity="uncommon")
+    tmp_storage.lock_set(three["id"], user["id"])
+    four, _ = make_set(tmp_storage, user["id"], cmc=4, rarity="rare")
+    assert tmp_storage.lock_set(four["id"], user["id"])["status"] == "locked"
+
+    # Drafts that break the rules can't come from create_set, so plant them.
+    five, _ = make_set(tmp_storage, user["id"], cmc=5, rarity="mythic")
+    plant(tmp_storage, five["id"], rarity="rare")
+    with pytest.raises(StorageError) as exc:
+        tmp_storage.lock_set(five["id"], user["id"])
+    assert exc.value.status == 409 and "Rare" in exc.value.message
+    plant(tmp_storage, five["id"], rarity="mythic", cmc=3)
+    with pytest.raises(StorageError) as exc:
+        tmp_storage.lock_set(five["id"], user["id"])
+    assert exc.value.status == 409 and "3 CMC" in exc.value.message
+
+
+def test_legacy_draft_ignored_by_current_sets_and_rules(tmp_storage, user):
+    tmp_storage.create_event("Night")
+    legacy, _ = make_set(tmp_storage, user["id"])
+    plant(tmp_storage, legacy["id"], cmc=None, rarity=None)
+    assert tmp_storage.current_sets(user["id"]) == []
+    with pytest.raises(StorageError) as exc:
+        tmp_storage.lock_set(legacy["id"], user["id"])
+    assert exc.value.status == 409
+    assert exc.value.message == "This set was made under the old rules — start a new commander"
+    fresh = tmp_storage.create_set(user["id"], "New", "p", PARAMS, cmc=4, rarity="mythic")
+    assert tmp_storage.get_set(legacy["id"])["status"] == "abandoned"
+    assert tmp_storage.current_sets(user["id"]) == [fresh]
+
+
+def test_reroll_keeps_params(tmp_storage, user):
+    params = {**PARAMS, "type": "Artifact", "subtype": "Vehicle", "power": "4", "toughness": "2",
+              "cmc": 3, "rarity": "uncommon"}
+    s = tmp_storage.create_set(user["id"], "Wagon", "p", params, cmc=3, rarity="uncommon")
+    card = tmp_storage.create_card(user["id"], "p", params, set_id=s["id"], slot=1)
+    tmp_storage.update_card(card["id"], status="done")
+    assert tmp_storage.reroll_card(card["id"], user["id"])["card_params"] == params
+
+
+def test_locked_sets_ordered_by_cmc(tmp_storage, user, other):
+    event = tmp_storage.create_event("Night")
+    five, _ = make_set(tmp_storage, user["id"], cmc=5, rarity="mythic")
+    tmp_storage.lock_set(five["id"], user["id"])
+    three, _ = make_set(tmp_storage, other["id"], cmc=3, rarity="rare")
+    tmp_storage.lock_set(three["id"], other["id"])
+    legacy, _ = make_set(tmp_storage, user["id"], cmc=3, rarity="uncommon")
+    plant(tmp_storage, legacy["id"], cmc=None, rarity=None, status="locked",
+          event_id=event["id"], locked_at="0000")
+    assert [s["cmc"] for s in tmp_storage.locked_sets(event["id"])] == [3, 5, None]
 
 
 def test_list_user_cards_newest_first(tmp_storage, user, other):

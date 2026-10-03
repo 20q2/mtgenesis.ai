@@ -207,6 +207,10 @@ def commander_slot_params(params: dict, slot: int) -> dict:
     return out
 
 
+def _rarity_taken(rarity: str, cmc: int) -> str:
+    return f"You already have a {rarity.capitalize()} commander ({cmc} CMC)"
+
+
 class StorageError(Exception):
     """A rule violation that maps directly to an HTTP status (400/403/404/409)."""
 
@@ -261,6 +265,13 @@ class Storage:
             conn.execute("ALTER TABLE cards ADD COLUMN brief_json TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS cards_shared ON cards(shared_at) "
                      "WHERE shared_at IS NOT NULL")
+        # A set is one commander (docs/superpowers/specs/2026-10-03-commander-rules-design.md);
+        # sets made before that have NULL cmc/rarity and are "legacy".
+        set_cols = {r[1] for r in conn.execute("PRAGMA table_info(sets)")}
+        if "cmc" not in set_cols:
+            conn.execute("ALTER TABLE sets ADD COLUMN cmc INTEGER")
+        if "rarity" not in set_cols:
+            conn.execute("ALTER TABLE sets ADD COLUMN rarity TEXT")
 
     # ----- connection helpers -----
     def _conn(self) -> sqlite3.Connection:
@@ -431,9 +442,14 @@ class Storage:
         return [r["id"] for r in rows]
 
     # ----- sets -----
-    # Row keys: id, user_id, event_id, commander_name, prompt, card_params, status, created_at, locked_at
+    # Row keys: id, user_id, event_id, commander_name, prompt, card_params, status, created_at,
+    # locked_at, cmc, rarity. A set is one commander: three versions at one mana value. Sets with
+    # cmc NULL predate that (legacy): they are listed but never count toward the rules below.
     _SET_COLS = ("id, user_id, event_id, commander_name, prompt, card_params_json, status, "
-                 "created_at, locked_at")
+                 "created_at, locked_at, cmc, rarity")
+    # A user's live commanders: drafts, and sets locked in the open event.
+    _LIVE = ("(status = 'draft' OR (status = 'locked' AND "
+             "event_id IN (SELECT id FROM events WHERE status = 'open')))")
 
     @staticmethod
     def _decode_set(row: dict | None) -> dict | None:
@@ -444,35 +460,47 @@ class Storage:
         d["card_params"] = json.loads(params) if params is not None else None
         return d
 
-    def create_set(self, user_id: str, commander_name: str, prompt: str, card_params: dict) -> dict:
-        """New draft set; any existing draft of this user becomes 'abandoned'.
-        commander_name trimmed, 1-40 chars, else 400."""
+    def create_set(self, user_id: str, commander_name: str, prompt: str, card_params: dict, *,
+                   cmc: int, rarity: str) -> dict:
+        """New draft commander at this mana value; the user's draft at the same mana value (and
+        any legacy draft) becomes 'abandoned'. commander_name trimmed, 1-40 chars, else 400.
+        409 when the user's commander at this mana value is locked in the open event, or another
+        of their live commanders already has this rarity."""
         name = clean_commander_name(commander_name)
         set_id = _new_id()
         with self._tx() as conn:
-            conn.execute("UPDATE sets SET status = 'abandoned' WHERE user_id = ? AND status = 'draft'",
-                         (user_id,))
+            if conn.execute(
+                    "SELECT 1 FROM sets WHERE user_id = ? AND cmc = ? AND status = 'locked' "
+                    "AND event_id IN (SELECT id FROM events WHERE status = 'open')",
+                    (user_id, cmc)).fetchone():
+                raise StorageError(409, f"Your {cmc} CMC commander is locked in — unlock it to start over")
+            taken = conn.execute(
+                f"SELECT cmc FROM sets WHERE user_id = ? AND rarity = ? AND cmc IS NOT NULL "
+                f"AND cmc != ? AND {self._LIVE} LIMIT 1", (user_id, rarity, cmc)).fetchone()
+            if taken:
+                raise StorageError(409, _rarity_taken(rarity, taken["cmc"]))
+            conn.execute("UPDATE sets SET status = 'abandoned' WHERE user_id = ? AND status = 'draft' "
+                         "AND (cmc = ? OR cmc IS NULL)", (user_id, cmc))
             conn.execute(
                 "INSERT INTO sets (id, user_id, event_id, commander_name, prompt, card_params_json, "
-                "status, created_at) VALUES (?, ?, NULL, ?, ?, ?, 'draft', ?)",
-                (set_id, user_id, name, prompt, _dumps(card_params), _now()))
+                "status, created_at, cmc, rarity) VALUES (?, ?, NULL, ?, ?, ?, 'draft', ?, ?, ?)",
+                (set_id, user_id, name, prompt, _dumps(card_params), _now(), cmc, rarity))
         return self.get_set(set_id)
 
     def get_set(self, set_id: str) -> dict | None:
         return self._decode_set(
             self._one(f"SELECT {self._SET_COLS} FROM sets WHERE id = ?", (set_id,)))
 
-    def current_set(self, user_id: str) -> dict | None:
-        """The user's draft, else their set locked in the open event, else None."""
-        row = self._one(
-            f"SELECT {self._SET_COLS} FROM sets WHERE user_id = ? AND status = 'draft' "
-            "ORDER BY created_at DESC, rowid DESC LIMIT 1", (user_id,))
-        if row is None:
-            row = self._one(
-                f"SELECT {self._SET_COLS} FROM sets WHERE user_id = ? AND status = 'locked' "
-                "AND event_id IN (SELECT id FROM events WHERE status = 'open') "
-                "ORDER BY locked_at DESC LIMIT 1", (user_id,))
-        return self._decode_set(row)
+    def current_sets(self, user_id: str) -> list[dict]:
+        """Per mana value, the user's newest draft, else their commander locked in the open
+        event; in mana value order. Legacy sets are left out."""
+        rows = self._all(
+            f"SELECT {self._SET_COLS} FROM sets WHERE user_id = ? AND cmc IS NOT NULL "
+            f"AND {self._LIVE} ORDER BY status = 'locked', created_at DESC, rowid DESC", (user_id,))
+        newest: dict[int, dict] = {}
+        for row in rows:  # drafts come first, newest first
+            newest.setdefault(row["cmc"], row)
+        return [self._decode_set(newest[cmc]) for cmc in sorted(newest)]
 
     def set_cards(self, set_id: str) -> list[dict]:
         """Current (replaced = 0) cards ordered by slot."""
@@ -508,17 +536,20 @@ class Storage:
         return self.get_card(new_id)
 
     def lock_set(self, set_id: str, user_id: str, commander_name: str | None = None) -> dict:
-        """Requires open event, all 3 current cards done, owner, non-empty commander name,
-        and no other locked set by this user in the open event. Sets event_id and locked_at."""
+        """Requires open event, all 3 current cards done, owner, non-empty commander name, a
+        non-legacy set, and no other commander of this user locked in the open event at the same
+        mana value or with the same rarity. Sets event_id and locked_at."""
         with self._tx() as conn:
-            s = conn.execute("SELECT user_id, status, commander_name FROM sets WHERE id = ?",
-                             (set_id,)).fetchone()
+            s = conn.execute("SELECT user_id, status, commander_name, cmc, rarity FROM sets "
+                             "WHERE id = ?", (set_id,)).fetchone()
             if s is None:
                 raise StorageError(404, "Set not found")
             if s["user_id"] != user_id:
                 raise StorageError(403, "You can only lock your own set")
             if s["status"] != "draft":
                 raise StorageError(409, "Only a draft set can be locked")
+            if s["cmc"] is None:
+                raise StorageError(409, "This set was made under the old rules — start a new commander")
             event = conn.execute("SELECT id FROM events WHERE status = 'open'").fetchone()
             if event is None:
                 raise StorageError(409, "No event open — ask the host")
@@ -526,10 +557,14 @@ class Storage:
                 "SELECT status FROM cards WHERE set_id = ? AND replaced = 0", (set_id,))]
             if len(statuses) != 3 or any(st != "done" for st in statuses):
                 raise StorageError(409, "All 3 cards must be finished before locking")
-            if conn.execute(
-                    "SELECT 1 FROM sets WHERE user_id = ? AND event_id = ? AND status = 'locked'",
-                    (user_id, event["id"])).fetchone():
-                raise StorageError(409, "You already have a set locked in this event — unlock it first")
+            for other in conn.execute(
+                    "SELECT cmc, rarity FROM sets WHERE user_id = ? AND event_id = ? "
+                    "AND status = 'locked' AND cmc IS NOT NULL", (user_id, event["id"])):
+                if other["cmc"] == s["cmc"]:
+                    raise StorageError(409, f"Your {s['cmc']} CMC commander is already locked in "
+                                            "— unlock it first")
+                if other["rarity"] == s["rarity"]:
+                    raise StorageError(409, _rarity_taken(s["rarity"], other["cmc"]))
             name = clean_commander_name(
                 s["commander_name"] if commander_name is None else commander_name)
             conn.execute(
@@ -539,9 +574,9 @@ class Storage:
 
     def unlock_set(self, set_id: str, user_id: str) -> dict:
         """Only while its event is open. Deletes the set's votes; back to draft with event_id NULL.
-        Any other draft of the owner is abandoned so they keep at most one draft."""
+        The owner's other draft at the same mana value is abandoned (one draft per mana value)."""
         with self._tx() as conn:
-            s = conn.execute("SELECT user_id, status, event_id FROM sets WHERE id = ?",
+            s = conn.execute("SELECT user_id, status, event_id, cmc FROM sets WHERE id = ?",
                              (set_id,)).fetchone()
             if s is None:
                 raise StorageError(404, "Set not found")
@@ -555,7 +590,8 @@ class Storage:
                 raise StorageError(409, "The event is closed")
             conn.execute("DELETE FROM votes WHERE set_id = ?", (set_id,))
             conn.execute("UPDATE sets SET status = 'abandoned' "
-                         "WHERE user_id = ? AND status = 'draft' AND id != ?", (user_id, set_id))
+                         "WHERE user_id = ? AND status = 'draft' AND cmc IS ? AND id != ?",
+                         (user_id, s["cmc"], set_id))
             conn.execute("UPDATE sets SET status = 'draft', event_id = NULL, locked_at = NULL "
                          "WHERE id = ?", (set_id,))
         return self.get_set(set_id)
@@ -604,9 +640,10 @@ class Storage:
             f"SELECT {self._EVENT_COLS} FROM events ORDER BY created_at DESC, rowid DESC")
 
     def locked_sets(self, event_id: str) -> list[dict]:
-        """Sets locked in this event, oldest lock first."""
+        """Sets locked in this event by mana value (legacy sets last), then oldest lock first."""
         rows = self._all(f"SELECT {self._SET_COLS} FROM sets WHERE event_id = ? "
-                         "AND status = 'locked' ORDER BY locked_at, rowid", (event_id,))
+                         "AND status = 'locked' ORDER BY cmc IS NULL, cmc, locked_at, rowid",
+                         (event_id,))
         return [self._decode_set(r) for r in rows]
 
     # ----- votes -----
@@ -635,11 +672,19 @@ class Storage:
                 (voter_id, set_id, card_id, _now()))
 
     def vote_tally(self, set_id: str) -> dict[str, int]:
-        """card_id -> count, only cards that have votes."""
+        """card_id -> votes, only cards that have votes. The set owner's own vote counts 2."""
         rows = self._conn().execute(
-            "SELECT card_id, COUNT(*) AS n FROM votes WHERE set_id = ? GROUP BY card_id",
+            "SELECT v.card_id, SUM(CASE WHEN v.voter_id = s.user_id THEN 2 ELSE 1 END) AS n "
+            "FROM votes v JOIN sets s ON s.id = v.set_id WHERE v.set_id = ? GROUP BY v.card_id",
             (set_id,)).fetchall()
         return {r["card_id"]: r["n"] for r in rows}
+
+    def owner_vote(self, set_id: str) -> str | None:
+        """The card the set's owner voted for, if any."""
+        row = self._conn().execute(
+            "SELECT v.card_id FROM votes v JOIN sets s ON s.id = v.set_id "
+            "WHERE v.set_id = ? AND v.voter_id = s.user_id", (set_id,)).fetchone()
+        return row["card_id"] if row is not None else None
 
     def user_vote(self, voter_id: str, set_id: str) -> str | None:
         row = self._conn().execute(
