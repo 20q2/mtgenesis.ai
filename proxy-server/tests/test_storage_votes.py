@@ -59,6 +59,16 @@ def test_self_vote_counts_two(tmp_storage, owner, voter):
     assert tmp_storage.owner_vote(s["id"]) == c1
 
 
+def test_legacy_sets_keep_one_vote_per_voter(tmp_storage, owner, voter):
+    # Sets made before the commander rules keep the results they had: no double self-vote.
+    s, (c1, c2, _) = locked_set(tmp_storage, owner)
+    tmp_storage._conn().execute("UPDATE sets SET cmc = NULL, rarity = NULL WHERE id = ?", (s["id"],))
+    tmp_storage.cast_vote(owner, s["id"], c1)
+    tmp_storage.cast_vote(voter, s["id"], c2)
+    assert tmp_storage.vote_tally(s["id"]) == {c1: 1, c2: 1}
+    assert tmp_storage.owner_vote(s["id"]) is None
+
+
 def test_self_vote_weight_moves_with_vote_change(tmp_storage, owner, voter):
     s, (c1, c2, _) = locked_set(tmp_storage, owner)
     tmp_storage.cast_vote(owner, s["id"], c1)

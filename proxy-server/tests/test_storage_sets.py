@@ -306,25 +306,36 @@ def test_regenerate_same_cmc_same_rarity_ok(tmp_storage, user):
 
 def test_rarity_conflict_on_create(tmp_storage, user, other):
     event = tmp_storage.create_event("Night")
-    draft = tmp_storage.create_set(user["id"], "Three", "p", PARAMS, cmc=3, rarity="rare")
-    with pytest.raises(StorageError) as exc:
-        tmp_storage.create_set(user["id"], "Four", "p", PARAMS, cmc=4, rarity="rare")
-    assert exc.value.status == 409
-    assert exc.value.message == "You already have a Rare commander (3 CMC)"
-    assert tmp_storage.get_set(draft["id"])["status"] == "draft"
     # another player's Rare is no conflict
     tmp_storage.create_set(other["id"], "Theirs", "p", PARAMS, cmc=4, rarity="rare")
 
-    # locked in the open event: still a conflict
+    # a commander locked in the open event holds its rarity
     s, _ = make_set(tmp_storage, user["id"], cmc=3, rarity="rare")
     tmp_storage.lock_set(s["id"], user["id"])
     with pytest.raises(StorageError) as exc:
         tmp_storage.create_set(user["id"], "Four", "p", PARAMS, cmc=4, rarity="rare")
     assert exc.value.status == 409
+    assert exc.value.message == "You already have a Rare commander (3 CMC)"
 
     # locked in a closed event: no conflict
     tmp_storage.close_event(event["id"])
     tmp_storage.create_set(user["id"], "Four", "p", PARAMS, cmc=4, rarity="rare")
+
+
+def test_drafts_may_share_a_rarity_until_one_is_locked(tmp_storage, user):
+    # Rarities can be reassigned freely while drafting (rule 4: "however the player likes");
+    # Lock in is where the one-of-each rule is enforced.
+    tmp_storage.create_event("Night")
+    three, _ = make_set(tmp_storage, user["id"], cmc=3, rarity="uncommon")
+    four, _ = make_set(tmp_storage, user["id"], cmc=4, rarity="rare")
+    tmp_storage.create_set(user["id"], "Five", "p", PARAMS, cmc=5, rarity="mythic")
+    swapped, _ = make_set(tmp_storage, user["id"], cmc=3, rarity="rare")  # 3 and 4 both Rare now
+    assert [s["rarity"] for s in tmp_storage.current_sets(user["id"])] == ["rare", "rare", "mythic"]
+    tmp_storage.lock_set(swapped["id"], user["id"])
+    with pytest.raises(StorageError) as exc:
+        tmp_storage.lock_set(four["id"], user["id"])
+    assert exc.value.status == 409
+    assert exc.value.message == "You already have a Rare commander (3 CMC)"
 
 
 def test_abandoned_set_frees_its_rarity(tmp_storage, user):

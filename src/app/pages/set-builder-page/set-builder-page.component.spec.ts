@@ -49,10 +49,11 @@ describe('SetBuilderPageComponent', () => {
     expect(fixture.nativeElement.querySelectorAll('app-commander-panel').length).toBe(3);
   });
 
-  it("a panel's taken rarities are the other CMCs' rarities", () => {
+  it("a panel's taken rarities are the other CMCs' locked rarities (drafts may share one)", () => {
     setup([three(), five()], openEvent);
-    expect(component.takenRaritiesFor(4)).toEqual({ uncommon: 3, mythic: 5 });
+    expect(component.takenRaritiesFor(4)).toEqual({ mythic: 5 });
     expect(component.takenRaritiesFor(3)).toEqual({ mythic: 5 });
+    expect(component.takenRaritiesFor(5)).toEqual({});
   });
 
   it('the summary strip shows each commander\'s rarity and status', () => {
@@ -69,9 +70,11 @@ describe('SetBuilderPageComponent', () => {
     setup([three()], openEvent);
     component.onStateChange(4, { status: 'draft', rarity: Rarity.RARE });
     expect(component.summary(4)).toBe('Rare · Draft');
-    expect(component.takenRaritiesFor(5)).toEqual({ uncommon: 3, rare: 4 });
-    component.onStateChange(3, null);
-    expect(component.takenRaritiesFor(5)).toEqual({ rare: 4 });
+    expect(component.takenRaritiesFor(5)).toEqual({});
+    component.onStateChange(4, { status: 'locked', rarity: Rarity.RARE });
+    expect(component.taken[5]).toEqual({ rare: 4 });
+    component.onStateChange(4, null);
+    expect(component.taken[5]).toEqual({});
   });
 
   it('tabs switch the visible commander', () => {

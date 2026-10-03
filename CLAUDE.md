@@ -83,8 +83,8 @@ AI Night's commander rules, enforced on `/set` and `/vote`. The spec is `docs/su
   - Legendary Creature, or Legendary Artifact — Vehicle (`commanderKind`)
   - Uncommon, Rare or Mythic
   - P/T as a point buy: at most CMC + 1 points (Vehicles +2), whole numbers only, never X or `*`; blank means an even split that spends every point (`auto_stats`)
-- `storage.py` checks across a player's live commanders (drafts plus those locked in the open event): one per CMC, and each rarity used once. Sets with `cmc` NULL predate the rules: they still show (under "Earlier sets") but can't be locked.
-- Votes stay one per voter per commander. `vote_tally` counts the owner's own vote as 2, and `SetView.cards[].ownerVote` marks it.
+- `storage.py` checks across a player's commanders: one draft per CMC and one locked per CMC in the open event; each rarity once among the locked ones (drafts may share a rarity while the player reassigns them). Sets with `cmc` NULL predate the rules: they still show (under "Earlier sets") but can't be locked.
+- Votes stay one per voter per commander. `vote_tally` counts the owner's own vote as 2 (not on legacy sets), and `SetView.cards[].ownerVote` marks it.
 - `src/app/services/commander-rules.ts` mirrors the rules for instant form feedback, so keep it in sync with `commander_rules.py`. Normal create (`count: 1`) is unaffected.
 - Tests: `tests/test_commander_rules.py`, plus the per-CMC cases in `tests/test_storage_sets.py` and `tests/test_api.py`.
 

@@ -441,7 +441,7 @@ class Storage:
         """New draft commander at this mana value; the user's draft at the same mana value (and
         any legacy draft) becomes 'abandoned'. commander_name trimmed, 1-40 chars, else 400.
         409 when the user's commander at this mana value is locked in the open event, or another
-        of their live commanders already has this rarity."""
+        of their commanders locked in the open event already has this rarity."""
         name = clean_commander_name(commander_name)
         set_id = _new_id()
         with self._tx() as conn:
@@ -450,9 +450,13 @@ class Storage:
                     "AND event_id IN (SELECT id FROM events WHERE status = 'open')",
                     (user_id, cmc)).fetchone():
                 raise StorageError(409, f"Your {cmc} CMC commander is locked in — unlock it to start over")
+            # Only a locked commander holds its rarity: drafts may share one while the player
+            # reassigns them, and lock_set enforces one of each.
             taken = conn.execute(
-                f"SELECT cmc FROM sets WHERE user_id = ? AND rarity = ? AND cmc IS NOT NULL "
-                f"AND cmc != ? AND {self._LIVE} LIMIT 1", (user_id, rarity, cmc)).fetchone()
+                "SELECT cmc FROM sets WHERE user_id = ? AND rarity = ? AND cmc IS NOT NULL "
+                "AND cmc != ? AND status = 'locked' "
+                "AND event_id IN (SELECT id FROM events WHERE status = 'open') LIMIT 1",
+                (user_id, rarity, cmc)).fetchone()
             if taken:
                 raise StorageError(409, _rarity_taken(rarity, taken["cmc"]))
             conn.execute("UPDATE sets SET status = 'abandoned' WHERE user_id = ? AND status = 'draft' "
@@ -648,18 +652,21 @@ class Storage:
                 (voter_id, set_id, card_id, _now()))
 
     def vote_tally(self, set_id: str) -> dict[str, int]:
-        """card_id -> votes, only cards that have votes. The set owner's own vote counts 2."""
+        """card_id -> votes, only cards that have votes. The owner's own vote counts 2, except on
+        legacy sets (made before the commander rules), which keep the results they had."""
         rows = self._conn().execute(
-            "SELECT v.card_id, SUM(CASE WHEN v.voter_id = s.user_id THEN 2 ELSE 1 END) AS n "
+            "SELECT v.card_id, SUM(CASE WHEN v.voter_id = s.user_id AND s.cmc IS NOT NULL "
+            "THEN 2 ELSE 1 END) AS n "
             "FROM votes v JOIN sets s ON s.id = v.set_id WHERE v.set_id = ? GROUP BY v.card_id",
             (set_id,)).fetchall()
         return {r["card_id"]: r["n"] for r in rows}
 
     def owner_vote(self, set_id: str) -> str | None:
-        """The card the set's owner voted for, if any."""
+        """The card the set's owner voted for (the vote that counts 2), if any; None on legacy sets."""
         row = self._conn().execute(
             "SELECT v.card_id FROM votes v JOIN sets s ON s.id = v.set_id "
-            "WHERE v.set_id = ? AND v.voter_id = s.user_id", (set_id,)).fetchone()
+            "WHERE v.set_id = ? AND v.voter_id = s.user_id AND s.cmc IS NOT NULL",
+            (set_id,)).fetchone()
         return row["card_id"] if row is not None else None
 
     def user_vote(self, voter_id: str, set_id: str) -> str | None:

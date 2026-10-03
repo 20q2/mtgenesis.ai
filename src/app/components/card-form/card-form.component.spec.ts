@@ -136,6 +136,18 @@ describe('CardFormComponent', () => {
     });
   });
 
+  it('normal mode never sends a commander kind (Generate or Regenerate text)', () => {
+    const sent: any[] = [];
+    component.generateCard.subscribe(card => sent.push(card));
+    component.regenerateText.subscribe(card => sent.push(card));
+    component.cardForm.patchValue({ name: 'Bolt', type: 'Instant' });
+    component.onSubmit();
+    component.isGenerating = false;
+    component.onRegenerateText();
+    expect(sent.length).toBe(2);
+    expect(sent.every(card => !('commanderKind' in card))).toBeTrue();
+  });
+
   it('normal mode keeps all four rarities and its P/T rules', () => {
     const labels = fixture.nativeElement.querySelectorAll('.rarity-option');
     expect(labels.length).toBe(4);

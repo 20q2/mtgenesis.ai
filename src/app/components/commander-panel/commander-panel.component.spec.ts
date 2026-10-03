@@ -95,6 +95,12 @@ describe('CommanderPanelComponent', () => {
       expect((fixture.nativeElement.querySelector('button.lock') as HTMLButtonElement).disabled).toBeFalse();
     });
 
+    it("explains a draft whose rarity another locked commander already has", () => {
+      setup(draft(), openEvent, { rare: 3 });
+      expect(component.lockDisabledReason())
+        .toBe('Your 3 CMC commander is locked in as Rare — generate this one with another rarity');
+    });
+
     it('treats a closed event as no event', () => {
       setup(draft(), eventView({ status: 'closed', sets: [] }));
       expect(component.lockDisabledReason()).toBe('No event open — ask the host');

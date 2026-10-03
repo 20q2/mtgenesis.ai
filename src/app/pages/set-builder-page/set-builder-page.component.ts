@@ -73,12 +73,13 @@ export class SetBuilderPageComponent implements OnInit, OnDestroy {
     this.eventSub?.unsubscribe();
   }
 
-  /** Rarities used by the other two commanders, with their CMC. */
+  /** Rarities the other two commanders are locked in with, with their CMC. Drafts may share a
+   *  rarity while the player reassigns them; Lock in enforces one of each. */
   takenRaritiesFor(cmc: number): Partial<Record<Rarity, number>> {
     const taken: Partial<Record<Rarity, number>> = {};
     for (const other of this.cmcs) {
       const state = this.states[other];
-      if (other !== cmc && state) {
+      if (other !== cmc && state?.status === 'locked') {
         taken[state.rarity] = other;
       }
     }

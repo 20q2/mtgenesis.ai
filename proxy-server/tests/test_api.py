@@ -663,9 +663,16 @@ def test_vehicle_commander(client, queue, tmp_storage):
 
 
 def test_rarity_conflict_is_409(client, queue, tmp_storage):
+    client.post("/api/v1/admin/events", json={"name": "Night"}, headers=ADMIN)
     uid = login(client, "Andrew")
     first = generate_set(client, uid, "Three", cmc=3, rarity="rare")
     finish_cards(tmp_storage, first["cards"])
+    # a draft doesn't hold its rarity; a locked commander does
+    assert client.post("/api/v1/generations", headers=H(uid),
+                       json=set_request("Four", cmc=4, rarity="rare")).status_code == 200
+    finish_cards(tmp_storage, tmp_storage.set_cards(tmp_storage.current_sets(uid)[1]["id"]))
+    assert client.post(f"/api/v1/sets/{first['setId']}/lock", headers=H(uid),
+                       json={}).status_code == 200
     res = client.post("/api/v1/generations", headers=H(uid),
                       json=set_request("Four", cmc=4, rarity="rare"))
     assert res.status_code == 409

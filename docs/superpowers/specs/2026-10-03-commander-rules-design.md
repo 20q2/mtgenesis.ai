@@ -68,7 +68,7 @@ A user's **live** commanders are their `draft` sets plus their sets `locked` in 
 
 - **`create_set(user_id, commander_name, prompt, card_params, cmc, rarity)`**, all in one transaction:
   - 409 if the user has a set at this `cmc` locked in the open event: "Your 4 CMC commander is locked in — unlock it to start over".
-  - 409 if a live commander of the user at a **different** CMC has this rarity: "You already have a Rare commander (4 CMC)".
+  - 409 if a commander of the user at a **different** CMC is **locked in the open event** with this rarity: "You already have a Rare commander (4 CMC)". Drafts don't hold a rarity, so a player can reassign rarities while drafting; `lock_set` enforces one of each. (Changed after review, 2026-10-03: holding rarities on drafts stranded a player who had drafted all three.)
   - Abandon only the user's `draft` at the **same** `cmc`. Drafts at other CMCs are untouched, and legacy drafts are abandoned too.
   - Insert the set with `cmc` and `rarity`.
 - **`current_sets(user_id) -> list[dict]`:** for each CMC in 3, 4, 5, the newest draft, or else the set locked in the open event. Returned in CMC order, with missing CMCs omitted. This replaces `current_set`.
@@ -78,7 +78,7 @@ A user's **live** commanders are their `draft` sets plus their sets `locked` in 
   - Legacy drafts can't be locked: 409 "This set was made under the old rules — start a new commander".
 - **`unlock_set`:** still deletes the set's votes and returns it to draft. It now abandons only the user's other draft at the **same** `cmc`.
 - **`reroll_card`:** unchanged. The new card copies the old one's params, so CMC, rarity, kind and P/T carry over.
-- **`vote_tally(set_id)`:** a vote by the set's owner counts 2:
+- **`vote_tally(set_id)`:** a vote by the set's owner counts 2 (legacy sets keep one vote per voter, so past events' results don't change):
   `SUM(CASE WHEN v.voter_id = s.user_id THEN 2 ELSE 1 END)`, joined to `sets`. `leader_flags` is unchanged.
 - **`cast_vote`:** unchanged (one vote per voter per set, and self-votes are allowed).
 - `_SET_COLS` and the set decoder include `cmc` and `rarity`.

@@ -143,7 +143,7 @@ export class CommanderPanelComponent implements OnChanges, OnDestroy {
       return `Colored pips can add up to at most ${MAX_PIP_VALUE} mana.`;
     }
     if (this.rarityTakenAt !== undefined) {
-      return `Your ${this.rarityTakenAt} CMC commander is already ${rarityLabel(this.formCard!.rarity)}.`;
+      return `Your ${this.rarityTakenAt} CMC commander is locked in as ${rarityLabel(this.formCard!.rarity)}.`;
     }
     if (this.statsError) {
       return this.statsError;
@@ -241,6 +241,11 @@ export class CommanderPanelComponent implements OnChanges, OnDestroy {
     }
     if (this.slots.some(s => !s || s.status !== 'done')) {
       return 'Waiting for all 3 versions';
+    }
+    const clash = this.setRarity ? this.takenRarities[this.setRarity] : undefined;
+    if (clash !== undefined) {
+      return `Your ${clash} CMC commander is locked in as ${rarityLabel(this.setRarity!)} — `
+        + 'generate this one with another rarity';
     }
     if (!this.setName) {
       return 'Enter a commander name';
