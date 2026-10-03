@@ -1,0 +1,95 @@
+<div *ngIf="error" class="alert alert-error" role="alert">
+  <span class="material-icons">error</span>
+  <span>{{ error }}</span>
+  <button type="button" class="alert-close" (click)="clearError()" aria-label="Dismiss">×</button>
+</div>
+
+<div class="set-layout" [class.has-set]="!!setId">
+  <!-- Form: commander name, card details, Generate -->
+  <section class="panel form-panel">
+    <div class="commander-field">
+      <label [for]="'commanderName-' + cmc" class="field-label">{{ cmc }} CMC commander name</label>
+      <input [id]="'commanderName-' + cmc"
+             class="night-input commander-name"
+             type="text"
+             [formControl]="commanderName"
+             [maxlength]="maxNameLength"
+             [readonly]="nameReadOnly"
+             placeholder="e.g. Zur'ka, Élan of Ash">
+      <span class="muted counter">{{ commanderName.value.length }}/{{ maxNameLength }}</span>
+    </div>
+    <div class="name-actions" *ngIf="canChangeName">
+      <span class="muted name-hint">
+        {{ renaming ? 'Generate again to use the new name.' : 'The name is part of the rendered cards.' }}
+      </span>
+      <button type="button" class="btn btn-ghost change-name" (click)="toggleRename()">
+        {{ renaming ? 'Cancel' : 'Change name' }}
+      </button>
+    </div>
+
+    <app-card-form [modelsReady]="true"
+                   [commanderMode]="true"
+                   [commanderCmc]="cmc"
+                   [takenRarities]="takenRarities"
+                   [idSuffix]="'-' + cmc"
+                   [showName]="false"
+                   [showGenerate]="false"
+                   (cardChange)="onCardChange($event)"></app-card-form>
+
+    <div class="generate-row">
+      <button type="button"
+              class="btn btn-gold generate-set"
+              [disabled]="!canGenerate()"
+              (click)="generate()">
+        <span class="material-icons">auto_awesome</span>
+        {{ submitting ? 'Submitting…' : 'Generate 3 versions' }}
+      </button>
+      <span class="muted" *ngIf="generateHint() as hint">{{ hint }}</span>
+    </div>
+  </section>
+
+  <!-- The 3 versions and lock controls -->
+  <section class="panel slots-panel">
+    <div class="slots-header">
+      <h3 class="section-title">
+        {{ setId ? (setName || 'Your commander') : 'Your 3 versions' }}
+      </h3>
+      <span *ngIf="isLocked" class="badge badge-gold locked-badge">
+        <span class="material-icons">lock</span> Locked
+      </span>
+    </div>
+
+    <div class="slots">
+      <app-card-slot *ngFor="let view of slots; let i = index; trackBy: trackSlot"
+                     [view]="view"
+                     [label]="slotLabel(i)"
+                     [showReroll]="!!setId && !isLocked"
+                     [canReroll]="canRerollSlot(view)"
+                     (reroll)="onReroll($event)"></app-card-slot>
+    </div>
+
+    <div class="lock-bar" *ngIf="setId">
+      <ng-container *ngIf="!isLocked; else lockedControls">
+        <button type="button"
+                class="btn btn-gold lock"
+                [disabled]="!!lockDisabledReason() || locking"
+                (click)="lock()">
+          <span class="material-icons">lock</span>
+          {{ locking ? 'Locking…' : 'Lock in' }}
+        </button>
+        <span class="muted lock-reason" *ngIf="lockDisabledReason() as reason">{{ reason }}</span>
+      </ng-container>
+
+      <ng-template #lockedControls>
+        <span class="muted">
+          Locked into <strong>{{ event?.name || 'the event' }}</strong>.
+          <a routerLink="/vote" class="night-link">Go vote</a>
+        </span>
+        <button type="button" class="btn btn-ghost unlock" [disabled]="unlocking" (click)="unlock()">
+          <span class="material-icons">lock_open</span>
+          {{ unlocking ? 'Unlocking…' : 'Unlock' }}
+        </button>
+      </ng-template>
+    </div>
+  </section>
+</div>

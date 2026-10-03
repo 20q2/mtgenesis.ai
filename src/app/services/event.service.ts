@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable } from 'rxjs';
 import { EventSummary, EventView, SetView } from '../models/api.model';
 import { api } from './api.util';
 
@@ -27,12 +27,6 @@ export class EventService {
   mySets(): Observable<SetView[]> {
     return this.http.get<SetView[]>(api('/me/sets/current'));
   }
-
-  /** TEMPORARY until the set builder moves to mySets() (plan Task 6). */
-  mySet(): Observable<SetView | null> {
-    return this.mySets().pipe(map(sets => sets[0] ?? null));
-  }
-
   lock(setId: string, commanderName: string): Observable<SetView> {
     return this.http.post<SetView>(api(`/sets/${encodeURIComponent(setId)}/lock`), { commanderName });
   }

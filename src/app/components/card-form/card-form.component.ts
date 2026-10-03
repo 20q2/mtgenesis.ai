@@ -50,6 +50,8 @@ export class CardFormComponent implements OnInit, OnChanges {
   @Input() commanderCmc = 4;
   /** Commander mode: rarities used by the player's other commanders, with their CMC. */
   @Input() takenRarities: Partial<Record<Rarity, number>> = {};
+  /** Appended to every element id, so several forms on one page keep unique ids and labels. */
+  @Input() idSuffix = '';
   @Output() cardChange = new EventEmitter<Card>();
   @Output() generateCard = new EventEmitter<Card>();
   @Output() regenerateText = new EventEmitter<Card>();

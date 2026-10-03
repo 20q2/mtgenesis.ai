@@ -1,9 +1,11 @@
-<div class="page set-page" [class.has-set]="!!setId">
+<div class="page set-page">
   <section class="panel intro">
-    <h2 class="page-title">Commander Set</h2>
+    <h2 class="page-title">Commanders</h2>
     <p class="muted">
-      Generate 3 versions of the same commander at 3, 4 and 5 mana, reroll any you don't like, then lock in the set.
-      Everyone votes on which version becomes legal tonight.
+      Make three commanders: one each at 3, 4 and 5 mana, a Legendary Creature or Vehicle.
+      Each gets <strong>CMC + 1 points</strong> of power and toughness (Vehicles +2), and between them
+      they are one <strong>Uncommon</strong>, one <strong>Rare</strong> and one <strong>Mythic</strong>.
+      Each commander is generated as 3 versions. Lock each one in, and everyone votes on which version is legal tonight.
     </p>
   </section>
 
@@ -13,92 +15,37 @@
     <button type="button" class="alert-close" (click)="clearError()" aria-label="Dismiss">×</button>
   </div>
 
-  <div class="set-layout">
-    <!-- Form: commander name, card details, Generate -->
-    <section class="panel form-panel">
-      <div class="commander-field">
-        <label for="commanderName" class="field-label">Commander name</label>
-        <input id="commanderName"
-               class="night-input"
-               type="text"
-               [formControl]="commanderName"
-               [maxlength]="maxNameLength"
-               [readonly]="nameReadOnly"
-               placeholder="e.g. Zur'ka, Élan of Ash">
-        <span class="muted counter">{{ commanderName.value.length }}/{{ maxNameLength }}</span>
-      </div>
-      <div class="name-actions" *ngIf="canChangeName">
-        <span class="muted name-hint">
-          {{ renaming ? 'Generate a new set to use the new name.' : 'The name is part of the rendered cards.' }}
+  <p class="muted" *ngIf="loading">Loading your commanders…</p>
+
+  <ng-container *ngIf="!loading">
+    <div class="summary-strip" role="tablist" aria-label="Your commanders">
+      <button *ngFor="let cmc of cmcs"
+              type="button"
+              role="tab"
+              class="summary-tab"
+              [id]="'commander-tab-' + cmc"
+              [attr.aria-selected]="activeCmc === cmc"
+              [attr.aria-controls]="'commander-panel-' + cmc"
+              [class.active]="activeCmc === cmc"
+              [class.locked]="states[cmc]?.status === 'locked'"
+              (click)="selectCmc(cmc)">
+        <span class="tab-cmc">{{ cmc }} CMC</span>
+        <span class="tab-state">
+          <span *ngIf="states[cmc]?.status === 'locked'" class="material-icons" aria-hidden="true">lock</span>
+          {{ summary(cmc) }}
         </span>
-        <button type="button" class="btn btn-ghost change-name" (click)="toggleRename()">
-          {{ renaming ? 'Cancel' : 'Change name' }}
-        </button>
-      </div>
+      </button>
+    </div>
 
-      <app-card-form [modelsReady]="true"
-                     [commanderMode]="true"
-                     [showName]="false"
-                     [showGenerate]="false"
-                     (cardChange)="onCardChange($event)"></app-card-form>
-
-      <div class="generate-row">
-        <button type="button"
-                class="btn btn-gold generate-set"
-                [disabled]="!canGenerate()"
-                (click)="generate()">
-          <span class="material-icons">auto_awesome</span>
-          {{ submitting ? 'Submitting…' : 'Generate set of 3' }}
-        </button>
-        <span class="muted" *ngIf="generateHint() as hint">{{ hint }}</span>
-      </div>
-    </section>
-
-    <!-- The 3 slots and lock controls -->
-    <section class="panel slots-panel">
-      <div class="slots-header">
-        <h3 class="section-title">
-          {{ setId ? (setName || 'Your commander') : 'Your 3 versions' }}
-        </h3>
-        <span *ngIf="isLocked" class="badge badge-gold locked-badge">
-          <span class="material-icons">lock</span> Locked
-        </span>
-      </div>
-
-      <p class="muted" *ngIf="loading">Loading your set…</p>
-
-      <div class="slots">
-        <app-card-slot *ngFor="let view of slots; let i = index; trackBy: trackSlot"
-                       [view]="view"
-                       [label]="slotLabel(i)"
-                       [showReroll]="!!setId && !isLocked"
-                       [canReroll]="canRerollSlot(view)"
-                       (reroll)="onReroll($event)"></app-card-slot>
-      </div>
-
-      <div class="lock-bar" *ngIf="setId">
-        <ng-container *ngIf="!isLocked; else lockedControls">
-          <button type="button"
-                  class="btn btn-gold lock"
-                  [disabled]="!!lockDisabledReason() || locking"
-                  (click)="lock()">
-            <span class="material-icons">lock</span>
-            {{ locking ? 'Locking…' : 'Lock in' }}
-          </button>
-          <span class="muted lock-reason" *ngIf="lockDisabledReason() as reason">{{ reason }}</span>
-        </ng-container>
-
-        <ng-template #lockedControls>
-          <span class="muted">
-            Locked into <strong>{{ event?.name || 'the event' }}</strong>.
-            <a routerLink="/vote" class="night-link">Go vote</a>
-          </span>
-          <button type="button" class="btn btn-ghost unlock" [disabled]="unlocking" (click)="unlock()">
-            <span class="material-icons">lock_open</span>
-            {{ unlocking ? 'Unlocking…' : 'Unlock' }}
-          </button>
-        </ng-template>
-      </div>
-    </section>
-  </div>
+    <app-commander-panel *ngFor="let cmc of cmcs"
+                         role="tabpanel"
+                         [id]="'commander-panel-' + cmc"
+                         [attr.aria-labelledby]="'commander-tab-' + cmc"
+                         [hidden]="activeCmc !== cmc"
+                         [cmc]="cmc"
+                         [set]="sets[cmc]"
+                         [event]="event"
+                         [takenRarities]="taken[cmc]"
+                         (stateChange)="onStateChange(cmc, $event)"></app-commander-panel>
+  </ng-container>
 </div>

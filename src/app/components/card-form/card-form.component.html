@@ -2,8 +2,8 @@
   <!-- Name + mana cost: the card's header line -->
   <div class="form-row">
     <div class="field" *ngIf="showName">
-      <label for="name" class="field-label">Card name</label>
-      <input id="name"
+      <label [for]="'name' + idSuffix" class="field-label">Card name</label>
+      <input [id]="'name' + idSuffix"
              type="text"
              formControlName="name"
              placeholder="Enter card name"
@@ -15,8 +15,8 @@
     </div>
 
     <div class="field">
-      <label for="manaCost" class="field-label">{{ commanderMode ? 'Colored pips' : 'Mana cost' }}</label>
-      <input id="manaCost"
+      <label [for]="'manaCost' + idSuffix" class="field-label">{{ commanderMode ? 'Colored pips' : 'Mana cost' }}</label>
+      <input [id]="'manaCost' + idSuffix"
              type="text"
              formControlName="manaCost"
              [placeholder]="commanderMode ? '{W}{U}' : '{1}{W}{U} or {X}'"
@@ -47,8 +47,8 @@
 
   <!-- Commander: Legendary Creature or Legendary Artifact — Vehicle -->
   <div class="field" *ngIf="commanderMode">
-    <span class="field-label" id="kind-label">Commander</span>
-    <div class="chips" role="group" aria-labelledby="kind-label">
+    <span class="field-label" [id]="'kind-label' + idSuffix">Commander</span>
+    <div class="chips" role="group" [attr.aria-labelledby]="'kind-label' + idSuffix">
       <button type="button" class="chip kind-creature"
               [attr.aria-pressed]="commanderKind === 'creature'"
               (click)="setCommanderKind('creature')">
@@ -64,8 +64,8 @@
 
   <!-- Type line (fixed for a commander set) -->
   <div class="field" *ngIf="!commanderMode">
-    <label for="supertype" class="field-label">Supertype <span class="optional">optional</span></label>
-    <input id="supertype"
+    <label [for]="'supertype' + idSuffix" class="field-label">Supertype <span class="optional">optional</span></label>
+    <input [id]="'supertype' + idSuffix"
            type="text"
            formControlName="supertype"
            placeholder="Legendary, Basic, Snow, etc."
@@ -83,8 +83,8 @@
   </div>
 
   <div class="field" *ngIf="!commanderMode">
-    <label for="type" class="field-label">Card type</label>
-    <input id="type"
+    <label [for]="'type' + idSuffix" class="field-label">Card type</label>
+    <input [id]="'type' + idSuffix"
            type="text"
            formControlName="type"
            placeholder="Creature, Instant, Sorcery, etc."
@@ -107,8 +107,8 @@
 
   <div class="form-row">
     <div class="field" *ngIf="filteredSubtypes.length > 0">
-      <label for="subtype" class="field-label">Subtype</label>
-      <input id="subtype"
+      <label [for]="'subtype' + idSuffix" class="field-label">Subtype</label>
+      <input [id]="'subtype' + idSuffix"
              type="text"
              formControlName="subtype"
              placeholder="Human, Wizard, Equipment, etc."
@@ -126,8 +126,8 @@
     </div>
 
     <div class="field pt-field" *ngIf="showPowerToughness">
-      <label for="powerToughness" class="field-label">Power / toughness</label>
-      <input id="powerToughness"
+      <label [for]="'powerToughness' + idSuffix" class="field-label">Power / toughness</label>
+      <input [id]="'powerToughness' + idSuffix"
              type="text"
              formControlName="powerToughness"
              placeholder="2/3 or */X"
@@ -139,8 +139,8 @@
 
     <!-- Commander: point-buy P/T, optional -->
     <div class="field pt-field" *ngIf="commanderMode">
-      <label for="commanderPt" class="field-label">Power / toughness <span class="optional">optional</span></label>
-      <input id="commanderPt"
+      <label [for]="'commanderPt' + idSuffix" class="field-label">Power / toughness <span class="optional">optional</span></label>
+      <input [id]="'commanderPt' + idSuffix"
              type="text"
              formControlName="powerToughness"
              placeholder="auto"
@@ -148,16 +148,16 @@
              inputmode="numeric"
              class="night-input pt-input"
              [class.invalid]="!!statsError"
-             [attr.aria-describedby]="statsError ? 'commanderPtError' : 'commanderPtHint'">
-      <span *ngIf="statsError as err; else ptHint" id="commanderPtError" class="field-error pt-error">{{ err }}</span>
-      <ng-template #ptHint><span id="commanderPtHint" class="muted pt-hint">{{ statsHint }}</span></ng-template>
+             [attr.aria-describedby]="(statsError ? 'commanderPtError' : 'commanderPtHint') + idSuffix">
+      <span *ngIf="statsError as err; else ptHint" [id]="'commanderPtError' + idSuffix" class="field-error pt-error">{{ err }}</span>
+      <ng-template #ptHint><span [id]="'commanderPtHint' + idSuffix" class="muted pt-hint">{{ statsHint }}</span></ng-template>
     </div>
   </div>
 
   <!-- Rarity -->
   <div class="field">
-    <span class="field-label" id="rarity-label">Rarity</span>
-    <div class="rarity-group" [class.rarity-group-3]="commanderMode" role="radiogroup" aria-labelledby="rarity-label">
+    <span class="field-label" [id]="'rarity-label' + idSuffix">Rarity</span>
+    <div class="rarity-group" [class.rarity-group-3]="commanderMode" role="radiogroup" [attr.aria-labelledby]="'rarity-label' + idSuffix">
       <label *ngFor="let rarity of visibleRarities"
              class="rarity-option rarity-{{ rarity.value.toLowerCase() }}"
              [class.taken]="rarityTakenAt(rarity.value) !== undefined">
