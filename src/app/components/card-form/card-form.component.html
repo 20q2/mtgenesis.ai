@@ -40,12 +40,29 @@
         </button>
       </div>
       <span class="muted commander-cost-hint" *ngIf="commanderMode">
-        Generic mana is added per version: 3, 4 and 5 mana.
+        Generic mana is added up to {{ commanderCmc }} mana.
       </span>
     </div>
   </div>
 
-  <!-- Type line (fixed to Legendary Creature for a commander set) -->
+  <!-- Commander: Legendary Creature or Legendary Artifact — Vehicle -->
+  <div class="field" *ngIf="commanderMode">
+    <span class="field-label" id="kind-label">Commander</span>
+    <div class="chips" role="group" aria-labelledby="kind-label">
+      <button type="button" class="chip kind-creature"
+              [attr.aria-pressed]="commanderKind === 'creature'"
+              (click)="setCommanderKind('creature')">
+        <i class="ms ms-creature" aria-hidden="true"></i> Creature
+      </button>
+      <button type="button" class="chip kind-vehicle"
+              [attr.aria-pressed]="commanderKind === 'vehicle'"
+              (click)="setCommanderKind('vehicle')">
+        <i class="ms ms-artifact" aria-hidden="true"></i> Vehicle
+      </button>
+    </div>
+  </div>
+
+  <!-- Type line (fixed for a commander set) -->
   <div class="field" *ngIf="!commanderMode">
     <label for="supertype" class="field-label">Supertype <span class="optional">optional</span></label>
     <input id="supertype"
@@ -119,16 +136,36 @@
              [class.invalid]="isFieldInvalid('power') || isFieldInvalid('toughness')"
              (input)="onPowerToughnessChange()">
     </div>
+
+    <!-- Commander: point-buy P/T, optional -->
+    <div class="field pt-field" *ngIf="commanderMode">
+      <label for="commanderPt" class="field-label">Power / toughness <span class="optional">optional</span></label>
+      <input id="commanderPt"
+             type="text"
+             formControlName="powerToughness"
+             placeholder="auto"
+             autocomplete="off"
+             inputmode="numeric"
+             class="night-input pt-input"
+             [class.invalid]="!!statsError"
+             [attr.aria-describedby]="statsError ? 'commanderPtError' : 'commanderPtHint'">
+      <span *ngIf="statsError as err; else ptHint" id="commanderPtError" class="field-error pt-error">{{ err }}</span>
+      <ng-template #ptHint><span id="commanderPtHint" class="muted pt-hint">{{ statsHint }}</span></ng-template>
+    </div>
   </div>
 
   <!-- Rarity -->
   <div class="field">
     <span class="field-label" id="rarity-label">Rarity</span>
-    <div class="rarity-group" role="radiogroup" aria-labelledby="rarity-label">
-      <label *ngFor="let rarity of rarityOptions" class="rarity-option rarity-{{ rarity.value.toLowerCase() }}">
-        <input type="radio" class="sr-only" formControlName="rarity" [value]="rarity.value">
+    <div class="rarity-group" [class.rarity-group-3]="commanderMode" role="radiogroup" aria-labelledby="rarity-label">
+      <label *ngFor="let rarity of visibleRarities"
+             class="rarity-option rarity-{{ rarity.value.toLowerCase() }}"
+             [class.taken]="rarityTakenAt(rarity.value) !== undefined">
+        <input type="radio" class="sr-only" formControlName="rarity" [value]="rarity.value"
+               [attr.disabled]="rarityTakenAt(rarity.value) !== undefined ? '' : null">
         <span class="gem" aria-hidden="true"></span>
         {{ rarity.label }}
+        <span *ngIf="rarityTakenAt(rarity.value) as cmc" class="taken-note">used at {{ cmc }} CMC</span>
       </label>
     </div>
   </div>

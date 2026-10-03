@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, OnInit, Output } from '@angular/core';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { 
   Card, 
@@ -9,19 +9,18 @@ import {
   RarityOptions, 
   Rarity, 
   ManaSymbols,
+  CommanderKind,
   createEmptyCard 
 } from '../../models/card.model';
+import { COMMANDER_RARITIES, commanderStatsError, statPoints } from '../../services/commander-rules';
 import { ManaService } from '../../services/mana.service';
-
-/** The mana value a commander set's shared art prompt is sized for (its middle version). */
-const COMMANDER_ART_CMC = 4;
 
 @Component({
   selector: 'app-card-form',
   templateUrl: './card-form.component.html',
   styleUrls: ['./card-form.component.scss']
 })
-export class CardFormComponent implements OnInit {
+export class CardFormComponent implements OnInit, OnChanges {
   cardForm!: FormGroup;
   colorOptions = ColorOptions;
   supertypeOptions = SupertypeOptions;
@@ -43,15 +42,25 @@ export class CardFormComponent implements OnInit {
   /** Hide the Generate button (the set builder has its own "Generate set of 3"). */
   @Input() showGenerate = true;
   /**
-   * Commander set mode: the type line is fixed to Legendary Creature and P/T is left to the
-   * server's stat curve (the three versions cost 3, 4 and 5 mana).
+   * Commander set mode: a Legendary Creature or Vehicle at commanderCmc mana, Uncommon, Rare or
+   * Mythic, with an optional point-buy P/T (blank = the server picks the split).
    */
   @Input() commanderMode = false;
+  /** Commander mode: the commander's mana value (sets the P/T budget and the art scale). */
+  @Input() commanderCmc = 4;
+  /** Commander mode: rarities used by the player's other commanders, with their CMC. */
+  @Input() takenRarities: Partial<Record<Rarity, number>> = {};
   @Output() cardChange = new EventEmitter<Card>();
   @Output() generateCard = new EventEmitter<Card>();
   @Output() regenerateText = new EventEmitter<Card>();
 
   constructor(private fb: FormBuilder, private manaService: ManaService) {}
+
+  ngOnChanges(): void {
+    if (this.cardForm) {
+      this.ensureFreeRarity();
+    }
+  }
 
   ngOnInit(): void {
     this.initForm();
@@ -143,28 +152,103 @@ export class CardFormComponent implements OnInit {
       power: [emptyCard.power],
       toughness: [emptyCard.toughness],
       powerToughness: [''], // Combined field for power/toughness
+      commanderKind: ['creature'],
       flavorText: [emptyCard.flavorText],
       setCode: [emptyCard.setCode],
       cardNumber: [emptyCard.cardNumber]
     });
   }
 
-  /** In commander mode, fixes the type line to Legendary Creature. */
+  /** In commander mode, starts as a Legendary Creature at a commander rarity that is free. */
   private applyCommanderDefaults(): void {
     if (!this.commanderMode) {
       return;
     }
-    this.cardForm.patchValue({ type: 'Creature', supertype: 'Legendary' }, { emitEvent: false });
+    const rarity = this.cardForm.get('rarity')?.value;
+    this.cardForm.patchValue({
+      type: 'Creature', supertype: 'Legendary', commanderKind: 'creature',
+      rarity: COMMANDER_RARITIES.includes(rarity) ? rarity : Rarity.UNCOMMON
+    }, { emitEvent: false });
     this.updateTypeRelatedFields('Creature');
+    this.ensureFreeRarity();
+  }
+
+  /** Commander mode: Creature (Legendary Creature) or Vehicle (Legendary Artifact — Vehicle). */
+  setCommanderKind(kind: CommanderKind): void {
+    const subtype = (this.cardForm.get('subtype')?.value || '').replace(/\s*\bVehicle\b/i, '').trim();
+    this.cardForm.patchValue({
+      commanderKind: kind,
+      type: kind === 'vehicle' ? 'Artifact' : 'Creature',
+      subtype: kind === 'vehicle' ? `${subtype} Vehicle`.trim() : subtype
+    });
+  }
+
+  get commanderKind(): CommanderKind {
+    return this.cardForm.get('commanderKind')?.value === 'vehicle' ? 'vehicle' : 'creature';
+  }
+
+  /** The rarity choices: Uncommon, Rare and Mythic for a commander, all four otherwise. */
+  get visibleRarities() {
+    return this.commanderMode
+      ? this.rarityOptions.filter(r => COMMANDER_RARITIES.includes(r.value as Rarity))
+      : this.rarityOptions;
+  }
+
+  /** The CMC of the player's other commander that uses this rarity, if any. */
+  rarityTakenAt(rarity: string): number | undefined {
+    return this.commanderMode ? this.takenRarities[rarity as Rarity] : undefined;
+  }
+
+  /** Moves a commander off a rarity another of the player's commanders already uses. */
+  private ensureFreeRarity(): void {
+    if (!this.commanderMode || this.rarityTakenAt(this.cardForm.get('rarity')?.value) === undefined) {
+      return;
+    }
+    const free = COMMANDER_RARITIES.find(r => this.rarityTakenAt(r) === undefined);
+    if (free) {
+      this.cardForm.patchValue({ rarity: free });
+    }
+  }
+
+  /** The typed P/T as [power, toughness] strings ('3' alone is power with no toughness). */
+  private commanderStats(): [string, string] {
+    const value: string = (this.cardForm.get('powerToughness')?.value || '').trim();
+    if (!value) {
+      return ['', ''];
+    }
+    const slash = value.indexOf('/');
+    return slash < 0 ? [value, ''] : [value.slice(0, slash).trim(), value.slice(slash + 1).trim()];
+  }
+
+  /** Commander mode: why the typed P/T breaks the point buy, or null. */
+  get statsError(): string | null {
+    if (!this.commanderMode) {
+      return null;
+    }
+    const [power, toughness] = this.commanderStats();
+    return commanderStatsError(power, toughness, this.commanderCmc, this.commanderKind);
+  }
+
+  get statsHint(): string {
+    const points = statPoints(this.commanderCmc, this.commanderKind);
+    return this.commanderKind === 'vehicle'
+      ? `${points} points (Vehicle +2) · leave blank for auto`
+      : `${points} points · e.g. 2/2, 3/1, 1/3 · leave blank for auto`;
   }
 
   onFormValueChanges(): void {
     const formValue = this.cardForm.value;
     
-    // If the type doesn't include 'creature', remove power/toughness
-    if (!this.showPowerToughness) {
-      formValue.power = undefined;
-      formValue.toughness = undefined;
+    if (this.commanderMode) {
+      // The point buy: typed P/T as entered (the server validates it), blank = auto
+      [formValue.power, formValue.toughness] = this.commanderStats();
+    } else {
+      delete formValue.commanderKind;
+      // If the type doesn't include 'creature', remove power/toughness
+      if (!this.showPowerToughness) {
+        formValue.power = undefined;
+        formValue.toughness = undefined;
+      }
     }
     
     // Auto-generate art prompt
@@ -354,8 +438,7 @@ export class CardFormComponent implements OnInit {
     if (name) parts.push(name);
     if (typeDescription) parts.push(`${/^[aeiou]/.test(typeDescription) ? 'an' : 'a'} ${typeDescription}`);
     if (isCreature) {
-      // A commander set shares one art prompt across its 3-, 4- and 5-mana versions.
-      const cmc = this.commanderMode ? COMMANDER_ART_CMC : Number(this.cardForm.get('cmc')?.value) || 0;
+      const cmc = this.commanderMode ? this.commanderCmc : Number(this.cardForm.get('cmc')?.value) || 0;
       parts.push(this.creatureScale(cmc));
     }
     return parts.join(', ') || 'a fantasy scene';
