@@ -23,7 +23,8 @@
         <span class="lg-value lg-mana">
           <span *ngFor="let cmc of cmcs" class="lg-mana-slot" [class.done]="states[cmc]?.status === 'locked'"
                 [class.started]="!!states[cmc]">
-            <i class="ms ms-cost ms-{{ cmc }}" aria-hidden="true"></i>
+            <i class="ms ms-cost ms-shadow ms-{{ cmc }}" aria-hidden="true"></i>
+            <span *ngIf="states[cmc]?.status === 'locked'" class="material-icons lg-check" aria-hidden="true">check</span>
             <span class="sr-only">{{ cmc }} CMC: {{ summary(cmc) }}</span>
           </span>
         </span>

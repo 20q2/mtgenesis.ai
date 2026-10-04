@@ -1,16 +1,18 @@
 <ol class="night-steps" aria-label="How tonight works">
-  <li *ngFor="let step of steps; let i = index"
+  <li *ngFor="let step of steps; let i = index; let last = last"
       class="night-step"
       [attr.data-state]="stateOf(i)"
       [attr.aria-current]="stateOf(i) === 'current' ? 'step' : null">
-    <span class="step-mark" aria-hidden="true">
-      <span *ngIf="stateOf(i) === 'done'; else num" class="material-icons">check</span>
-      <ng-template #num>{{ i + 1 }}</ng-template>
+    <!-- The badge and the line to the next step share one row, so the line never crosses text -->
+    <span class="step-rail" aria-hidden="true">
+      <span class="step-mark">
+        <span *ngIf="stateOf(i) === 'done'; else num" class="material-icons">check</span>
+        <ng-template #num>{{ i + 1 }}</ng-template>
+      </span>
+      <span *ngIf="!last" class="step-line"></span>
     </span>
-    <span class="step-body">
-      <span class="step-title">{{ step.title }}</span>
-      <span class="step-text">{{ step.text }}</span>
-    </span>
+    <span class="step-title">{{ step.title }}</span>
+    <span class="step-text">{{ step.text }}</span>
     <span class="sr-only">{{ stateOf(i) === 'done' ? '(done)' : stateOf(i) === 'current' ? '(you are here)' : '' }}</span>
   </li>
 </ol>

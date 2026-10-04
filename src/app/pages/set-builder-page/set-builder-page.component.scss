@@ -56,16 +56,22 @@ app-commander-panel[hidden] {
   }
 }
 
+/* Five rules: one even row on wide screens, a tidy 2-column grid on medium, a list on phones. */
 .ledger {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0 1.5rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0 1.25rem;
   margin: 0;
   padding: 0;
   list-style: none;
 
-  @media (max-width: 900px) {
+  @media (max-width: 1100px) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    /* The odd fifth rule takes the whole last row instead of leaving a hole */
+    .ledger-item:last-child {
+      grid-column: 1 / -1;
+    }
   }
 
   @media (max-width: 560px) {
@@ -102,34 +108,34 @@ app-commander-panel[hidden] {
 
 .lg-mana {
   display: inline-flex;
-  gap: 0.35rem;
+  gap: 0.5rem;
   font-size: 1.3rem;
 }
 
+/* Not started: faded. Started: full strength. Locked in: full strength with a check. */
 .lg-mana-slot {
   position: relative;
   display: inline-flex;
-  opacity: 0.4;
+  opacity: 0.35;
   transition: opacity var(--dur) var(--ease-out);
 
   &.started {
-    opacity: 0.75;
+    opacity: 1;
   }
 
-  &.done {
-    opacity: 1;
-
-    &::after {
-      content: '';
-      position: absolute;
-      right: -3px;
-      bottom: -2px;
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      background: var(--success);
-      box-shadow: 0 0 0 2px var(--surface-raised);
-    }
+  .lg-check {
+    position: absolute;
+    right: -5px;
+    bottom: -4px;
+    display: grid;
+    place-items: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--success);
+    color: #fff;
+    font-size: 11px;
+    box-shadow: 0 0 0 2px var(--surface-raised);
   }
 }
 
