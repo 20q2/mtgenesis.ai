@@ -1,6 +1,7 @@
 import { CardFormComponent } from '../../components/card-form/card-form.component';
 import { NO_ERRORS_SCHEMA } from '@angular/core';
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { ReactiveFormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { HttpClientTestingModule } from '@angular/common/http/testing';
 import { BehaviorSubject, Subject, of, throwError } from 'rxjs';
@@ -165,4 +166,46 @@ describe('CreatePageComponent (jobs)', () => {
     expect((component as any).generateCardText).toBeUndefined();
     expect((component as any).generateCardArt).toBeUndefined();
   });
+});
+
+describe('CreatePageComponent with the real card form', () => {
+  it('keeps showing the finished card after the AI fills the blank fields', fakeAsync(() => {
+    const watch$ = new Subject<CardView>();
+    const gen = jasmine.createSpyObj<GenerationService>('GenerationService',
+      ['submit', 'watch', 'toCard', 'cardParams', 'promptFor', 'share']);
+    gen.watch.and.returnValue(watch$);
+    gen.cardParams.and.callFake(GenerationService.prototype.cardParams);
+    gen.promptFor.and.callFake(GenerationService.prototype.promptFor);
+    gen.toCard.and.callFake((v: CardView, b: Card) => ({ ...b, cardImageUrl: `${environment.apiUrl}${v.cardImageUrl}` }));
+    gen.submit.and.returnValue(of({ setId: null, cards: [cardView({ id: 'j-1' })] }));
+    const media = jasmine.createSpyObj<MediaService>('MediaService', ['src', 'download']);
+    media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule, ReactiveFormsModule],
+      declarations: [CreatePageComponent, CardFormComponent, MediaPipe],
+      providers: [
+        { provide: GenerationService, useValue: gen },
+        { provide: QueueService, useValue: { online$: new BehaviorSubject(true), status$: of(null) } },
+        { provide: MediaService, useValue: media },
+        { provide: PoolService, useValue: { current: () => of(poolView()) } }
+      ],
+      schemas: [NO_ERRORS_SCHEMA]
+    });
+    const fixture = TestBed.createComponent(CreatePageComponent);
+    const page = fixture.componentInstance;
+    fixture.detectChanges();
+
+    page.generateCard({ ...page.cardFormComponent.cardForm.value, name: '' } as Card);
+    const done = doneCard({ id: 'j-1' });
+    done.card = { ...done.card!, name: 'Stormcaller', manaCost: '{2}{U}', type: 'Creature', subtype: 'Bird' };
+    watch$.next(done);
+    fixture.detectChanges();
+    tick(1000);  // past the card-exit animation, if one (wrongly) starts
+    fixture.detectChanges();
+
+    expect(page.cardFormComponent.cardForm.value.name).toBe('Stormcaller');
+    expect(page.currentCard.cardImageUrl).toBe(`${environment.apiUrl}/api/v1/media/cards/j-1.png`);
+    expect(page.cardExiting).toBeFalse();
+    fixture.destroy();
+  }));
 });

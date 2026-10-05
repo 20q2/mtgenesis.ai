@@ -248,4 +248,14 @@ describe('CommanderFormComponent', () => {
     component.emit();
     expect(last.artPrompt).toBe('a legendary dragon, large and imposing');
   });
+
+  it("indents each section's controls under its heading", () => {
+    setup(3);
+    const section = el().querySelector('.cf-section') as HTMLElement;
+    const head = section.querySelector('.cf-head') as HTMLElement;
+    const controls = section.querySelector('.pip-buttons') as HTMLElement;
+    expect(getComputedStyle(head).marginLeft).toBe('0px');
+    expect(parseFloat(getComputedStyle(controls).marginLeft)).toBeGreaterThan(8);
+    expect(controls.getBoundingClientRect().left).toBeGreaterThan(head.getBoundingClientRect().left + 8);
+  });
 });

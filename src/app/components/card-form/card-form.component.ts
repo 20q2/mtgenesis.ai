@@ -432,9 +432,11 @@ export class CardFormComponent implements OnInit {
         patch[key] = card[key];
       }
     }
-    const fillCost = blank('manaCost') && !!card.manaCost;
-    if (fillCost) {
+    if (blank('manaCost') && card.manaCost) {
+      // Colors and mana value follow the filled cost.
       patch['manaCost'] = card.manaCost;
+      patch['colors'] = this.manaService.extractColorsFromManaCost(card.manaCost);
+      patch['cmc'] = this.manaService.calculateCMC(card.manaCost);
     }
     if (blank('powerToughness') && card.power && card.toughness) {
       patch['power'] = card.power;
@@ -444,10 +446,13 @@ export class CardFormComponent implements OnInit {
     if (!Object.keys(patch).length) {
       return;
     }
-    this.cardForm.patchValue(patch);
-    if (fillCost) {
-      this.onManaCostChange();  // colors and mana value follow the filled cost
-    }
+    // Silently: a cardChange here would make the create page swap the finished card for the
+    // form's preview (it treats any form change as an edit of the generated card).
+    this.cardForm.patchValue(patch, { emitEvent: false });
+    const type = (this.cardForm.get('type')?.value || '').toLowerCase();
+    const subtype = (this.cardForm.get('subtype')?.value || '').toLowerCase();
+    this.updateFilteredSubtypes(this.cardForm.get('type')?.value || '');
+    this.showPowerToughness = type.includes('creature') || subtype.includes('vehicle');
   }
 
   clearForm(): void {

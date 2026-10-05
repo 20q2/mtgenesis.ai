@@ -17,6 +17,15 @@
     padding-top: 0.25rem;
     border-top: 0;
   }
+
+  /* Controls sit indented under their heading, so the headings lead the eye */
+  > :not(.cf-head) {
+    margin-left: 0.9rem;
+
+    @media (max-width: 480px) {
+      margin-left: 0.5rem;
+    }
+  }
 }
 
 .cf-head {

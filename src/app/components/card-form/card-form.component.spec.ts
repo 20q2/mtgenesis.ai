@@ -60,6 +60,15 @@ describe('CardFormComponent', () => {
       expect(v.colors).toEqual(['U']);
     });
 
+    it('fills silently, so the finished card on the page is not replaced by the form', () => {
+      const emitted: unknown[] = [];
+      component.cardChange.subscribe(c => emitted.push(c));
+      component.cardForm.patchValue({ name: '', manaCost: '', type: '', subtype: '' }, { emitEvent: false });
+      component.fillBlanks(generated);
+      expect(emitted).toEqual([]);
+      expect(component.cardForm.value.cmc).toBe(3);
+    });
+
     it('leaves a typed body alone', () => {
       component.cardForm.patchValue({ type: 'Creature', powerToughness: '4/4', power: '4', toughness: '4' });
       component.fillBlanks(generated);
