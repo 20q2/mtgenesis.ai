@@ -17,18 +17,24 @@ def brief(tag):
 class Director:
     """Fake brief_fn: returns briefs tagged b1, b2 ... and records its calls."""
 
-    def __init__(self, result="briefs"):
+    def __init__(self, result="briefs", fill=None):
         self.calls = []
         self.result = result
+        self.fill = fill
+        self.fill_asked = []
 
-    def __call__(self, params, count, avoid):
+    def __call__(self, params, count, avoid, fill_fields=None):
         self.calls.append({"name": params.get("name"), "count": count, "avoid": avoid})
+        self.fill_asked.append(fill_fields)
         if self.result == "none":
             return None
         if self.result == "raise":
             raise ConnectionError("ollama is down")
         start = sum(c["count"] for c in self.calls[:-1])
-        return [brief(f"b{start + i + 1}") for i in range(count)]
+        briefs = [brief(f"b{start + i + 1}") for i in range(count)]
+        if self.fill is not None:
+            briefs[0]["fill"] = dict(self.fill)
+        return briefs
 
 
 @pytest.fixture
@@ -162,7 +168,7 @@ def test_position_counts_the_brief_stage(storage, rec, tmp_path):
 def test_position_while_the_brief_is_being_written(storage, rec, tmp_path):
     seen = []
 
-    def director(params, count, avoid):
+    def director(params, count, avoid, fill_fields=None):
         seen.append(q.position(card_id))
         return None
 
@@ -193,3 +199,28 @@ def test_set_split_across_calls_still_avoids_the_briefed_sibling(storage, rec, t
     q.process_next_brief()
     assert director.calls[-1]["count"] == 2
     assert director.calls[-1]["avoid"] == [brief("b1")]
+
+
+def test_a_single_card_with_blanks_gets_them_filled_into_its_params(storage, rec, tmp_path):
+    director = Director(fill={"name": "Stormcaller", "subtype": "Bird", "power": "2", "toughness": "3"})
+    q = queue(storage, tmp_path, rec, director)
+    card_id = add_card(storage, card_params={"name": "", "manaCost": "{3}{U}", "colors": ["U"],
+                                             "type": "Creature", "rarity": "rare", "cmc": 4})
+    q.enqueue(card_id)
+    q.process_next_brief()
+    assert director.fill_asked == [["name", "subtype", "power", "toughness"]]
+    card = storage.get_card(card_id)
+    assert card["card_params"]["name"] == "Stormcaller"
+    assert card["card_params"]["subtype"] == "Bird"
+    assert (card["card_params"]["power"], card["card_params"]["toughness"]) == ("2", "3")
+    assert "fill" not in card["brief"]          # the brief itself stays as before
+
+
+def test_set_cards_are_never_filled(storage, rec, tmp_path):
+    director = Director(fill={"name": "Nope"})
+    q = queue(storage, tmp_path, rec, director)
+    _, ids = set_cards(storage)
+    q.enqueue_many(ids)
+    q.process_next_brief()
+    assert director.fill_asked == [None]
+    assert all(storage.get_card(i)["card_params"].get("name") != "Nope" for i in ids)

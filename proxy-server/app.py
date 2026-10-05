@@ -1169,8 +1169,9 @@ def init_ai_night(app):
     if DIRECTOR_ENABLED:
         director_client = ollama.Client(timeout=DIRECTOR_TIMEOUT_SECONDS)
 
-        def brief_fn(params, count, avoid):
-            return director.write_briefs(params, count, avoid, director_client, DIRECTOR_MODEL)
+        def brief_fn(params, count, avoid, fill_fields=None):
+            return director.write_briefs(params, count, avoid, director_client, DIRECTOR_MODEL,
+                                         fill_fields=fill_fields)
     gen_queue = GenerationQueue(storage, data_dir, createCardContent,
                                 image_generation.generate_art, finalize_card, brief_fn=brief_fn)
     gen_queue.recover_on_startup()

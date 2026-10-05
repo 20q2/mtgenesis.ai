@@ -16,6 +16,7 @@ import json
 import random
 import re
 
+import card_fill
 import power_level as power
 from rules_text import COLOR_HOOKS, COLORLESS_HOOKS, DESIGN_GUIDE, POWER_GUIDE, type_line
 
@@ -85,16 +86,20 @@ def set_overlap(texts: list[str]) -> float:
     return sum(jaccard(a, b) for a, b in pairs) / len(pairs) if pairs else 0.0
 
 
-def _schema(count: int) -> dict:
+def _schema(count: int, fill_fields: list[str] | None = None) -> dict:
     art = {"type": "object", "properties": {f: {"type": "string"} for f in ART_FIELDS},
            "required": list(ART_FIELDS)}
     item = {"type": "object",
             "properties": {"identity": {"type": "string"}, "mechanic": {"type": "string"}, "art": art},
             "required": ["identity", "mechanic", "art"]}
-    return {"type": "object",
-            "properties": {"briefs": {"type": "array", "items": item, "minItems": count,
-                                      "maxItems": count}},
-            "required": ["briefs"]}
+    schema = {"type": "object",
+              "properties": {"briefs": {"type": "array", "items": item, "minItems": count,
+                                        "maxItems": count}},
+              "required": ["briefs"]}
+    if fill_fields:
+        schema["properties"]["fill"] = card_fill.fill_schema(fill_fields)
+        schema["required"].append("fill")
+    return schema
 
 
 def _shapes(card: dict) -> tuple[str, ...]:
@@ -153,16 +158,25 @@ def _describe(n: int, ingredients: dict) -> str:
 
 
 def _messages(card: dict, count: int, avoid: list[dict], rng: random.Random | None = None,
-              ingredients: list[dict] | None = None) -> list[dict]:
+              ingredients: list[dict] | None = None, fill_fields: list[str] | None = None) -> list[dict]:
     card = card or {}
+    fill_fields = fill_fields or []
+    blank = "(blank: you choose it in fill)"
     colors = [c for c in (card.get("colors") or []) if c in "WUBRG"]
-    facts = [f"Name: {(card.get('name') or '').strip() or 'Untitled'}",
-             f"Type line: {type_line(card) or 'Creature'}",
-             "Colors: " + (", ".join({"W": "white", "U": "blue", "B": "black", "R": "red",
-                                      "G": "green"}[c] for c in colors) or "colorless"),
-             f"Mana cost: {card.get('manaCost') or '{0}'} (mana value {card.get('cmc', 0)})",
-             f"Rarity: {(card.get('rarity') or 'common').lower()}",
-             power.describe_budget(card)]
+    facts = [f"Name: {blank if 'name' in fill_fields else (card.get('name') or '').strip() or 'Untitled'}",
+             f"Type line: {blank if 'type' in fill_fields else type_line(card) or 'Creature'}"]
+    if "manaCost" in fill_fields:
+        facts.append(f"Mana cost and colors: {blank}")
+    else:
+        facts += ["Colors: " + (", ".join({"W": "white", "U": "blue", "B": "black", "R": "red",
+                                           "G": "green"}[c] for c in colors) or "colorless"),
+                  f"Mana cost: {card.get('manaCost') or '{0}'} (mana value {card.get('cmc', 0)})"]
+    facts.append(f"Rarity: {(card.get('rarity') or 'common').lower()}")
+    if not fill_fields:
+        # The budget depends on the cost and body, which aren't known until they are filled.
+        facts.append(power.describe_budget(card))
+    if fill_fields:
+        facts += ["", card_fill.fill_instructions(fill_fields)]
     ingredients = ingredients or draw_ingredients(card, count, rng or random.Random())
     asks = [f"Write {count} brief{'s' if count > 1 else ''}, in this order. Ingredients, rolled at "
             "random so this card is unlike any other:"]
@@ -245,19 +259,24 @@ def _same_character(briefs: list[dict], avoid: list[dict]) -> None:
 
 
 def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model: str,
-                 rng: random.Random | None = None) -> list[dict] | None:
+                 rng: random.Random | None = None,
+                 fill_fields: list[str] | None = None) -> list[dict] | None:
     """`count` briefs for the card (one per commander-set version), each with a mechanic
     different from the others and from `avoid`. None if two attempts fail; never raises.
-    `rng` draws the ingredients (seed it for repeatable runs); a retry draws fresh ones."""
+    `rng` draws the ingredients (seed it for repeatable runs); a retry draws fresh ones.
+    `fill_fields` (single cards only): blank fields for the model to choose in the same call;
+    the validated values come back as the first brief's "fill" (card_fill.clean_fill)."""
     avoid = avoid or []
     rng = rng or random.Random()
+    fill_fields = fill_fields if count == 1 else None
     subtype = (card or {}).get("subtype") or ""
     for _ in range(ATTEMPTS):
         ingredients = draw_ingredients(card, count, rng)
         try:
             resp = client.chat(
-                model=model, messages=_messages(card, count, avoid, ingredients=ingredients),
-                format=_schema(count),
+                model=model, messages=_messages(card, count, avoid, ingredients=ingredients,
+                                                fill_fields=fill_fields),
+                format=_schema(count, fill_fields),
                 think=False, keep_alive="30m",
                 # Small context, like the rules-text call: SDXL must still fit beside the model.
                 options={"temperature": 0.9, "top_p": 0.95, "num_predict": 200 * count + 100,
@@ -268,7 +287,10 @@ def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model
             return None
         try:
             raw = json.loads(resp["message"]["content"])
-            briefs = [_clean(b, subtype, (card or {}).get("name") or "") for b in raw.get("briefs") or []]
+            fill = card_fill.clean_fill(raw.get("fill"), card or {}, fill_fields) if fill_fields else None
+            filled = card_fill.apply_fill(card or {}, fill or {})
+            briefs = [_clean(b, filled.get("subtype") or "", filled.get("name") or "")
+                      for b in raw.get("briefs") or []]
         except Exception as exc:  # bad JSON or shape: worth one more try
             _log(f"🎬 Director reply unreadable: {exc}")
             continue
@@ -277,6 +299,9 @@ def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model
             for b, ing in zip(briefs, ingredients):
                 if ing["shape"]:
                     b["shape"] = ing["shape"]
+            if fill is not None:
+                briefs[0]["fill"] = fill
+                _log(f"🎬 Director filled the blanks: {fill}")
             _log(f"🎬 Director briefs: {[b['mechanic'] for b in briefs]}")
             return briefs
         _log("🎬 Director reply rejected (missing fields or repeated mechanics)")

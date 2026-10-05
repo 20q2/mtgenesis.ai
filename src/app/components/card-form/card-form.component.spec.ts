@@ -42,4 +42,33 @@ describe('CardFormComponent', () => {
     expect(sent.length).toBeGreaterThan(1);
     expect(sent.every(card => !('commanderKind' in card))).toBeTrue();
   });
+
+  describe('filling the blanks', () => {
+    const generated = { name: 'Stormcaller', manaCost: '{2}{U}', type: 'Creature', supertype: 'Legendary',
+                        subtype: 'Bird Wizard', colors: ['U'], cmc: 3, rarity: 'rare', power: '2', toughness: '3' };
+
+    it('fills only the fields the player left empty, never the supertype', () => {
+      component.cardForm.patchValue({ name: 'My Name', manaCost: '', type: '', subtype: '', supertype: '' });
+      component.fillBlanks(generated);
+      const v = component.cardForm.value;
+      expect(v.name).toBe('My Name');
+      expect(v.manaCost).toBe('{2}{U}');
+      expect(v.type).toBe('Creature');
+      expect(v.subtype).toBe('Bird Wizard');
+      expect(v.supertype).toBe('');
+      expect(v.powerToughness).toBe('2/3');
+      expect(v.colors).toEqual(['U']);
+    });
+
+    it('leaves a typed body alone', () => {
+      component.cardForm.patchValue({ type: 'Creature', powerToughness: '4/4', power: '4', toughness: '4' });
+      component.fillBlanks(generated);
+      expect(component.cardForm.value.powerToughness).toBe('4/4');
+    });
+
+    it('tells the player blank fields are filled in by the AI', () => {
+      expect(fixture.nativeElement.querySelector('.blank-hint').textContent)
+        .toContain('Leave a field blank and the AI fills it in');
+    });
+  });
 });

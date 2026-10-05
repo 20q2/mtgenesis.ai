@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+import card_fill
 from storage import Storage
 
 TextFn = Callable[[str, dict], "str | None"]
@@ -50,7 +51,8 @@ RenderFn = Callable[[dict, "str | None", "str | None", "str | None"], "tuple[dic
 Production: app.finalize_card. force_name is the set's commander_name for set cards, else None."""
 
 BriefFn = Callable[[dict, int, list], "list[dict] | None"]
-"""(card_params, count, avoid briefs) -> count briefs, or None. Production: director.write_briefs."""
+"""(card_params, count, avoid briefs[, fill_fields=]) -> count briefs, or None. Production:
+director.write_briefs. A single card with blank fields also gets them filled (card_fill.py)."""
 
 IDLE_SLEEP_SECONDS = 0.2
 AVERAGE_WINDOW = 10
@@ -192,12 +194,23 @@ class GenerationQueue:
                 group_ids = [c["id"] for c in group]
                 # Versions already briefed (an earlier call, or a reroll's siblings) are avoided.
                 avoid = [c["brief"] for c in others if c.get("brief") and c["id"] not in group_ids]
+            # A single card's blank fields (create page) are chosen in the same call;
+            # commander sets keep their fixed rules.
+            fill_fields = [] if card.get("set_id") else card_fill.blank_fields(card["card_params"])
             try:
-                briefs = self.brief_fn(dict(card["card_params"]), len(group), avoid)
+                if fill_fields:
+                    briefs = self.brief_fn(dict(card["card_params"]), len(group), avoid,
+                                           fill_fields=fill_fields)
+                else:
+                    briefs = self.brief_fn(dict(card["card_params"]), len(group), avoid)
             except Exception as exc:
                 _log(f"🎬 Director failed for {card_id}: {_error_detail(exc)}")
                 briefs = None
             if briefs is not None and len(briefs) == len(group):
+                fill = briefs[0].pop("fill", None) if fill_fields else None
+                if fill:
+                    self.storage.set_card_params(
+                        card_id, card_fill.apply_fill(card["card_params"], fill))
                 for member, member_brief in zip(group, briefs):
                     self.storage.set_card_brief(member["id"], member_brief)
         finally:

@@ -1,4 +1,10 @@
 <form [formGroup]="cardForm" (ngSubmit)="onSubmit()" class="card-form">
+  <p class="blank-hint">
+    <span class="material-icons" aria-hidden="true">auto_awesome</span>
+    Leave a field blank and the AI fills it in: name, cost, type, subtype and power/toughness
+    (not the supertype).
+  </p>
+
   <!-- Name + mana cost: the card's header line -->
   <div class="form-row">
     <div class="field" *ngIf="showName">

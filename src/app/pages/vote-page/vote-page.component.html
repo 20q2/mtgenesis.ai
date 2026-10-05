@@ -9,7 +9,7 @@
   <!-- No open event -->
   <section *ngIf="event === null" class="panel empty-state">
     <h2 class="page-title">No event open</h2>
-    <p class="muted">Voting starts when the host opens tonight's event.</p>
+    <p class="muted">Voting starts when the host opens the event on the event night.</p>
     <p><a routerLink="/events" class="night-link">See past events</a></p>
   </section>
 
@@ -26,7 +26,7 @@
 
       <ul *ngIf="!isClosed" class="how-to-vote" aria-label="How to vote">
         <li><span class="material-icons" aria-hidden="true">how_to_vote</span>
-          <span><strong>Pick one favorite version of each commander.</strong> The version with the most votes is legal tonight.</span></li>
+          <span><strong>Pick one favorite version of each commander.</strong> The version with the most votes is legal on the event night.</span></li>
         <li><span class="material-icons" aria-hidden="true">balance</span>
           <span><strong>Vote in good faith:</strong> pick the version that's balanced for fair games, not just the strongest.</span></li>
         <li><span class="material-icons" aria-hidden="true">person</span>
@@ -34,14 +34,14 @@
         <li><span class="material-icons" aria-hidden="true">edit</span>
           <span>You can change a vote until the host closes voting.</span></li>
       </ul>
-      <p class="muted" *ngIf="isClosed">Voting is closed and the results are final. The winning versions are legal tonight.</p>
+      <p class="muted" *ngIf="isClosed">Voting is closed and the results are final. The winning versions are legal on the event night.</p>
 
       <p *ngIf="!isClosed && progress.total" class="vote-progress" aria-live="polite">
         You've voted on <strong>{{ progress.voted }}</strong> of {{ progress.total }} commanders
       </p>
     </section>
 
-    <!-- After the vote: what I play with tonight -->
+    <!-- After the vote: what I play with on the event night -->
     <section *ngIf="isClosed && legal.length" class="panel my-legal">
       <h3 class="section-title">Your legal commanders</h3>
       <ul class="legal-list">
@@ -58,7 +58,7 @@
       </ul>
     </section>
 
-    <app-winners-banner *ngIf="isClosed" [sets]="ev.sets" title="Tonight's legal commanders"></app-winners-banner>
+    <app-winners-banner *ngIf="isClosed" [sets]="ev.sets" title="Legal commanders on the event night"></app-winners-banner>
 
     <div *ngIf="error" class="alert alert-error" role="alert">
       <span class="material-icons">error</span>

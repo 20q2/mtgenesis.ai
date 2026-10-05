@@ -17,54 +17,60 @@
       <a routerLink="/vote" class="btn btn-gold">Go vote</a>
     </div>
 
-    <ul class="ledger" aria-label="The rules">
-      <li class="ledger-item">
-        <span class="lg-label">Mana</span>
-        <span class="lg-value lg-mana">
-          <span *ngFor="let cmc of cmcs" class="lg-mana-slot" [class.done]="states[cmc]?.status === 'locked'"
-                [class.started]="!!states[cmc]">
-            <i class="ms ms-cost ms-shadow ms-{{ cmc }}" aria-hidden="true"></i>
-            <span *ngIf="states[cmc]?.status === 'locked'" class="material-icons lg-check" aria-hidden="true">check</span>
-            <span class="sr-only">{{ cmc }} CMC: {{ summary(cmc) }}</span>
-          </span>
-        </span>
-        <span class="lg-note">One at each mana value. Multicolor is fine.</span>
-      </li>
-      <li class="ledger-item">
-        <span class="lg-label">Type</span>
-        <span class="lg-value">Legendary Creature or Vehicle</span>
-        <span class="lg-note">Crew cost on Vehicles comes from the AI</span>
-      </li>
-      <li class="ledger-item">
-        <span class="lg-label">Power / toughness</span>
-        <span class="lg-value">CMC + 1 points</span>
-        <span class="lg-note">Vehicles +2 · spend fewer if you like · no X or *</span>
-      </li>
-      <li class="ledger-item">
-        <span class="lg-label">Rarity</span>
-        <span class="lg-value rarity-track">
-          <span *ngFor="let r of rarities" class="track rarity-{{ r.value }}"
-                [class.held]="rarityHolders(r.value).length > 0">
-            <span class="gem" aria-hidden="true"></span>
-            {{ r.label }}
-            <span class="track-holder">
-              <ng-container *ngIf="rarityHolders(r.value).length; else open">
-                <ng-container *ngFor="let h of rarityHolders(r.value); let last = last">
-                  <span class="material-icons" *ngIf="h.locked" aria-label="locked">lock</span>{{ h.cmc }} CMC{{ last ? '' : ' & ' }}
-                </ng-container>
-              </ng-container>
-              <ng-template #open>open</ng-template>
+    <details class="rules">
+      <summary class="rules-toggle">
+        <span class="material-icons rules-chevron" aria-hidden="true">expand_more</span>
+        The rules
+      </summary>
+      <ul class="ledger" aria-label="The rules">
+        <li class="ledger-item">
+          <span class="lg-label">Mana</span>
+          <span class="lg-value lg-mana">
+            <span *ngFor="let cmc of cmcs" class="lg-mana-slot" [class.done]="states[cmc]?.status === 'locked'"
+                  [class.started]="!!states[cmc]">
+              <i class="ms ms-cost ms-shadow ms-{{ cmc }}" aria-hidden="true"></i>
+              <span *ngIf="states[cmc]?.status === 'locked'" class="material-icons lg-check" aria-hidden="true">check</span>
+              <span class="sr-only">{{ cmc }} CMC: {{ summary(cmc) }}</span>
             </span>
           </span>
-        </span>
-        <span class="lg-note">One Uncommon, one Rare, one Mythic</span>
-      </li>
-      <li class="ledger-item">
-        <span class="lg-label">Versions</span>
-        <span class="lg-value">3 per commander</span>
-        <span class="lg-note">No tweaking</span>
-      </li>
-    </ul>
+          <span class="lg-note">One at each mana value. Multicolor is fine.</span>
+        </li>
+        <li class="ledger-item">
+          <span class="lg-label">Type</span>
+          <span class="lg-value">Legendary Creature or Vehicle</span>
+          <span class="lg-note">Crew cost on Vehicles comes from the AI</span>
+        </li>
+        <li class="ledger-item">
+          <span class="lg-label">Power / toughness</span>
+          <span class="lg-value">CMC + 1 points</span>
+          <span class="lg-note">Vehicles +2 · spend fewer if you like · no X or *</span>
+        </li>
+        <li class="ledger-item">
+          <span class="lg-label">Rarity</span>
+          <span class="lg-value rarity-track">
+            <span *ngFor="let r of rarities" class="track rarity-{{ r.value }}"
+                  [class.held]="rarityHolders(r.value).length > 0">
+              <span class="gem" aria-hidden="true"></span>
+              {{ r.label }}
+              <span class="track-holder">
+                <ng-container *ngIf="rarityHolders(r.value).length; else open">
+                  <ng-container *ngFor="let h of rarityHolders(r.value); let last = last">
+                    <span class="material-icons" *ngIf="h.locked" aria-label="locked">lock</span>{{ h.cmc }} CMC{{ last ? '' : ' & ' }}
+                  </ng-container>
+                </ng-container>
+                <ng-template #open>open</ng-template>
+              </span>
+            </span>
+          </span>
+          <span class="lg-note">One Uncommon, one Rare, one Mythic</span>
+        </li>
+        <li class="ledger-item">
+          <span class="lg-label">Versions</span>
+          <span class="lg-value">3 per commander</span>
+          <span class="lg-note">No tweaking</span>
+        </li>
+      </ul>
+    </details>
   </section>
 
   <div *ngIf="error" class="alert alert-error" role="alert">

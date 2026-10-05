@@ -118,6 +118,10 @@ It needs the GPU, so run it only when the site is not live.
 - Lint errors and over-budget cards are no worse than the baseline.
 - Average card time rises by at most about 4 s.
 
+## 7a. Filling the blanks (added 2026-10-05)
+
+On the create page (single cards, never commander sets) a player can leave any of name, mana cost, type, subtype and power/toughness empty. `card_fill.blank_fields` lists them (a Land needs no cost; only creatures and Vehicles need a body); `write_briefs(..., fill_fields=...)` asks for them in the same call, as a `fill` object beside the brief, and the facts show those fields as blank instead of "Untitled" / `{0}`. `card_fill.clean_fill` keeps only valid values; the queue merges them into the card's params (`apply_fill` also sets colors and mana value from a filled cost) before text and art, so everything downstream sees a complete card. A value that fails validation, or a failed director call, leaves the field as before. Supertype is never filled.
+
 ## 8. Testing (pytest, no GPU, no live Ollama)
 
 - **`tests/test_director.py`**, with a stubbed Ollama client:

@@ -103,6 +103,14 @@ describe('SetBuilderPageComponent', () => {
     expect(rules).toContain('No tweaking');
   });
 
+  it('folds the rules away until opened', () => {
+    setup([], openEvent);
+    const details = fixture.nativeElement.querySelector('details.rules') as HTMLDetailsElement;
+    expect(details.open).toBeFalse();
+    expect(details.querySelector('summary')!.textContent).toContain('The rules');
+    expect(details.querySelector('.ledger')).not.toBeNull();
+  });
+
   it('tracks which commander holds each rarity', () => {
     setup([three(), five()], openEvent);
     expect(component.rarityHolders('uncommon')).toEqual([{ cmc: 3, locked: false }]);

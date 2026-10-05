@@ -236,3 +236,41 @@ def test_people_are_described_by_clothing():
 
 def test_subject_leads_with_who_they_are():
     assert "age and gender" in director.SYSTEM_PROMPT
+
+
+# ----- filling the blanks (card_fill.py) -----
+
+BLANK = {"name": "", "type": "", "supertype": "", "subtype": "", "colors": [], "manaCost": "",
+         "cmc": 0, "rarity": "rare"}
+FIELDS = ["name", "manaCost", "type", "subtype", "power", "toughness"]
+
+
+def reply_with_fill(fill, briefs=None):
+    return json.dumps({"briefs": briefs or [brief()], "fill": fill})
+
+
+def test_blank_fields_are_asked_for_and_returned_on_the_brief():
+    client = StubClient(reply_with_fill({"name": "Ashen Vigil", "manaCost": "{2}{B}", "type": "Creature",
+                                         "subtype": "Human Cleric", "power": "2", "toughness": "3"}))
+    briefs = write_briefs(BLANK, 1, [], client, "qwen3:8b", fill_fields=FIELDS)
+    assert briefs[0]["fill"] == {"name": "Ashen Vigil", "manaCost": "{2}{B}", "type": "Creature",
+                                 "subtype": "Human Cleric", "power": "2", "toughness": "3"}
+    call = client.calls[0]
+    assert set(call["format"]["properties"]["fill"]["properties"]) == set(FIELDS)
+    user = call["messages"][1]["content"]
+    assert "Name: (blank" in user and "Some of this card's fields are blank" in user
+
+
+def test_an_invalid_fill_is_dropped_but_the_brief_is_kept():
+    client = StubClient(reply_with_fill({"name": "x" * 40, "manaCost": "{Q}", "type": "Wizard",
+                                         "subtype": "", "power": "*", "toughness": "*"}))
+    briefs = write_briefs(BLANK, 1, [], client, "qwen3:8b", fill_fields=FIELDS)
+    assert briefs[0]["fill"] == {}
+    assert briefs[0]["mechanic"]
+
+
+def test_no_fill_is_asked_for_without_blanks():
+    client = StubClient([brief()])
+    briefs = write_briefs(CARD, 1, [], client, "qwen3:8b")
+    assert "fill" not in briefs[0]
+    assert "fill" not in client.calls[0]["format"]["properties"]

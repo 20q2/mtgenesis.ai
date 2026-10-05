@@ -1,3 +1,4 @@
+import { CardFormComponent } from '../../components/card-form/card-form.component';
 import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -94,6 +95,16 @@ describe('CreatePageComponent (jobs)', () => {
     expect(component.isGenerating).toBeFalse();
     expect(component.currentCard.cardImageUrl).toBe(`${environment.apiUrl}/api/v1/media/cards/j-1.png`);
     expect(component.successMessage).toContain('generated');
+  });
+
+  it('fills the form fields the player left blank with what the AI chose', () => {
+    const form = jasmine.createSpyObj<CardFormComponent>('CardFormComponent', ['fillBlanks', 'setGenerating']);
+    component.cardFormComponent = form;
+    gen.submit.and.returnValue(of({ setId: null, cards: [cardView({ id: 'j-1' })] }));
+    component.generateCard(card);
+    const done = doneCard({ id: 'j-1' });
+    watch$.next(done);
+    expect(form.fillBlanks).toHaveBeenCalledOnceWith(done.card!);
   });
 
   it('offers Share once the card is done and toggles it', () => {

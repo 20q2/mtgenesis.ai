@@ -56,6 +56,46 @@ app-commander-panel[hidden] {
   }
 }
 
+/* The rules fold away (closed by default) behind one slim header row. */
+.rules-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+
+  &:hover {
+    color: var(--text);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--line-gold);
+    outline-offset: 2px;
+    border-radius: var(--r-md);
+  }
+}
+
+.rules-chevron {
+  font-size: 1.15rem;
+  transition: transform var(--dur) var(--ease-out);
+
+  .rules[open] & {
+    transform: rotate(180deg);
+  }
+}
+
 /* Five rules: one even row on wide screens, a tidy 2-column grid on medium, a list on phones. */
 .ledger {
   display: grid;

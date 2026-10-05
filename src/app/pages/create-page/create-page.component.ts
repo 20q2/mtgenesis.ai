@@ -161,6 +161,10 @@ export class CreatePageComponent implements OnInit, OnDestroy {
         this.jobView = view;
         if (view.status === 'done') {
           this.currentCard = this.generation.toCard(view, base);
+          // Blank fields were chosen by the AI: show them in the form so they can be tweaked.
+          if (view.card) {
+            this.cardFormComponent?.fillBlanks(view.card);
+          }
           this.showSuccess('Card generated successfully! It is saved in your Gallery.');
         } else if (view.status === 'failed') {
           this.error = `Failed to generate card: ${view.error || 'unknown error'}`;

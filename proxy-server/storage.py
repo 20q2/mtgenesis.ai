@@ -373,6 +373,12 @@ class Storage:
                          "ORDER BY created_at DESC, rowid DESC", (user_id,))
         return [self._decode_card(r) for r in rows]
 
+    def set_card_params(self, card_id: str, card_params: dict) -> None:
+        """Replace a card's params (the director filled its blank fields before text and art)."""
+        with self._tx() as conn:
+            conn.execute("UPDATE cards SET card_params_json = ? WHERE id = ?",
+                         (_dumps(card_params), card_id))
+
     def set_card_brief(self, card_id: str, brief: dict | None) -> None:
         """Store the director's brief for a card (None clears it)."""
         with self._tx() as conn:

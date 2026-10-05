@@ -203,7 +203,7 @@ describe('VotePageComponent', () => {
     expect(banner.textContent).toContain('Grimbold the Unbowed');
     expect(banner.textContent).toContain('Tied');
     expect(banner.textContent).toContain('Ask the host to pick');
-    expect(banner.textContent).toContain("Tonight's legal commanders");
+    expect(banner.textContent).toContain("Legal commanders on the event night");
     expect(banner.textContent).toContain('One winning version per commander');
   });
 

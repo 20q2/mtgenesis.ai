@@ -3,7 +3,7 @@ import { setOutcome } from './winners';
 
 /**
  * The shape of an AI Night, as the rule sheet runs it: build three commanders, lock each in
- * (posting its 3 versions), everyone votes, and the winning versions are legal tonight.
+ * (posting its 3 versions), everyone votes, and the winning versions are legal on the event night.
  */
 export type NightStepId = 'build' | 'lock' | 'vote' | 'play';
 
@@ -11,7 +11,7 @@ export const NIGHT_STEPS: { id: NightStepId; title: string; text: string }[] = [
   { id: 'build', title: 'Build', text: 'Three commanders: one at 3, 4 and 5 mana, 3 versions each' },
   { id: 'lock', title: 'Lock in', text: 'Lock in each commander\'s 3 versions for the vote' },
   { id: 'vote', title: 'Vote', text: 'Pick the fairest version of every commander' },
-  { id: 'play', title: 'Play', text: 'The version with the most votes is legal tonight' }
+  { id: 'play', title: 'Play', text: 'The version with the most votes is legal on the event night' }
 ];
 
 /** Where a player is: building until all 3 exist, locking in until all 3 are, then voting. */

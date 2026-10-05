@@ -1,6 +1,6 @@
 <section class="winners-banner">
   <h3 class="winners-title"><span class="material-icons" aria-hidden="true">emoji_events</span> {{ title }}</h3>
-  <p class="muted winners-sub">One winning version per commander: the one with the most votes is legal tonight.</p>
+  <p class="muted winners-sub">One winning version per commander: the one with the most votes is legal on the event night.</p>
   <p *ngIf="!sets.length" class="muted">No commanders were locked in.</p>
   <div *ngFor="let group of sets | cmcGroups; trackBy: trackGroup" class="winners-group">
     <h4 class="cmc-heading">{{ group.label }}</h4>

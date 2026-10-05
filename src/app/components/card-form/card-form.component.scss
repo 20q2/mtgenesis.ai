@@ -240,3 +240,19 @@
   }
 }
 
+
+/* Blank fields are filled in by the AI (proxy-server/card_fill.py) */
+.blank-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--text-muted);
+
+  .material-icons {
+    flex: none;
+    font-size: 1.05rem;
+    color: var(--accent-text);
+  }
+}
