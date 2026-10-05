@@ -16,36 +16,52 @@
     <!-- Header: what this is and how it works -->
     <section class="panel pool-header">
       <div class="pool-heading">
-        <div>
-          <p class="eyebrow">Knowledge Pool</p>
-          <h2 class="page-title">{{ p.name }}</h2>
-        </div>
+        <h2 class="page-title">{{ p.name }}</h2>
         <span class="badge" [class.badge-gold]="isOpen" [class.badge-muted]="!isOpen">
           {{ isOpen ? 'Submissions & voting open' : 'Closed' }}
         </span>
       </div>
 
-      <p class="rules-line">
-        Colorless or mono-colored cards only · up to {{ p.maxEntriesPerUser }} per player ·
-        <strong class="medal-word gold">gold</strong> 3 / <strong class="medal-word silver">silver</strong> 2 /
-        <strong class="medal-word bronze">bronze</strong> 1, never your own card · the top half make the pool
+      <p class="pool-lede">
+        The Knowledge Pool is a shared set of custom cards: every card that makes the pool can go in anyone's deck
+        at the event. Everyone enters cards, everyone votes, and the best-voted cards make it.
       </p>
-      <p class="muted" *ngIf="isOpen">
-        Submit a finished card from <a routerLink="/create" class="night-link">Create</a> or your
-        <a routerLink="/gallery" class="night-link">Gallery</a>.
-      </p>
+
+      <ul class="how-it-works" aria-label="How it works">
+        <li>
+          <span class="material-icons" aria-hidden="true">style</span>
+          <span><strong>Enter up to {{ p.maxEntriesPerUser }} of your finished cards</strong>, colorless or one color,
+            from <a routerLink="/create" class="night-link">Create</a> or your
+            <a routerLink="/gallery" class="night-link">Gallery</a>.</span>
+        </li>
+        <li>
+          <span class="material-icons" aria-hidden="true">military_tech</span>
+          <span><strong>You have one gold, one silver and one bronze for the whole pool</strong>
+            (3, 2 and 1 points), never your own card. Giving a medal again moves it.</span>
+        </li>
+        <li>
+          <span class="material-icons" aria-hidden="true">balance</span>
+          <span><strong>Vote in good faith:</strong> medal the cards you'd want everyone to have: fun and balanced,
+            not broken. The power check below flags cards that look too strong for their cost.</span>
+        </li>
+        <li>
+          <span class="material-icons" aria-hidden="true">workspace_premium</span>
+          <span><strong>As many cards as half the players make the pool</strong> (8 players → the top 4 cards).
+            Cards tied at the line are in too. A card with no medals never does.</span>
+        </li>
+      </ul>
       <p class="muted" *ngIf="!isOpen">This pool is closed. The cards above the pool line are legal for everyone at the event.</p>
 
       <div class="stats">
-        <span class="stat"><strong>{{ p.submitters }} {{ p.submitters === 1 ? 'player' : 'players' }} → top {{ p.cutoff }}</strong> make the pool</span>
+        <span class="stat"><strong>{{ p.submitters }} {{ p.submitters === 1 ? 'player' : 'players' }} → top {{ p.cutoff }} {{ p.cutoff === 1 ? 'card' : 'cards' }}</strong> make the pool</span>
         <span class="stat" *ngIf="isOpen">Your entries {{ p.myEntryCount }} / {{ p.maxEntriesPerUser }}</span>
         <span class="stat my-medals" *ngIf="isOpen" aria-label="Your medals">
           <span *ngFor="let m of medals"
                 class="my-medal"
                 [ngClass]="m.medal"
-                [class.given]="medalGiven(m.medal)"
-                [title]="medalGiven(m.medal) ? 'Your ' + m.medal + ' is given' : 'Your ' + m.medal + ' is still free'">
+                [class.given]="medalGiven(m.medal)">
             <span class="material-icons" aria-hidden="true">military_tech</span>
+            <span class="medal-state">{{ m.label }} {{ medalGiven(m.medal) ? 'given' : 'free' }}</span>
           </span>
         </span>
       </div>
@@ -78,7 +94,17 @@
     </section>
 
     <section class="panel">
-      <h3 class="section-title">{{ isOpen ? 'Entries' : 'All entries' }}</h3>
+      <div class="entries-head">
+        <h3 class="section-title">{{ isOpen ? 'Entries' : 'All entries' }}</h3>
+        <p class="power-key">
+          Power check, a rough estimate of the rules text against the card's cost:
+          <span class="power power-fair"><span class="material-icons" aria-hidden="true">balance</span> Fair</span>
+          <span class="power power-pushed"><span class="material-icons" aria-hidden="true">warning</span> Pushed</span>
+          (about 1 mana too strong)
+          <span class="power power-over"><span class="material-icons" aria-hidden="true">warning</span> Over the curve</span>
+          (2 or more)
+        </p>
+      </div>
       <p class="muted no-entries" *ngIf="!p.entries.length">
         No cards yet. <a routerLink="/create" class="night-link">Create one</a> and submit it.
       </p>

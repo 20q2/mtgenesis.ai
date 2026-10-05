@@ -65,12 +65,46 @@ describe('PoolPageComponent', () => {
   const tileIds = () => Array.from(el().querySelectorAll('.entries [data-entry-id]'))
     .map(t => (t as HTMLElement).dataset['entryId']);
 
-  it('explains the rules and how many cards make the pool', () => {
+  it('says what the Knowledge Pool is', () => {
     setup(contested());
-    const text = el().textContent!;
-    expect(text).toContain('Colorless or mono-colored cards only');
-    expect(text).toContain('4 players → top 2 make the pool');
+    expect(el().querySelector('.pool-lede')!.textContent).toContain("can go in anyone's deck");
+    expect(el().querySelector('.eyebrow')).toBeNull();
+  });
+
+  it('explains how it works: entries, medals, good faith and the cutoff', () => {
+    setup(contested());
+    const rules = el().querySelector('.how-it-works')!.textContent!.replace(/\s+/g, ' ');
+    expect(rules).toContain('Enter up to 3 of your finished cards');
+    expect(rules).toContain('colorless or one color');
+    expect(rules).toContain('one gold, one silver and one bronze for the whole pool');
+    expect(rules).toContain('never your own');
+    expect(rules).toContain('Giving a medal again moves it');
+    expect(rules).toContain('good faith');
+    expect(rules).toContain('As many cards as half the players make the pool');
+    expect(rules).toContain('A card with no medals never does');
+    expect(rules).not.toContain('top half');
+  });
+
+  it('counts players and the cards that make the pool, and my entries', () => {
+    setup(contested());
+    const text = el().textContent!.replace(/\s+/g, ' ');
+    expect(text).toContain('4 players → top 2 cards make the pool');
     expect(text).toContain('Your entries 1 / 3');
+  });
+
+  it('labels my medals as given or still free', () => {
+    setup(contested());
+    const chips = Array.from(el().querySelectorAll('.my-medal .medal-state')).map(c => c.textContent!.trim());
+    expect(chips).toEqual(['Gold given', 'Silver free', 'Bronze free']);
+  });
+
+  it('explains the power check', () => {
+    setup(contested());
+    const key = el().querySelector('.power-key')!.textContent!.replace(/\s+/g, ' ');
+    expect(key).toContain('Fair');
+    expect(key).toContain('Pushed');
+    expect(key).toContain('Over the curve');
+    expect(key).toContain('rough estimate');
   });
 
   it('lists entries in the server order with the pool line after the last card that is in', () => {

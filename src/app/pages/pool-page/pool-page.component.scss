@@ -26,12 +26,66 @@
   gap: 0.5rem 0.75rem;
 }
 
-.eyebrow {
-  font-family: var(--font-caps);
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent-text);
+.pool-lede {
+  max-width: 70ch;
+  margin: 0.4rem 0 0.25rem;
+  color: var(--text-muted);
+}
+
+.how-it-works {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 1.5rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+
+  @media (max-width: 720px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    padding: 0.55rem 0;
+    border-top: 1px solid var(--line);
+    font-size: 0.92rem;
+    color: var(--text-muted);
+  }
+
+  strong {
+    color: var(--text);
+  }
+
+  .material-icons {
+    flex: none;
+    font-size: 1.15rem;
+    color: var(--accent-text);
+  }
+}
+
+.entries-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.75rem;
+
+  .section-title {
+    margin: 0;
+  }
+}
+
+.power-key {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.45rem;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .rules-line {
@@ -70,7 +124,10 @@
 
 .my-medal {
   display: inline-flex;
-  opacity: 0.35;
+  align-items: center;
+  gap: 0.15rem;
+  font-size: 0.82rem;
+  opacity: 0.55;
 
   .material-icons {
     font-size: 1.15rem;
