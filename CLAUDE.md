@@ -114,9 +114,9 @@ Asset images are cached in memory. `cairosvg`/`wand` are optional imports, and `
 
 ### Deployment
 
-- Production runs the Flask server on a local GPU machine, exposed through ngrok. The frontend is served from GitHub Pages (`gh-pages` branch, https://20q2.github.io/mtgenesis.ai/).
+- Production runs the Flask server on a local GPU machine, exposed through a free Cloudflare quick tunnel (`cloudflared`, a new `*.trycloudflare.com` URL each launch). It replaced ngrok, whose free plan caps HTTP requests per month and ran out during an event. The frontend is served from GitHub Pages (`gh-pages` branch, https://20q2.github.io/mtgenesis.ai/).
 - `Start MTGenesis.cmd` → `deploy/start-site.ps1` does the whole launch:
-  - starts Ollama, Flask and ngrok (reusing any already running)
+  - starts Ollama, Flask and the tunnel (reusing any already running; cloudflared's metrics server on 127.0.0.1:20241 reports the URL via `/quicktunnel`)
   - pushes `api-config.json` with the live tunnel URL to `gh-pages`
   - rebuilds the app with `--base-href /mtgenesis.ai/` only when the frontend source differs from the commit recorded in `gh-pages/build-info.json`
   - uses `.deploy/` (gitignored) as its scratch space

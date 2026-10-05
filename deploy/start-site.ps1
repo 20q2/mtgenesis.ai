@@ -1,13 +1,15 @@
 <#
 .SYNOPSIS
-    One-click launcher for MTGenesis.AI: starts Ollama, the Flask backend and an ngrok
-    tunnel, then publishes the site to GitHub Pages pointing at the live tunnel.
+    One-click launcher for MTGenesis.AI: starts Ollama, the Flask backend and a public
+    tunnel (a free Cloudflare quick tunnel), then publishes the site to GitHub Pages pointing
+    at the live tunnel.
 
 .DESCRIPTION
     Run it by double-clicking "Start MTGenesis.cmd" in the repo root. Steps:
       1. Ollama      - reuses a running server or starts `ollama serve`; pulls the model if missing.
       2. Backend     - reuses a healthy server on :5000 or opens a "MTGenesis backend" window.
-      3. ngrok       - reuses a tunnel to :5000 or opens a "MTGenesis tunnel" window.
+      3. Tunnel      - reuses a tunnel to :5000 or opens a "MTGenesis tunnel" window
+                       (a Cloudflare quick tunnel; the URL is new each launch).
       4. Publish     - pushes the gh-pages branch: api-config.json always carries the live
                        tunnel URL; the Angular app is rebuilt only when the frontend source
                        changed since the last deploy (or with -Rebuild).
@@ -20,11 +22,6 @@
 .PARAMETER NoPublish
     Start everything locally and print the tunnel URL, but don't push to GitHub Pages.
 
-.PARAMETER NgrokDomain
-    Optional static ngrok domain (e.g. my-name.ngrok-free.app; every free account gets one at
-    https://dashboard.ngrok.com/domains). With it the URL never changes between runs.
-    Defaults to $env:MTGENESIS_NGROK_DOMAIN.
-
 .PARAMETER CreateShortcut
     Put an "MTGenesis" shortcut on the desktop that runs this launcher, then exit.
 #>
@@ -32,7 +29,6 @@
 param(
     [switch]$Rebuild,
     [switch]$NoPublish,
-    [string]$NgrokDomain = $env:MTGENESIS_NGROK_DOMAIN,
     [switch]$CreateShortcut
 )
 
@@ -53,7 +49,10 @@ $OllamaUrl   = 'http://127.0.0.1:11434'
 $OllamaModel = 'qwen3:8b'
 $configMatch = Select-String -Path (Join-Path $ServerDir 'config.py') -Pattern '"MTG_TEXT_MODEL",\s*"([^"]+)"' -ErrorAction SilentlyContinue
 if ($configMatch) { $OllamaModel = $configMatch.Matches[0].Groups[1].Value }
-$NgrokApi    = 'http://127.0.0.1:4040/api/tunnels'
+# cloudflared's metrics server on a fixed port: /quicktunnel reports the tunnel's hostname,
+# which also lets a second run find and reuse a tunnel that is already up.
+$CloudflaredMetrics = '127.0.0.1:20241'
+$CloudflaredLog     = Join-Path $DeployDir 'cloudflared.log'
 # Frontend inputs; a change to any of these since the last deploy triggers a rebuild.
 $FrontendPaths = @('src', 'angular.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.app.json')
 
@@ -179,79 +178,73 @@ function Start-Backend {
     if (-not $up) { throw 'The backend did not come up. Check the "MTGenesis backend" window for the error.' }
 }
 
-function Get-NgrokExe {
+function Get-CloudflaredExe {
     $candidates = @(
-        "$env:LOCALAPPDATA\Microsoft\WinGet\Links\ngrok.exe",
-        "$env:ProgramData\chocolatey\bin\ngrok.exe",
-        "$env:USERPROFILE\scoop\shims\ngrok.exe"
+        "${env:ProgramFiles(x86)}\cloudflared\cloudflared.exe",
+        "$env:ProgramFiles\cloudflared\cloudflared.exe",
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Links\cloudflared.exe",
+        "$env:ProgramData\chocolatey\bin\cloudflared.exe",
+        "$env:USERPROFILE\scoop\shims\cloudflared.exe"
     )
-    $ngrok = Find-Exe 'ngrok' $candidates
-    if ($ngrok) { return $ngrok }
-
+    $exe = Find-Exe 'cloudflared' $candidates
+    if ($exe) { return $exe }
     $pkgRoot = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
     if (Test-Path $pkgRoot) {
-        $found = Get-ChildItem $pkgRoot -Filter 'ngrok.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        $found = Get-ChildItem $pkgRoot -Filter 'cloudflared.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) { return $found.FullName }
     }
     return $null
 }
 
-function Initialize-Ngrok {
-    $ngrok = Get-NgrokExe
-    if (-not $ngrok) {
-        Write-Warn 'ngrok is not installed.'
-        $answer = Read-Host '    Install it now with winget? [Y/n]'
-        if ($answer -match '^[nN]') { throw 'ngrok is required. Install it from https://ngrok.com/download and run this again.' }
-        & winget install --id Ngrok.Ngrok --exact --accept-source-agreements --accept-package-agreements | Out-Host
-        Update-PathFromRegistry
-        $ngrok = Get-NgrokExe
-        if (-not $ngrok) { throw 'ngrok installed but could not be found. Open a new window and run this again.' }
-    }
-
-    # The agent reads the token from its config file or NGROK_AUTHTOKEN.
-    $configFiles = @("$env:LOCALAPPDATA\ngrok\ngrok.yml", "$env:USERPROFILE\.config\ngrok\ngrok.yml", "$env:USERPROFILE\.ngrok2\ngrok.yml")
-    $hasToken = [bool]$env:NGROK_AUTHTOKEN
-    foreach ($f in $configFiles) {
-        if ((Test-Path $f) -and (Select-String -Path $f -Pattern '^\s*authtoken:\s*\S' -Quiet)) { $hasToken = $true }
-    }
-    if (-not $hasToken) {
-        Write-Warn 'ngrok needs your account authtoken (one-time setup).'
-        Start-Process 'https://dashboard.ngrok.com/get-started/your-authtoken'
-        $token = Read-Host '    Paste the authtoken from the page that just opened'
-        if (-not $token.Trim()) { throw 'No ngrok authtoken given.' }
-        & $ngrok config add-authtoken $token.Trim() | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw 'ngrok config add-authtoken failed.' }
-    }
-    return $ngrok
+function Initialize-Cloudflared {
+    $exe = Get-CloudflaredExe
+    if ($exe) { return $exe }
+    Write-Warn 'cloudflared is not installed (free, no account needed).'
+    $answer = Read-Host '    Install it now with winget? [Y/n]'
+    if ($answer -match '^[nN]') { throw 'cloudflared is required. Install it from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ and run this again.' }
+    & winget install --id Cloudflare.cloudflared --exact --accept-source-agreements --accept-package-agreements | Out-Host
+    Update-PathFromRegistry
+    $exe = Get-CloudflaredExe
+    if (-not $exe) { throw 'cloudflared installed but could not be found. Open a new window and run this again.' }
+    return $exe
 }
 
-function Get-TunnelUrl {
-    try { $t = Invoke-RestMethod $NgrokApi -TimeoutSec 2 } catch { return $null }
-    foreach ($tun in $t.tunnels) {
-        if ($tun.public_url -like 'https://*' -and $tun.config.addr -match ":$BackendPort$") { return $tun.public_url }
+# The quick tunnel's https URL: from cloudflared's metrics server, else from its log file.
+function Get-CloudflareTunnelUrl {
+    try {
+        $q = Invoke-RestMethod "http://$CloudflaredMetrics/quicktunnel" -TimeoutSec 2
+        if ($q.hostname) { return "https://$($q.hostname)" }
+    } catch { }
+    if (Test-Path $CloudflaredLog) {
+        $m = Select-String -Path $CloudflaredLog -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' -AllMatches -ErrorAction SilentlyContinue |
+            Select-Object -Last 1
+        if ($m) { return $m.Matches[-1].Value }
     }
     return $null
 }
 
 function Start-Tunnel {
-    Write-Step 'ngrok tunnel'
-    $url = Get-TunnelUrl
+    Write-Step 'Cloudflare tunnel'
+    $url = $null
+    try {
+        $q = Invoke-RestMethod "http://$CloudflaredMetrics/quicktunnel" -TimeoutSec 2
+        if ($q.hostname) { $url = "https://$($q.hostname)" }
+    } catch { }
     if ($url) {
         Write-Ok "Already running - reusing $url"
     } else {
-        $ngrok = Initialize-Ngrok
-        $ngrokArgs = "http $BackendPort"
-        if ($NgrokDomain) { $ngrokArgs += ' --url=https://' + ($NgrokDomain -replace '^https?://', '').TrimEnd('/') }
-        $proc = Start-Window 'MTGenesis tunnel' $ngrok $ngrokArgs $RepoRoot
-        $url = Wait-For 'the tunnel' { Get-TunnelUrl } 60 { Test-ChildRunning $proc 'ngrok.exe' }
-        if (-not $url) {
-            throw 'ngrok did not open a tunnel. Check the "MTGenesis tunnel" window (a free account allows one agent at a time; close any other ngrok).'
-        }
+        $exe = Initialize-Cloudflared
+        New-Item -ItemType Directory -Force $DeployDir | Out-Null
+        if (Test-Path $CloudflaredLog) { Remove-Item $CloudflaredLog -Force }
+        $cfArgs = "tunnel --no-autoupdate --metrics $CloudflaredMetrics --logfile `"$CloudflaredLog`" --url http://localhost:$BackendPort"
+        $proc = Start-Window 'MTGenesis tunnel' $exe $cfArgs $RepoRoot
+        $url = Wait-For 'the tunnel' { Get-CloudflareTunnelUrl } 90 { Test-ChildRunning $proc 'cloudflared.exe' }
+        if (-not $url) { throw 'cloudflared did not open a tunnel. Check the "MTGenesis tunnel" window for the error.' }
         Write-Ok $url
     }
-    if (-not (Test-Http "$url/health" @{ 'ngrok-skip-browser-warning' = 'true' })) {
-        throw "The tunnel is up but $url/health does not answer."
-    }
+    # A new quick-tunnel hostname can take a few seconds to resolve, so give it a minute.
+    $ok = Wait-For 'the backend through the tunnel' { Test-Http "$url/health" } 60
+    if (-not $ok) { throw "The tunnel is up but $url/health does not answer. Check the ""MTGenesis tunnel"" window." }
     Write-Ok 'Backend reachable through the tunnel'
     return $url
 }
