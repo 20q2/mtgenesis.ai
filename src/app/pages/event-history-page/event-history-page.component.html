@@ -51,7 +51,7 @@
 
     <div class="set-rows">
       <section *ngFor="let group of ev.sets | cmcGroups; trackBy: trackGroup" class="cmc-group">
-        <h3 class="section-title cmc-heading">{{ group.label }}</h3>
+        <h3 class="section-title cmc-heading paint-label">{{ group.label }}</h3>
         <app-set-row *ngFor="let set of group.sets; trackBy: trackSet"
                      [set]="set"
                      [showVoteButtons]="false"

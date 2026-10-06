@@ -127,10 +127,11 @@
   align-items: center;
   gap: 0.15rem;
   font-size: 0.82rem;
-  opacity: 0.55;
+  color: var(--text-muted);
 
   .material-icons {
     font-size: 1.15rem;
+    opacity: 0.45;
   }
 
   &.gold .material-icons { color: var(--medal-gold); }
@@ -138,7 +139,11 @@
   &.bronze .material-icons { color: var(--medal-bronze); }
 
   &.given {
-    opacity: 1;
+    color: var(--text);
+
+    .material-icons {
+      opacity: 1;
+    }
   }
 }
 

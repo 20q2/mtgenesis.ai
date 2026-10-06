@@ -315,6 +315,7 @@
 
   &.point-free {
     background: transparent;
+    border-color: var(--text-faint);  /* an unspent point is information: 4.9:1 */
   }
 }
 
@@ -381,9 +382,15 @@
     }
   }
 
+  /* Taken by another commander: muted ink, not faded, so "Locked at 3 CMC" stays readable */
   &:disabled {
-    opacity: 0.55;
+    background: var(--surface-sunken);
+    color: var(--text-muted);
     cursor: not-allowed;
+
+    .gem {
+      opacity: 0.5;
+    }
   }
 
   &:focus-visible {

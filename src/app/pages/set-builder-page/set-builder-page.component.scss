@@ -156,7 +156,7 @@ app-commander-panel[hidden] {
 .lg-mana-slot {
   position: relative;
   display: inline-flex;
-  opacity: 0.35;
+  opacity: 0.55;
   transition: opacity var(--dur) var(--ease-out);
 
   &.started {

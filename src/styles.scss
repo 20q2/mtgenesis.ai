@@ -38,7 +38,7 @@
   /* Text: ink on parchment */
   --text: #211d2e;
   --text-muted: #5a5568;
-  --text-faint: #736e82;
+  --text-faint: #66617a;
   --text-on-gold: #1b1608;
 
   /* Gold: fills and edges; --accent-text is the readable gold for text on light */
@@ -238,6 +238,16 @@ a {
   line-height: 1.2;
   color: var(--text);
   margin-bottom: 0.5rem;
+}
+
+/* A heading drawn straight on the painted background sits on a parchment tab: dark ink on
+   the dark blue paint is under 1.5:1, on the tab it is 13:1. */
+.paint-label {
+  display: inline-block;
+  padding: 0.2rem 0.75rem;
+  border-radius: var(--r-pill);
+  background: var(--scrim);
+  box-shadow: var(--shadow-1);
 }
 
 .muted {

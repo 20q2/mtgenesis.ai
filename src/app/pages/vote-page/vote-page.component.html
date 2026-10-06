@@ -76,7 +76,7 @@
     <!-- Rule 7: owners vote on their own first -->
     <section *ngIf="!isClosed && progress.mine.length" class="my-commanders">
       <div class="group-head">
-        <h3 class="section-title">Your commanders</h3>
+        <h3 class="section-title paint-label">Your commanders</h3>
         <span class="mine-nudge" [class.done]="!progress.mineUnvoted">
           <ng-container *ngIf="progress.mineUnvoted; else allMine">
             {{ mineNudge }} · your vote counts double
@@ -94,12 +94,12 @@
     </section>
 
     <div class="other-commanders">
-      <h3 *ngIf="!isClosed && progress.mine.length && progress.others.length" class="section-title others-title">
+      <h3 *ngIf="!isClosed && progress.mine.length && progress.others.length" class="section-title others-title paint-label">
         Everyone else's
       </h3>
       <section *ngFor="let group of (isClosed ? ev.sets : progress.others) | cmcGroups; trackBy: trackGroup"
                class="cmc-group">
-        <h3 class="section-title cmc-heading">{{ group.label }}</h3>
+        <h3 class="section-title cmc-heading paint-label">{{ group.label }}</h3>
         <app-set-row *ngFor="let set of group.sets; trackBy: trackSet"
                      [set]="set"
                      [final]="isClosed"
