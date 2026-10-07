@@ -242,8 +242,13 @@ function Start-Tunnel {
         if (-not $url) { throw 'cloudflared did not open a tunnel. Check the "MTGenesis tunnel" window for the error.' }
         Write-Ok $url
     }
-    # A new quick-tunnel hostname can take a few seconds to resolve, so give it a minute.
-    $ok = Wait-For 'the backend through the tunnel' { Test-Http "$url/health" } 60
+    # A new quick-tunnel hostname can take a while to resolve, and Windows caches the early
+    # "no such host" answer for minutes, so every miss flushes the DNS cache (no admin needed).
+    $ok = Wait-For 'the backend through the tunnel' {
+        if (Test-Http "$url/health") { return $true }
+        ipconfig /flushdns | Out-Null
+        return $false
+    } 180
     if (-not $ok) { throw "The tunnel is up but $url/health does not answer. Check the ""MTGenesis tunnel"" window." }
     Write-Ok 'Backend reachable through the tunnel'
     return $url
