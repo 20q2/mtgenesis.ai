@@ -14,7 +14,9 @@ BRIEF = {"identity": "An ash-priest who keeps dead fires burning",
                  "setting": "a ruined fire temple", "framing": "low angle, close",
                  "light": "embers glowing from below"}}
 
-# Snapshots of the prompts from before the director existed (commit 78a733e).
+# Snapshots of the prompts from before the director existed (commit 78a733e). The rules
+# snapshot was updated on 2026-10-10 for the wider COLOR_HOOKS and the rotated grounded
+# keywords (tests/test_variety.py): with this seed the hook and keywords drawn changed.
 RULES_USER_BEFORE = (
     "Name: Zur'ka, Élan of Ash\nType line: Legendary Creature — Human Cleric\nRarity: mythic\n"
     "Mana cost: {2}{B} (mana value 3)\nColors: black\n"
@@ -24,9 +26,9 @@ RULES_USER_BEFORE = (
     "repeats every turn.\nConcept: Zur'ka, a legendary human cleric, medium scale\n\n"
     "- Write 4 abilities (a keyword item of up to two keywords counts as one).\n"
     "- Refer to the card as \"Zur'ka\".\n"
-    "- A Human does not fly: no flying; prefer grounded keywords like vigilance, first strike, "
-    "reach or menace.\n"
-    "- Design hook to consider, scaled to the power budget: drain each opponent.")
+    "- A Human does not fly: no flying. If it has keywords, ground ones suit it, like reach, "
+    "menace or deathtouch.\n"
+    "- Design hook to consider, scaled to the power budget: return creatures from the graveyard.")
 ART_BEFORE = [
     (PROMPT, CARD,
      "Zur'ka, a legendary human cleric, medium scale, traditional oil painting on canvas, Magic: The "

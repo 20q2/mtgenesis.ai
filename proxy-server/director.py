@@ -26,16 +26,20 @@ IDENTITY_MAX_WORDS = 20
 MECHANIC_MAX_WORDS = 15
 ART_MAX_WORDS = 12
 ATTEMPTS = 2
+# Mechanics of recent cards that share a color (storage.recent_mechanics). Never shown to
+# the model: listed in the prompt they anchored it (9 red cards in a row copied one). They
+# rule out hooks that echo them, and a first reply that repeats one is retried.
+RECENT_LIMIT = 8
 
 # Ingredients: which kind of ability carries the mechanic, and an optional twist. Drawn per
 # brief (no repeats within a set) so the model can't settle on the same few favorites. The
 # shape skips the director and goes to the rules-text writer with the brief: shown to the
 # director it made mechanics read like rules text ("When you cast a spell, ...").
 SHAPES = ("a trigger when it enters", "an attack or combat damage trigger",
-          "a trigger when it dies or leaves the battlefield", "an activated ability with a real cost",
+          "a trigger when it dies or leaves the battlefield", "an activated ability with a mana or tap cost",
           "a static ability", "a trigger at the beginning of your upkeep or end step",
           "a trigger when you cast a spell")
-LAND_SHAPES = ("a trigger when it enters", "an activated ability with a real cost", "a static ability")
+LAND_SHAPES = ("a trigger when it enters", "an activated ability with a mana or tap cost", "a static ability")
 # No "named counter type" (the model wrote "Whenever an Ash Counter exists, ...") and no
 # "choice between two modes" (it stacked two effects on one ability and went over budget).
 TWISTS = ("add a real drawback or extra cost",
@@ -115,17 +119,21 @@ def _shapes(card: dict) -> tuple[str, ...]:
     return tuple(s for s in SHAPES if "attack" not in s)
 
 
-def draw_ingredients(card: dict, count: int, rng: random.Random) -> list[dict]:
+def draw_ingredients(card: dict, count: int, rng: random.Random,
+                     recent: list[str] | None = None) -> list[dict]:
     """Per brief: two on-color design hooks, an ability shape (None for spells and
     planeswalkers) and sometimes a twist. Within a set no hook, shape or twist repeats while
-    there are fresh ones left. Multicolor cards take a hook from each of two of their colors."""
+    there are fresh ones left. Multicolor cards take a hook from each of two of their colors.
+    Hooks sharing a word with a `recent` mechanic are skipped while others remain."""
     card = card or {}
     colors = [c for c in (card.get("colors") or []) if c in "WUBRG"]
     used: set[str] = set()
+    stale = set().union(*(content_words(m) for m in recent or []))
 
     def pick(pool: list[str], taken: list[str]) -> str:
         fresh = [h for h in pool if h not in used and h not in taken]
-        choice = rng.choice(fresh or [h for h in pool if h not in taken] or pool)
+        unseen = [h for h in fresh if not content_words(h) & stale]
+        choice = rng.choice(unseen or fresh or [h for h in pool if h not in taken] or pool)
         used.add(choice)
         return choice
 
@@ -260,18 +268,23 @@ def _same_character(briefs: list[dict], avoid: list[dict]) -> None:
 
 def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model: str,
                  rng: random.Random | None = None,
-                 fill_fields: list[str] | None = None) -> list[dict] | None:
+                 fill_fields: list[str] | None = None,
+                 recent: list[str] | None = None) -> list[dict] | None:
     """`count` briefs for the card (one per commander-set version), each with a mechanic
     different from the others and from `avoid`. None if two attempts fail; never raises.
     `rng` draws the ingredients (seed it for repeatable runs); a retry draws fresh ones.
+    `recent`: mechanics of recent cards in these colors to steer away from, silently (the
+    ingredients skip hooks that echo them). Only the first attempt must differ from them; a
+    last attempt that repeats one beats no brief at all.
     `fill_fields` (single cards only): blank fields for the model to choose in the same call;
     the validated values come back as the first brief's "fill" (card_fill.clean_fill)."""
     avoid = avoid or []
     rng = rng or random.Random()
     fill_fields = fill_fields if count == 1 else None
     subtype = (card or {}).get("subtype") or ""
-    for _ in range(ATTEMPTS):
-        ingredients = draw_ingredients(card, count, rng)
+    recent = (recent or [])[:RECENT_LIMIT]
+    for attempt in range(ATTEMPTS):
+        ingredients = draw_ingredients(card, count, rng, recent)
         try:
             resp = client.chat(
                 model=model, messages=_messages(card, count, avoid, ingredients=ingredients,
@@ -294,7 +307,9 @@ def write_briefs(card: dict, count: int, avoid: list[dict] | None, client, model
         except Exception as exc:  # bad JSON or shape: worth one more try
             _log(f"🎬 Director reply unreadable: {exc}")
             continue
-        if len(briefs) == count and all(briefs) and _distinct(briefs, avoid):
+        # Recent mechanics count like `avoid` mechanics (but never touch the art) until the last try.
+        steer = [{"mechanic": m} for m in recent] if attempt < ATTEMPTS - 1 else []
+        if len(briefs) == count and all(briefs) and _distinct(briefs, avoid + steer):
             _same_character(briefs, avoid)
             for b, ing in zip(briefs, ingredients):
                 if ing["shape"]:

@@ -217,6 +217,7 @@ def run_sets(args, app, out, raw_log):
 
 
 def write_sets_report(out, args, sets):
+    import rules_text
     versions = [v for s in sets for v in s['versions']]
     summary = {
         'label': args.label, 'director': not args.no_director, 'sets': len(sets),
@@ -225,6 +226,7 @@ def write_sets_report(out, args, sets):
         'errors': sum(1 for v in versions for sev, _ in v['issues'] if sev == 'error'),
         'over_budget_1': sum(1 for v in versions if v['power']['value'] - v['power']['budget'] > 1),
         'over_budget_2': sum(1 for v in versions if v['power']['value'] - v['power']['budget'] > 2),
+        'cliche_cards': sum(1 for v in versions if rules_text.cliche_count(v['final'])),
         'avg_seconds': round(sum(v['seconds'] for v in versions) / max(1, len(versions)), 1),
     }
     (out / 'report-sets.json').write_text(json.dumps({'summary': summary, 'sets': sets}, indent=2,
@@ -233,7 +235,8 @@ def write_sets_report(out, args, sets):
           f"Director: {'on' if summary['director'] else 'off'} · sets: {summary['sets']} "
           f"(briefs for {summary['sets_with_briefs']}) · mean overlap: {summary['mean_overlap']} · "
           f"errors: {summary['errors']} · over budget >1: {summary['over_budget_1']}, >2: "
-          f"{summary['over_budget_2']} · avg {summary['avg_seconds']}s per card", '']
+          f"{summary['over_budget_2']} · cliché cards: {summary['cliche_cards']}/{len(versions)} · "
+          f"avg {summary['avg_seconds']}s per card", '']
     for s in sets:
         md += [f"## {s['n']:02d}.{s['rep']} {s['name']}: overlap {s['overlap']}", '']
         for slot, v in enumerate(s['versions']):
@@ -256,6 +259,7 @@ def app_type(card):
 
 
 def write_report(out, args, results):
+    import rules_text
     errors = sum(1 for r in results for s, _ in r['issues'] if s == 'error')
     warns = sum(1 for r in results for s, _ in r['issues'] if s == 'warn')
     clean = sum(1 for r in results if not any(s == 'error' for s, _ in r['issues']))
@@ -272,12 +276,14 @@ def write_report(out, args, results):
         'over_budget_2': sum(1 for r in results if r['power']['value'] - r['power']['budget'] > 2),
         'avg_over': round(sum(r['power']['value'] - r['power']['budget'] for r in results) / max(1, len(results)), 2),
         'most_repeated_openings': openings.most_common(6),
+        'cliche_cards': sum(1 for r in results if rules_text.cliche_count(r['final'])),
     }
     (out / 'report.json').write_text(json.dumps({'summary': summary, 'results': results}, indent=2, ensure_ascii=False), encoding='utf-8')
 
     md = [f"# Rules text e2e: {args.label}", '',
           f"Model: `{summary['model']}` · cards: {summary['cards']} · clean (no errors): {clean} · "
-          f"errors: {errors} · warnings: {warns} · avg {summary['avg_chars']} chars · avg {summary['avg_seconds']}s",
+          f"errors: {errors} · warnings: {warns} · cliché cards: {summary['cliche_cards']} · "
+          f"avg {summary['avg_chars']} chars · avg {summary['avg_seconds']}s",
           '', f"Most repeated openings: {summary['most_repeated_openings']}", '']
     for r in results:
         md += [f"## {r['n']:02d}.{r['rep']} {r['name']} ({r['rarity']} {r['type']}) {r['pt']}", '',

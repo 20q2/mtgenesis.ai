@@ -1170,8 +1170,13 @@ def init_ai_night(app):
         director_client = ollama.Client(timeout=DIRECTOR_TIMEOUT_SECONDS)
 
         def brief_fn(params, count, avoid, fill_fields=None):
+            try:  # recent mechanics in these colors, so cards across players don't repeat
+                recent = storage.recent_mechanics(params.get("colors") or [], director.RECENT_LIMIT)
+            except Exception as exc:
+                print(f"⚠️ Recent mechanics unavailable: {exc}")
+                recent = []
             return director.write_briefs(params, count, avoid, director_client, DIRECTOR_MODEL,
-                                         fill_fields=fill_fields)
+                                         fill_fields=fill_fields, recent=recent)
     gen_queue = GenerationQueue(storage, data_dir, createCardContent,
                                 image_generation.generate_art, finalize_card, brief_fn=brief_fn)
     gen_queue.recover_on_startup()

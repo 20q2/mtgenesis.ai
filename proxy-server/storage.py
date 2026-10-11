@@ -385,6 +385,27 @@ class Storage:
             conn.execute("UPDATE cards SET brief_json = ? WHERE id = ?",
                          (_dumps(brief) if brief is not None else None, card_id))
 
+    def recent_mechanics(self, colors: list[str], limit: int, scan: int = 300) -> list[str]:
+        """The director's mechanics for the newest cards (any player) that share a color with
+        `colors` (colorless with colorless), newest first, without repeats. The director is
+        told to do something different (director.RECENT_LIMIT)."""
+        wanted = {c for c in colors or [] if c in "WUBRG"}
+        rows = self._all("SELECT card_params_json, brief_json FROM cards WHERE brief_json IS NOT NULL "
+                         "ORDER BY created_at DESC, rowid DESC LIMIT ?", (scan,))
+        found: list[str] = []
+        for row in rows:
+            try:
+                params, brief = json.loads(row["card_params_json"] or "{}"), json.loads(row["brief_json"])
+            except ValueError:
+                continue
+            have = {c for c in params.get("colors") or [] if c in "WUBRG"}
+            mechanic = (brief or {}).get("mechanic") if isinstance(brief, dict) else None
+            if mechanic and (have & wanted if wanted else not have) and mechanic not in found:
+                found.append(mechanic)
+                if len(found) >= limit:
+                    break
+        return found
+
     def set_card_shared(self, card_id: str, user_id: str, shared: bool) -> dict:
         """Share a finished card to the Community tab, or take it back. Sharing an already
         shared card keeps its original time. 404 unknown, 403 not owner, 409 not finished."""

@@ -111,6 +111,20 @@ FORBIDDEN = [
     (re.compile(r'\bgets? \+\d+/\+\d+ [a-z]+ [A-Za-z ]*tokens?\b'), 'garbled stat change'),
 ]
 
+# Legal but overused: on stored cards, 15% of red ones were "Sacrifice ...: deals N damage" and
+# 24% of all cards had menace in the keyword line. Each one found counts against a candidate
+# (after lint errors and a big power overrun), so another attempt wins when there is one.
+CLICHES = [
+    ('sacrifice for damage', re.compile(r'\bsacrifice [^:.\n]{1,40}:[^.\n]*\bdeals? \d+ damage', re.I)),
+    ('menace keyword', re.compile(r'^(?:[a-z ]+, )*menace(?:, [a-z ]+)*$', re.I | re.M)),
+]
+
+
+def cliche_count(text: str) -> int:
+    """How many CLICHES the rules text uses (each counted once)."""
+    return sum(bool(rx.search(text or '')) for _, rx in CLICHES)
+
+
 RARITY_ABILITY_CAP = {'common': 2, 'uncommon': 3, 'rare': 4, 'mythic': 5}
 MAX_TEXT_CHARS = 340  # beyond this the renderer's font gets hard to read
 
@@ -524,26 +538,49 @@ Uncommon land: {"abilities": ["This land enters tapped.", "{T}: Add {U} or {R}."
 """ + POWER_GUIDE + "\n\n" + DESIGN_GUIDE
 
 
-# Design hooks per color. One is suggested at random so similar requests still diverge.
+# Design hooks per color. One is suggested at random (two per director brief) so similar
+# requests still diverge. Wide lists on purpose: with 8 per color, 3 of them red damage, most
+# red cards came out "Sacrifice this creature: it deals 3 damage to any target".
 COLOR_HOOKS = {
     'W': ['go wide with 1/1 tokens', 'lifegain payoffs', 'tap down or detain opposing creatures',
           'protect your creatures', '+1/+1 counters on a team', 'exile removal until this leaves',
-          'enchantments matter', 'attack-with-a-group rewards'],
+          'enchantments matter', 'attack-with-a-group rewards', 'flicker: exile and return a creature',
+          'Equipment and Auras matter', 'creatures with power 2 or less matter',
+          'first strike and combat tricks', "tax opponents' attacks or spells",
+          'flying creatures matter', 'vigilance for the team', 'life total above your starting total'],
     'U': ['card selection with scry or surveil', 'bounce and tempo', 'tap or freeze permanents',
           'instants and sorceries matter', 'copy a spell or ability', 'artifacts matter',
-          'flash tricks', 'mill yourself for value', 'draw-your-second-card-each-turn payoffs'],
+          'flash tricks', 'mill yourself for value', 'draw-your-second-card-each-turn payoffs',
+          'draw a card, then discard a card', 'counter a spell unless its controller pays',
+          'flying creatures matter', 'noncreature spells matter',
+          "small creatures that can't be blocked", 'untap permanents', 'Clue tokens',
+          'take control of a creature'],
     'B': ['sacrifice for value', 'return creatures from the graveyard', 'drain each opponent',
           'removal with a cost', 'discard', '-1/-1 counters', 'pay life for power',
-          'creatures dying matters'],
+          'creatures dying matters', 'deathtouch', 'each opponent sacrifices a creature',
+          "reanimate opponents' creatures", 'cards in your graveyard matter',
+          'Zombie or Skeleton tokens', 'draw cards for life', 'exile cards from graveyards',
+          'Food or Blood tokens'],
     'R': ['attack triggers', 'direct damage', 'haste and aggression', 'exile the top card, you may play it',
-          'Treasure tokens', 'sacrifice for a burst of power', 'instants and sorceries matter',
-          'damage to each opponent'],
+          'Treasure tokens', 'instants and sorceries matter', 'damage to each opponent',
+          'goad or force creatures to attack', "creatures that can't block", 'copy a spell',
+          'discard a card, then draw a card', 'pump power with {R}: +1/+0',
+          'steal a creature until end of turn', 'your first spell each turn',
+          'double strike for a turn', 'destroy an artifact',
+          'Dragons and creatures with power 4 or greater'],
     'G': ['+1/+1 counters', 'extra land drops or ramp', 'fight another creature',
           'creatures with power 4 or greater matter', 'landfall', 'creature tokens that grow',
-          'defense with big blockers', 'search your library for a land'],
+          'defense with big blockers', 'search your library for a land', 'trample matters',
+          'Food tokens', 'return lands from your graveyard', 'X spells and big mana', 'untap lands',
+          'hexproof and protection', 'Elves and mana creatures',
+          'return a permanent card from your graveyard to your hand'],
 }
+GROUND_KEYWORDS = ['vigilance', 'first strike', 'reach', 'menace', 'trample', 'deathtouch',
+                   'lifelink', 'haste']
 COLORLESS_HOOKS = ['artifacts matter', 'charge counters', 'mana abilities with a twist',
-                   'sacrifice this for an effect', 'colorless spells matter']
+                   'sacrifice this for an effect', 'colorless spells matter', 'Equipment',
+                   'Construct or Thopter tokens', 'artifact spells cost less', 'Clue tokens',
+                   'untap artifacts', 'Vehicles and crew', 'activated abilities of artifacts']
 
 ABILITY_BUDGET = {'common': (1, 2), 'uncommon': (2, 3), 'rare': (2, 3), 'mythic': (3, 4)}
 
@@ -640,7 +677,11 @@ def build_messages(prompt: str, card: dict | None, rng) -> list[dict]:
         musts.append(f'Refer to the card as "{self_reference(card)}".')
     grounded = [w for w in subtype.split() if w in GROUNDED_SUBTYPES]
     if 'creature' in card_type and grounded:
-        musts.append(f'A {grounded[0].capitalize()} does not fly: no flying; prefer grounded keywords like vigilance, first strike, reach or menace.')
+        # Three at random: a fixed "vigilance, first strike, reach or menace" put menace on a
+        # quarter of all cards (commanders are mostly people).
+        a, b, c = rng.sample(GROUND_KEYWORDS, 3)
+        musts.append(f'A {grounded[0].capitalize()} does not fly: no flying. If it has keywords, '
+                     f'ground ones suit it, like {a}, {b} or {c}.')
 
     hooks = [h for c in colors for h in COLOR_HOOKS[c]] or COLORLESS_HOOKS
     hook = rng.choice(hooks)  # drawn either way so seeded runs stay comparable
@@ -1183,12 +1224,12 @@ def generate_rules_text(prompt: str, card: dict | None, client, model: str, *,
                         think: bool = False) -> str | None:
     """
     Ask the model for rules text, clean it, and keep the attempt with the fewest lint
-    errors, then the least over its power budget (stopping early on a clean one).
-    Returns None if every call failed.
+    errors, then within its power budget, then with the fewest clichés, then the least over
+    budget (stopping early on a clean one). Returns None if every call failed.
     """
     import random
     rng = rng or random.Random()
-    best, best_score = None, None
+    best, best_score, best_key = None, None, None
     for _ in range(max(1, attempts)):
         messages = build_messages(prompt, card, rng)
         try:
@@ -1212,10 +1253,13 @@ def generate_rules_text(prompt: str, card: dict | None, client, model: str, *,
         errors = error_count(lint_rules_text(text, card)) if text else 99
         value, allowed = power.assess(text, card or {})
         over = max(0.0, value - allowed)
-        print(f'🧹 Cleaned rules text ({errors} lint errors, power {value}/{allowed}): {text!r}')
-        if best is None or (errors, over) < best_score:
-            best, best_score = text, (errors, over)
-        if errors == 0 and over <= power.WARN_OVER:
+        cliches = cliche_count(text)
+        print(f'🧹 Cleaned rules text ({errors} lint errors, power {value}/{allowed}, '
+              f'{cliches} clichés): {text!r}')
+        key = (errors, over > power.WARN_OVER, cliches, over)
+        if best is None or key < best_key:
+            best, best_score, best_key = text, (errors, over), key
+        if errors == 0 and over <= power.WARN_OVER and cliches == 0:
             break
     # Last resorts. A line that still has a lint error after every attempt is dropped, as
     # long as the card keeps at least one real ability and its Enchant/Equip/Crew lines
