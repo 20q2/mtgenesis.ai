@@ -1,0 +1,61 @@
+<article class="ballot-player panel"
+         [class.mine]="player.mine"
+         [class.done]="!closed && done"
+         [attr.data-user-id]="player.userId"
+         (click)="open.emit(null)">
+  <header class="player-head">
+    <span class="avatar" aria-hidden="true">{{ player.username.charAt(0) }}</span>
+    <div class="player-id">
+      <h3 class="player-name">{{ player.username }}</h3>
+      <span *ngIf="player.mine" class="player-sub">{{ closed ? 'Your commanders' : 'Yours · your vote counts double' }}</span>
+    </div>
+    <span *ngIf="!closed" class="player-progress"
+          [attr.aria-label]="'Voted on ' + player.voted + ' of ' + player.sets.length">
+      <span *ngIf="done; else pips" class="material-icons" aria-hidden="true">check_circle</span>
+      <ng-template #pips>
+        <span *ngFor="let set of player.sets" class="pip" [class.on]="!!set.myVoteCardId" aria-hidden="true"></span>
+      </ng-template>
+      <span class="progress-count" aria-hidden="true">{{ player.voted }}/{{ player.sets.length }}</span>
+    </span>
+    <span class="open-hint material-icons" aria-hidden="true">chevron_right</span>
+  </header>
+
+  <div class="slots">
+    <ng-container *ngFor="let slot of player.slots; trackBy: trackSlot">
+      <button *ngIf="slot.set as set; else gap"
+              type="button"
+              class="ballot-slot"
+              [ngClass]="'state-' + state(set)"
+              [attr.data-set-id]="set.id"
+              [attr.aria-label]="slotLabel(set)"
+              (click)="onSlot($event, set)">
+        <span class="fan" aria-hidden="true">
+          <img *ngFor="let card of set.cards; let i = index; trackBy: trackCard"
+               class="fan-card"
+               [style.--o]="i - (set.cards.length - 1) / 2"
+               [class.front]="card.id === frontId(set)"
+               [class.back]="!!frontId(set) && card.id !== frontId(set)"
+               [src]="card.cardImageUrl | media | async"
+               alt="">
+          <span *ngIf="set.cmc" class="fan-pip"><i class="ms ms-cost ms-{{ set.cmc }}"></i></span>
+        </span>
+        <span class="slot-name">{{ set.commanderName }}</span>
+        <span class="slot-state" aria-hidden="true">
+          <span *ngIf="state(set) === 'busy'; else icon" class="mini-spinner"></span>
+          <ng-template #icon><span class="material-icons">{{ stateIcon(set) }}</span></ng-template>
+          {{ stateText(set) }}
+        </span>
+      </button>
+
+      <ng-template #gap>
+        <div class="ballot-slot gap">
+          <span class="fan" aria-hidden="true">
+            <span class="fan-ghost"></span>
+            <span *ngIf="slot.cmc" class="fan-pip"><i class="ms ms-cost ms-{{ slot.cmc }}"></i></span>
+          </span>
+          <span class="slot-name">Not locked in</span>
+        </div>
+      </ng-template>
+    </ng-container>
+  </div>
+</article>

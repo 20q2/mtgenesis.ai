@@ -32,6 +32,8 @@ import { SetRowComponent } from './components/set-row/set-row.component';
 import { WinnersBannerComponent } from './components/winners-banner/winners-banner.component';
 import { PoolAdminComponent } from './components/pool-admin/pool-admin.component';
 import { PoolSubmitComponent } from './components/pool-submit/pool-submit.component';
+import { BallotPlayerComponent } from './components/ballot-player/ballot-player.component';
+import { PlayerSheetComponent } from './components/player-sheet/player-sheet.component';
 
 @NgModule({
   declarations: [
@@ -55,6 +57,8 @@ import { PoolSubmitComponent } from './components/pool-submit/pool-submit.compon
     WinnersBannerComponent,
     PoolAdminComponent,
     PoolSubmitComponent,
+    BallotPlayerComponent,
+    PlayerSheetComponent,
     MediaPipe,
     CmcGroupsPipe,
     TiltDirective

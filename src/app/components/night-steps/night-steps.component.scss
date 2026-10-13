@@ -106,3 +106,64 @@
 .night-step[data-state='next'] .step-title {
   color: var(--text-muted);
 }
+
+/* Compact: one row of small badges, each title between its badge and the line to the next */
+:host(.compact) {
+  .night-steps {
+    grid-template-columns: repeat(3, minmax(max-content, 1fr)) max-content;
+    row-gap: 0;
+  }
+
+  /* Phones: only the step you're on keeps its title */
+  @media (max-width: 640px) {
+    .night-step:not([data-state='current']) .step-title {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+  }
+
+  .night-step {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    align-items: center;
+    column-gap: 0.4rem;
+  }
+
+  .step-rail {
+    display: contents;
+  }
+
+  .step-mark {
+    grid-column: 1;
+    grid-row: 1;
+    width: 1.5rem;
+    height: 1.5rem;
+    font-size: 0.78rem;
+
+    .material-icons {
+      font-size: 0.9rem;
+    }
+  }
+
+  .step-title {
+    grid-column: 2;
+    grid-row: 1;
+    font-size: 0.86rem;
+    white-space: nowrap;
+  }
+
+  .step-line {
+    display: block;
+    grid-column: 3;
+    grid-row: 1;
+    min-width: 0.75rem;
+    margin: 0 0.5rem 0 0.1rem;
+  }
+
+  .step-text {
+    display: none;
+  }
+}

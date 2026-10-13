@@ -56,6 +56,33 @@
         ],
         "createdAt": "2026-10-03T06:25:40.924Z",
         "reason": "Claude: src is bound at runtime via [src]=\"card.cardImageUrl | media | async\" (same pattern as winners-banner); static scan can't see it"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/components/ballot-player/ballot-player.component.html"
+        ],
+        "createdAt": "2026-10-13T15:16:49.399Z",
+        "reason": "Claude: src is an Angular [src] binding via the media pipe (blob URLs loaded at runtime), not an empty src"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/components/player-sheet/player-sheet.component.html"
+        ],
+        "createdAt": "2026-10-13T15:18:08.471Z",
+        "reason": "Claude: src is an Angular [src] binding via the media pipe (blob URLs loaded at runtime), not an empty src"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/pages/vote-page/vote-page.component.html"
+        ],
+        "createdAt": "2026-10-13T15:19:59.913Z",
+        "reason": "Claude: src is an Angular [src] binding via the media pipe (blob URLs loaded at runtime), not an empty src"
       }
     ]
   }

@@ -4,8 +4,9 @@ import {
   EMPTY, Observable, Subject, Subscription, catchError, finalize, of, startWith, switchMap
 } from 'rxjs';
 import { EventView, SetCardView, SetView } from '../../models/api.model';
-import { LegalCommander, VoteProgress, legalCommanders, voteProgress } from '../../services/commander-night';
-import { CmcGroup } from '../../services/commander-rules';
+import {
+  BallotPlayer, LegalCommander, VoteProgress, ballot, legalCommanders, nextToVote, voteProgress
+} from '../../services/commander-night';
 import { apiErrorMessage } from '../../services/api.util';
 import { EventService } from '../../services/event.service';
 import { PageVisibilityService } from '../../services/page-visibility.service';
@@ -16,8 +17,10 @@ export const VOTE_POLL_MS = 10000;
 
 /**
  * /vote: every commander locked in the current event, one vote per commander, live counts
- * (spec §7). The player's own commanders come first: the rules ask owners to vote first, and
- * their own vote counts ×2. After the vote it lists the player's legal commanders.
+ * (spec §7). The overview is a grid of players, each with small fans of their commanders
+ * marked voted or not; a player opens in a sheet with all their commanders' versions to vote
+ * on. The player's own commanders come first: the rules ask owners to vote first, and their
+ * own vote counts ×2. After the vote it lists the player's legal commanders.
  * Polls every 10s while the page is visible (paused while hidden, refreshed at once
  * when shown again). If the event being shown gets closed, it keeps showing that event
  * (now with the winners banner) instead of dropping to "No event open".
@@ -34,6 +37,11 @@ export class VotePageComponent implements OnInit, OnDestroy {
   loadError: string | null = null;
   /** Sets with a vote request in flight (guards double clicks). */
   readonly voting = new Set<string>();
+  /** The vote by player, mine first. */
+  players: BallotPlayer[] = [];
+  /** The player open in the sheet, and the commander to bring into view there. */
+  sheetUserId: string | null = null;
+  sheetFocusSetId: string | null = null;
 
   private readonly refresh$ = new Subject<void>();
   private lastEventId: string | null = null;
@@ -49,7 +57,7 @@ export class VotePageComponent implements OnInit, OnDestroy {
       switchMap(() => this.visibility.poll(VOTE_POLL_MS)),
       switchMap(() => this.load())
     ).subscribe(event => {
-      this.event = event;
+      this.setEvent(event);
       this.loadError = null;
       if (event) {
         this.lastEventId = event.id;
@@ -78,6 +86,55 @@ export class VotePageComponent implements OnInit, OnDestroy {
       return `${mineUnvoted} of yours still to vote on`;
     }
     return mine.length === 1 ? 'Vote on yours first' : `Vote on your ${mine.length} first`;
+  }
+
+  /** The first player with something left to vote on (mine come first); null when I'm done. */
+  get firstToVote(): BallotPlayer | null {
+    return this.players[nextToVote(this.players)] ?? null;
+  }
+
+  get sheetIndex(): number {
+    return this.players.findIndex(p => p.userId === this.sheetUserId);
+  }
+
+  get sheetPlayer(): BallotPlayer | null {
+    return this.players[this.sheetIndex] ?? null;
+  }
+
+  /** The next player after the open one with something left to vote on, never the open one. */
+  get nextPlayer(): BallotPlayer | null {
+    const next = this.players[nextToVote(this.players, this.sheetIndex)];
+    return next && next.userId !== this.sheetUserId ? next : null;
+  }
+
+  get votedPercent(): number {
+    const { voted, total } = this.progress;
+    return total ? Math.round((voted / total) * 100) : 0;
+  }
+
+  /** Opens a player's commanders, at `set` or else (while voting) the first one I haven't voted on. */
+  openPlayer(player: BallotPlayer, set: SetView | null = null): void {
+    this.sheetUserId = player.userId;
+    const target = set ?? (this.isClosed ? null : player.sets.find(s => !s.myVoteCardId));
+    this.sheetFocusSetId = target?.id ?? null;
+  }
+
+  stepPlayer(delta: number): void {
+    const count = this.players.length;
+    if (count) {
+      this.openPlayer(this.players[(this.sheetIndex + delta + count) % count]);
+    }
+  }
+
+  voteNext(): void {
+    if (this.firstToVote) {
+      this.openPlayer(this.firstToVote);
+    }
+  }
+
+  closeSheet(): void {
+    this.sheetUserId = null;
+    this.sheetFocusSetId = null;
   }
 
   legalLabel(l: LegalCommander): string {
@@ -126,12 +183,8 @@ export class VotePageComponent implements OnInit, OnDestroy {
     this.error = null;
   }
 
-  trackSet(_index: number, set: SetView): string {
-    return set.id;
-  }
-
-  trackGroup(_index: number, group: CmcGroup): string {
-    return group.label;
+  trackPlayer(_index: number, player: BallotPlayer): string {
+    return player.userId;
   }
 
   private load(): Observable<EventView | null> {
@@ -161,9 +214,17 @@ export class VotePageComponent implements OnInit, OnDestroy {
     if (!this.event) {
       return;
     }
-    this.event = {
+    this.setEvent({
       ...this.event,
       sets: this.event.sets.map(s => (s.id === updated.id ? updated : s))
-    };
+    });
+  }
+
+  private setEvent(event: EventView | null): void {
+    this.event = event;
+    this.players = ballot(event?.sets ?? [], this.users.currentUser()?.id ?? null);
+    if (this.sheetUserId && !this.sheetPlayer) {
+      this.closeSheet();
+    }
   }
 }

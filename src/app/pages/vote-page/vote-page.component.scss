@@ -1,11 +1,3 @@
-.vote-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
 .empty-state {
   text-align: center;
   padding: 2rem 1rem;
@@ -18,35 +10,152 @@
 
 .history-link {
   text-align: center;
-  margin: 1rem 0;
+  margin: 1.25rem 0 1rem;
 }
 
-/* Commanders under 3, 4 and 5 CMC headings */
-.cmc-group {
-  margin-top: 1.25rem;
+/* ===== Header: the night, where I am, how to vote ===== */
+.vote-header {
+  padding-bottom: 0.85rem;
 }
 
-.cmc-heading {
-  margin: 0 0 0.6rem;
-}
-
-/* ===== Header: the night, how to vote, progress ===== */
 .vote-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem 2rem;
+}
+
+.vote-title {
+  display: flex;
+  align-items: center;
   gap: 0.75rem;
+  min-width: 0;
+
+  .page-title {
+    margin: 0;
+  }
 }
 
 .vote-steps {
-  margin: 0.75rem 0 0.5rem;
+  flex: 0 1 30rem;
+  min-width: min(100%, 17rem);
+}
+
+.vote-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+
+  @media (max-width: 640px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.vote-progress {
+  flex: 1;
+  min-width: 0;
+}
+
+.progress-line {
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+  color: var(--text-muted);
+
+  strong {
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+}
+
+.meter {
+  height: 6px;
+  max-width: 34rem;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--surface-tint);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* Full width, revealed up to my progress: clip-path animates without relayout */
+.meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--you);
+  transition: clip-path 500ms var(--ease-out);
+}
+
+.next-to-vote {
+  flex: none;
+
+  @media (max-width: 640px) {
+    width: 100%;
+  }
+}
+
+.all-voted {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--you-text);
+
+  .material-icons {
+    font-size: 1.2rem;
+  }
+}
+
+/* The rules, folded away: the sheet repeats the one that matters at the moment of voting */
+.how-to {
+  margin-top: 0.6rem;
+
+  summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.1rem;
+    border-radius: var(--r-sm);
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--accent-text);
+    cursor: pointer;
+    list-style: none;
+
+    &::-webkit-details-marker {
+      display: none;
+    }
+
+    &:hover {
+      color: var(--text);
+    }
+
+    .material-icons {
+      font-size: 1.05rem;
+    }
+
+    .chevron {
+      font-size: 1.15rem;
+      transition: transform var(--dur) var(--ease-out);
+    }
+  }
+
+  &[open] .chevron {
+    transform: rotate(180deg);
+  }
 }
 
 .how-to-vote {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.15rem 1.5rem;
-  margin: 0.5rem 0 0;
+  gap: 0 1.5rem;
+  margin: 0.4rem 0 0;
   padding: 0;
   list-style: none;
 
@@ -60,7 +169,7 @@
     gap: 0.55rem;
     padding: 0.5rem 0;
     border-top: 1px solid var(--line);
-    font-size: 0.92rem;
+    font-size: 0.9rem;
     color: var(--text-muted);
   }
 
@@ -75,29 +184,21 @@
   }
 }
 
-.vote-progress {
-  margin: 0.75rem 0 0;
-  font-weight: 600;
-  color: var(--text-muted);
-
-  strong {
-    font-family: var(--font-display);
-    font-size: 1.1rem;
-    color: var(--text);
-  }
+.closed-note {
+  margin-top: 0.6rem;
 }
 
-/* ===== My commanders first ===== */
-.my-commanders {
-  margin-top: 1.25rem;
+/* ===== The players ===== */
+.ballot {
+  margin-top: 1.5rem;
 }
 
-.group-head {
+.ballot-head {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  margin-bottom: 0.6rem;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
 
   .section-title {
     margin: 0;
@@ -115,11 +216,12 @@
   color: var(--accent-text);
   font-size: 0.85rem;
   font-weight: 600;
+  box-shadow: var(--shadow-1);
 
   &.done {
-    border-color: color-mix(in srgb, var(--success) 40%, transparent);
-    background: var(--success-bg);
-    color: var(--success);
+    border-color: rgba(47, 127, 193, 0.4);
+    background: var(--info-bg);
+    color: var(--you-text);
   }
 
   .material-icons {
@@ -127,8 +229,14 @@
   }
 }
 
-.others-title {
-  margin: 1.5rem 0 0;
+.ballot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 0.85rem;
+
+  @media (max-width: 700px) {
+    gap: 0.65rem;
+  }
 }
 
 /* ===== After the vote: my legal commanders ===== */

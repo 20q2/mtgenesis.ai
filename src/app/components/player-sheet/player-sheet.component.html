@@ -1,0 +1,157 @@
+<dialog #dialog
+        class="player-sheet"
+        aria-labelledby="sheet-title"
+        (cancel)="onCancel($event)"
+        (click)="onDialogClick($event)"
+        (keydown)="onKeydown($event)">
+  <div class="sheet" [class.mine]="player.mine">
+    <header class="sheet-head">
+      <span class="avatar" aria-hidden="true">{{ player.username.charAt(0) }}</span>
+      <div class="sheet-id">
+        <h2 id="sheet-title" class="sheet-title" tabindex="-1" autofocus>{{ player.mine ? 'Your commanders' : player.username }}</h2>
+        <p class="sheet-sub">
+          <ng-container *ngIf="!closed">
+            <span class="sheet-progress" [class.done]="allVoted">
+              <span *ngIf="allVoted" class="material-icons" aria-hidden="true">check_circle</span>
+              {{ allVoted ? 'All voted' : player.voted + ' of ' + player.sets.length + ' voted' }}
+            </span>
+            <span *ngIf="player.mine" class="mine-note"> · your vote counts double</span>
+          </ng-container>
+          <ng-container *ngIf="closed">Final results</ng-container>
+        </p>
+      </div>
+      <button type="button" class="icon-btn close-btn" (click)="dismiss.emit()" aria-label="Close">
+        <span class="material-icons" aria-hidden="true">close</span>
+      </button>
+    </header>
+
+    <div #body class="sheet-body">
+      <p *ngIf="!closed" class="fair-play">
+        <span class="material-icons" aria-hidden="true">balance</span>
+        <span><strong>Vote in good faith:</strong> pick the version that's balanced for fair games, not just the strongest. You can change a vote until voting closes.</span>
+      </p>
+
+      <section *ngFor="let set of player.sets; trackBy: trackSet"
+               class="commander-row"
+               [class.voted]="!!set.myVoteCardId"
+               [attr.data-set-id]="set.id"
+               [attr.aria-label]="set.commanderName">
+        <div class="commander-info">
+          <span *ngIf="set.cmc" class="row-pip" [attr.aria-label]="set.cmc + ' CMC'">
+            <i class="ms ms-cost ms-shadow ms-{{ set.cmc }}" aria-hidden="true"></i>
+          </span>
+          <div class="commander-text">
+            <h3 class="commander-name">{{ set.commanderName }}</h3>
+            <span *ngIf="set.cmc" class="row-meta rarity-{{ set.rarity }}">
+              {{ set.cmc }} CMC<ng-container *ngIf="rarityLabel(set)"> · <span class="gem" aria-hidden="true"></span>{{ rarityLabel(set) }}</ng-container>
+            </span>
+          </div>
+          <span *ngIf="!closed" class="row-state" [class.voted]="!!set.myVoteCardId">
+            <span class="material-icons" aria-hidden="true">{{ set.myVoteCardId ? 'check_circle' : 'radio_button_unchecked' }}</span>
+            {{ set.myVoteCardId ? 'You picked ' + pickLabel(set) : 'Not voted yet' }}
+          </span>
+        </div>
+
+        <div class="versions">
+          <div *ngFor="let card of set.cards; trackBy: trackCard"
+               class="version"
+               [attr.data-card-id]="card.id"
+               [class.mine]="isPick(set, card)"
+               [class.leader]="card.leader"
+               [class.tied]="card.tied">
+            <div class="flags">
+              <span *ngIf="card.leader" class="flag flag-leader">
+                <span class="material-icons" aria-hidden="true">workspace_premium</span> {{ closed ? 'Winner' : 'Leading' }}
+              </span>
+              <span *ngIf="card.tied" class="flag flag-tied">Tied</span>
+              <span *ngIf="isPick(set, card)" class="flag flag-mine">Your pick</span>
+            </div>
+
+            <button *ngIf="card.status === 'done'; else notReady"
+                    type="button"
+                    class="version-card"
+                    [attr.aria-label]="'Enlarge version ' + card.slot"
+                    (click)="zoom(card)">
+              <img appTilt="6"
+                   [src]="card.cardImageUrl | media | async"
+                   [alt]="set.commanderName + ', version ' + card.slot">
+            </button>
+            <ng-template #notReady>
+              <div class="version-card pending">
+                <span class="material-icons" aria-hidden="true">hourglass_empty</span>
+                Version {{ card.slot }} isn't ready
+              </div>
+            </ng-template>
+
+            <div class="vote-bar">
+              <span class="count">{{ card.votes }} {{ card.votes === 1 ? 'vote' : 'votes' }}</span>
+              <span *ngIf="card.ownerVote" class="owner-x2" title="The owner's own vote counts as two">owner ×2</span>
+              <button *ngIf="!closed"
+                      type="button"
+                      class="btn vote-button"
+                      [class.picked]="isPick(set, card)"
+                      [class.btn-ghost]="!isPick(set, card)"
+                      [attr.aria-pressed]="isPick(set, card)"
+                      [attr.aria-label]="(isPick(set, card) ? 'Your pick: version ' : 'Vote for version ') + card.slot"
+                      [disabled]="busy.has(set.id)"
+                      (click)="onVote(set, card)">
+                <span class="material-icons" aria-hidden="true">{{ isPick(set, card) ? 'check' : 'how_to_vote' }}</span>
+                {{ isPick(set, card) ? 'Your pick' : 'Vote' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="sheet-foot">
+      <div *ngIf="error" class="alert alert-error" role="alert">
+        <span class="material-icons">error</span>
+        <span>{{ error }}</span>
+        <button type="button" class="alert-close" (click)="clearError.emit()" aria-label="Dismiss">×</button>
+      </div>
+
+      <div class="foot-row">
+        <div class="player-nav" *ngIf="count > 1">
+          <button type="button" class="icon-btn" (click)="step.emit(-1)" aria-label="Previous player">
+            <span class="material-icons" aria-hidden="true">chevron_left</span>
+          </button>
+          <span class="player-count">{{ position + 1 }} / {{ count }}</span>
+          <button type="button" class="icon-btn" (click)="step.emit(1)" aria-label="Next player">
+            <span class="material-icons" aria-hidden="true">chevron_right</span>
+          </button>
+          <span class="key-hint" aria-hidden="true"><kbd>←</kbd><kbd>→</kbd></span>
+        </div>
+
+        <ng-container *ngIf="!closed">
+          <button *ngIf="nextPlayer as next; else finished"
+                  type="button"
+                  class="btn next-player"
+                  [class.btn-gold]="allVoted"
+                  [class.btn-ghost]="!allVoted"
+                  (click)="goTo.emit(next)">
+            <span class="next-label">Next: {{ next.mine ? 'yours' : next.username }}</span>
+            <span class="next-left">{{ left(next) }} to vote</span>
+            <span class="material-icons" aria-hidden="true">arrow_forward</span>
+          </button>
+          <ng-template #finished>
+            <button *ngIf="allVoted" type="button" class="btn btn-gold next-player" (click)="dismiss.emit()">
+              <span class="material-icons" aria-hidden="true">done_all</span>
+              All voted · Close
+            </button>
+            <span *ngIf="!allVoted" class="last-ones">Last ones to vote on</span>
+          </ng-template>
+        </ng-container>
+        <button *ngIf="closed" type="button" class="btn btn-ghost next-player" (click)="dismiss.emit()">Close</button>
+      </div>
+    </footer>
+  </div>
+
+  <span class="sr-only" aria-live="polite">{{ announcement }}</span>
+
+  <!-- Full size: inside the dialog so it sits above the sheet in the top layer -->
+  <div *ngIf="zoomed as z" class="zoom" (click)="zoomed = null" role="presentation">
+    <img [src]="z.cardImageUrl | media | async" [alt]="(z.card?.name || 'Card') + ', version ' + z.slot">
+    <span class="zoom-hint">Tap anywhere to close</span>
+  </div>
+</dialog>

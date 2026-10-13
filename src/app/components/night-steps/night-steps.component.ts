@@ -1,4 +1,4 @@
-import { Component, Input } from '@angular/core';
+import { Component, HostBinding, Input } from '@angular/core';
 import { NIGHT_STEPS, NightStepId } from '../../services/commander-night';
 
 /** The four steps of an AI Night (build, lock in, vote, play), with where the player is now. */
@@ -9,6 +9,8 @@ import { NIGHT_STEPS, NightStepId } from '../../services/commander-night';
 })
 export class NightStepsComponent {
   @Input() current: NightStepId = 'build';
+  /** One slim row of titles (no descriptions), for pages where the steps are a reminder. */
+  @Input() @HostBinding('class.compact') compact = false;
 
   readonly steps = NIGHT_STEPS;
 

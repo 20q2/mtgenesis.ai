@@ -16,29 +16,56 @@
   <ng-container *ngIf="event as ev">
     <section class="panel vote-header">
       <div class="vote-title-row">
-        <h2 class="page-title">{{ ev.name }}</h2>
-        <span class="badge" [class.badge-gold]="!isClosed" [class.badge-muted]="isClosed">
-          {{ isClosed ? 'Closed' : 'Voting open' }}
-        </span>
+        <div class="vote-title">
+          <h2 class="page-title">{{ ev.name }}</h2>
+          <span class="badge" [class.badge-gold]="!isClosed" [class.badge-muted]="isClosed">
+            {{ isClosed ? 'Closed' : 'Voting open' }}
+          </span>
+        </div>
+        <app-night-steps class="vote-steps" [compact]="true" [current]="isClosed ? 'play' : 'vote'"></app-night-steps>
       </div>
 
-      <app-night-steps class="vote-steps" [current]="isClosed ? 'play' : 'vote'"></app-night-steps>
+      <!-- Where I am: how many I've voted on, and straight to the next one -->
+      <div *ngIf="!isClosed && progress.total" class="vote-status">
+        <div class="vote-progress" aria-live="polite">
+          <p class="progress-line">
+            You've voted on <strong>{{ progress.voted }}</strong> of {{ progress.total }} commanders
+          </p>
+          <div class="meter" role="progressbar" aria-label="Commanders voted on"
+               aria-valuemin="0" [attr.aria-valuemax]="progress.total" [attr.aria-valuenow]="progress.voted">
+            <span class="meter-fill" [style.clip-path]="'inset(0 ' + (100 - votedPercent) + '% 0 0 round 999px)'"></span>
+          </div>
+        </div>
+        <button *ngIf="firstToVote as next; else allDone" type="button" class="btn btn-gold next-to-vote" (click)="voteNext()">
+          {{ next.mine ? 'Vote on yours' : 'Vote on ' + next.username + '’s' }}
+          <span class="material-icons" aria-hidden="true">arrow_forward</span>
+        </button>
+        <ng-template #allDone>
+          <p class="all-voted">
+            <span class="material-icons" aria-hidden="true">done_all</span>
+            All voted. You can change a vote until the host closes voting.
+          </p>
+        </ng-template>
+      </div>
 
-      <ul *ngIf="!isClosed" class="how-to-vote" aria-label="How to vote">
-        <li><span class="material-icons" aria-hidden="true">how_to_vote</span>
-          <span><strong>Pick one favorite version of each commander.</strong> The version with the most votes is legal on the event night.</span></li>
-        <li><span class="material-icons" aria-hidden="true">balance</span>
-          <span><strong>Vote in good faith:</strong> pick the version that's balanced for fair games, not just the strongest.</span></li>
-        <li><span class="material-icons" aria-hidden="true">person</span>
-          <span><strong>Your vote on your own commander counts as two,</strong> so vote on your own first, then everyone else's.</span></li>
-        <li><span class="material-icons" aria-hidden="true">edit</span>
-          <span>You can change a vote until the host closes voting.</span></li>
-      </ul>
-      <p class="muted" *ngIf="isClosed">Voting is closed and the results are final. The winning versions are legal on the event night.</p>
-
-      <p *ngIf="!isClosed && progress.total" class="vote-progress" aria-live="polite">
-        You've voted on <strong>{{ progress.voted }}</strong> of {{ progress.total }} commanders
-      </p>
+      <details *ngIf="!isClosed" class="how-to">
+        <summary>
+          <span class="material-icons" aria-hidden="true">help_outline</span>
+          How voting works
+          <span class="material-icons chevron" aria-hidden="true">expand_more</span>
+        </summary>
+        <ul class="how-to-vote" aria-label="How to vote">
+          <li><span class="material-icons" aria-hidden="true">how_to_vote</span>
+            <span><strong>Pick one favorite version of each commander.</strong> The version with the most votes is legal on the event night.</span></li>
+          <li><span class="material-icons" aria-hidden="true">balance</span>
+            <span><strong>Vote in good faith:</strong> pick the version that's balanced for fair games, not just the strongest.</span></li>
+          <li><span class="material-icons" aria-hidden="true">person</span>
+            <span><strong>Your vote on your own commander counts as two,</strong> so vote on your own first, then everyone else's.</span></li>
+          <li><span class="material-icons" aria-hidden="true">edit</span>
+            <span>You can change a vote until the host closes voting.</span></li>
+        </ul>
+      </details>
+      <p class="muted closed-note" *ngIf="isClosed">Voting is closed and the results are final. The winning versions are legal on the event night.</p>
     </section>
 
     <!-- After the vote: what I play with on the event night -->
@@ -60,7 +87,7 @@
 
     <app-winners-banner *ngIf="isClosed" [sets]="ev.sets" title="Legal commanders on the event night"></app-winners-banner>
 
-    <div *ngIf="error" class="alert alert-error" role="alert">
+    <div *ngIf="error && !sheetPlayer" class="alert alert-error" role="alert">
       <span class="material-icons">error</span>
       <span>{{ error }}</span>
       <button type="button" class="alert-close" (click)="clearError()" aria-label="Dismiss">×</button>
@@ -73,11 +100,11 @@
       </p>
     </section>
 
-    <!-- Rule 7: owners vote on their own first -->
-    <section *ngIf="!isClosed && progress.mine.length" class="my-commanders">
-      <div class="group-head">
-        <h3 class="section-title paint-label">Your commanders</h3>
-        <span class="mine-nudge" [class.done]="!progress.mineUnvoted">
+    <!-- Every player's commanders at a glance; a tile opens that player's versions -->
+    <section *ngIf="players.length" class="ballot" aria-labelledby="ballot-title">
+      <div class="ballot-head">
+        <h3 id="ballot-title" class="section-title paint-label">{{ isClosed ? 'Every commander' : 'Players' }}</h3>
+        <span *ngIf="!isClosed && progress.mine.length" class="mine-nudge" [class.done]="!progress.mineUnvoted">
           <ng-container *ngIf="progress.mineUnvoted; else allMine">
             {{ mineNudge }} · your vote counts double
           </ng-container>
@@ -86,31 +113,33 @@
           </ng-template>
         </span>
       </div>
-      <app-set-row *ngFor="let set of progress.mine; trackBy: trackSet"
-                   [set]="set"
-                   [final]="isClosed"
-                   [disabled]="isClosed || voting.has(set.id)"
-                   (vote)="vote(set, $event)"></app-set-row>
-    </section>
 
-    <div class="other-commanders">
-      <h3 *ngIf="!isClosed && progress.mine.length && progress.others.length" class="section-title others-title paint-label">
-        Everyone else's
-      </h3>
-      <section *ngFor="let group of (isClosed ? ev.sets : progress.others) | cmcGroups; trackBy: trackGroup"
-               class="cmc-group">
-        <h3 class="section-title cmc-heading paint-label">{{ group.label }}</h3>
-        <app-set-row *ngFor="let set of group.sets; trackBy: trackSet"
-                     [set]="set"
-                     [final]="isClosed"
-                     [showVoteButtons]="!isClosed"
-                     [disabled]="isClosed || voting.has(set.id)"
-                     (vote)="vote(set, $event)"></app-set-row>
-      </section>
-    </div>
+      <div class="ballot-grid">
+        <app-ballot-player *ngFor="let p of players; trackBy: trackPlayer"
+                           [player]="p"
+                           [closed]="isClosed"
+                           [busy]="voting"
+                           (open)="openPlayer(p, $event)"></app-ballot-player>
+      </div>
+    </section>
 
     <p class="muted history-link">
       <a routerLink="/events" class="night-link">Past events</a>
     </p>
+
+    <app-player-sheet *ngIf="sheetPlayer as sp"
+                      [player]="sp"
+                      [closed]="isClosed"
+                      [busy]="voting"
+                      [error]="error"
+                      [focusSetId]="sheetFocusSetId"
+                      [position]="sheetIndex"
+                      [count]="players.length"
+                      [nextPlayer]="nextPlayer"
+                      (vote)="vote($event.set, $event.card)"
+                      (step)="stepPlayer($event)"
+                      (goTo)="openPlayer($event)"
+                      (dismiss)="closeSheet()"
+                      (clearError)="clearError()"></app-player-sheet>
   </ng-container>
 </div>

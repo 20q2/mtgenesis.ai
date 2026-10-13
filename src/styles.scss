@@ -74,6 +74,7 @@
 
   /* Semantic */
   --you: #2f7fc1;
+  --you-text: #22649c;
   --danger: #b42318;
   --danger-bg: #fdeceb;
   --success: #12714a;
@@ -577,6 +578,11 @@ a {
     color: var(--text-muted);
     border: 1px solid var(--line);
   }
+}
+
+/* ===== Dialogs: the page behind a modal <dialog> stays put ===== */
+html:has(dialog[open]) {
+  overflow: hidden;
 }
 
 /* ===== Mana pips (mana-font) ===== */
