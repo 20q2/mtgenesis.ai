@@ -23,6 +23,18 @@ MAX_MANA_VALUE = 10
 
 _SYMBOL = r"\{(?:\d{1,2}|[WUBRGCX]|[WUBRG]/[WUBRGP]|2/[WUBRG])\}"
 _COST_RE = re.compile(rf"(?:{_SYMBOL})+")
+# Types whose cards always carry a subtype (a creature type, a planeswalker's name, Siege).
+_SUBTYPED = ("creature", "planeswalker", "battle")
+# The only subtypes kept when the AI picks one for another type; anything else (a creature type
+# on an instant, "Treasure Token", "Sorcery") is dropped, so most such cards get none.
+SUBTYPES = {
+    "instant": ("Adventure", "Arcane", "Lesson", "Trap"),
+    "sorcery": ("Adventure", "Arcane", "Lesson", "Trap"),
+    "enchantment": ("Aura", "Background", "Case", "Class", "Curse", "Role", "Room", "Rune",
+                    "Saga", "Shrine"),
+    "artifact": ("Equipment", "Vehicle", "Clue", "Food", "Treasure"),
+    "land": ("Cave", "Desert", "Gate", "Lair", "Locus", "Sphere", "Town"),
+}
 _SUBTYPE_RE = re.compile(r"[A-Za-z][A-Za-z' -]*")
 _WHOLE_RE = re.compile(r"\d{1,2}")
 
@@ -37,12 +49,30 @@ def _has_body(card_type: str, subtype: str) -> bool:
     return not card_type or "creature" in card_type or "vehicle" in (subtype or "").lower()
 
 
+def _subtyped(card_type: str) -> bool:
+    return any(t in card_type.lower() for t in _SUBTYPED)
+
+
+def _subtype_ok(card_type: str, sub: str) -> bool:
+    """Whether `sub` is a believable subtype for `card_type` (blank type = a Creature)."""
+    if not card_type.strip() or "creature" in card_type.lower():
+        return not any(w.lower() in NOT_CREATURE_TYPES for w in sub.split())
+    if _subtyped(card_type):
+        return True
+    allowed = {s for t, subs in SUBTYPES.items() if t in card_type.lower() for s in subs}
+    return all(w in allowed for w in sub.split())
+
+
 def blank_fields(params: dict) -> list[str]:
     """The fields the player left empty that the AI should fill, in FILLABLE order. A Land
-    needs no cost; only creatures (and Vehicles) need a body; an unknown type may need both."""
+    needs no cost; only creatures (and Vehicles) need a body; an unknown type may need both.
+    A subtype is filled only where the type has one (or the type is blank too): a blank on an
+    instant, artifact, enchantment or land means none."""
     params = params or {}
     card_type = (params.get("type") or "").strip()
-    fields = [f for f in ("name", "type", "subtype") if _blank(params.get(f))]
+    fields = [f for f in ("name", "type") if _blank(params.get(f))]
+    if _blank(params.get("subtype")) and (not card_type or _subtyped(card_type)):
+        fields.append("subtype")
     if _blank(params.get("manaCost")) and "land" not in card_type.lower():
         fields.append("manaCost")
     if (not card_type or _has_body(card_type, params.get("subtype") or "")) and \
@@ -66,8 +96,9 @@ def fill_instructions(fields: list[str]) -> str:
         "manaCost": "a mana cost in braces like {2}{W}{U} that suits the rarity and type "
                     f"(mana value at most {MAX_MANA_VALUE}; colors from it are the card's colors)",
         "type": "the card type, one of: " + ", ".join(CARD_TYPES),
-        "subtype": "its subtype(s), e.g. Human Wizard for a creature, or an empty string for a "
-                   "spell that has none",
+        "subtype": "its subtype(s), e.g. Human Wizard for a creature. Instants, sorceries, "
+                   "artifacts, enchantments and lands almost never have one: give an empty string "
+                   "unless it truly is an Aura, Equipment, Vehicle, Saga or the like",
         "power": "its power, a whole number", "toughness": "its toughness, a whole number",
     }
     lines = ["Some of this card's fields are blank. In \"fill\", choose them so the whole card "
@@ -112,9 +143,7 @@ def clean_fill(raw: dict, params: dict, fields: list[str]) -> dict:
 
     if "subtype" in fields and text["subtype"]:
         sub = text["subtype"]
-        creature = not card_type.strip() or "creature" in card_type.lower()
-        if len(sub) <= SUBTYPE_MAX and _SUBTYPE_RE.fullmatch(sub) and \
-                not (creature and any(w.lower() in NOT_CREATURE_TYPES for w in sub.split())):
+        if len(sub) <= SUBTYPE_MAX and _SUBTYPE_RE.fullmatch(sub) and _subtype_ok(card_type, sub):
             out["subtype"] = sub
 
     if "power" in fields and _has_body(card_type, out.get("subtype") or params.get("subtype") or ""):

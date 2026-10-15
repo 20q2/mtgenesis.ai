@@ -203,6 +203,9 @@ export interface PoolEntryView {
   /** Who flagged the card as broken (usernames, oldest first). Advisory: never affects rank or `in`. */
   wtfBy: string[];
   myWtf: boolean;
+  /** Who liked the card without a medal (usernames, oldest first). Advisory, like `wtfBy`. */
+  likedBy: string[];
+  myLike: boolean;
   createdAt: string;
 }
 

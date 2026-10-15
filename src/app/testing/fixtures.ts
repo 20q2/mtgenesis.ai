@@ -100,6 +100,8 @@ export function poolEntry(overrides: Partial<PoolEntryView> = {}): PoolEntryView
     myMedal: null,
     wtfBy: [],
     myWtf: false,
+    likedBy: [],
+    myLike: false,
     createdAt: '2026-09-29T19:00:00+00:00',
     ...overrides
   };

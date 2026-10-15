@@ -183,6 +183,44 @@ def test_wtf_cleared_on_withdraw_and_frozen_when_closed(tmp_storage, pool):
     assert tmp_storage.pool_wtf_voters(pool["id"]) == {b: [bob]}
 
 
+# ----- Likes ("I like this, but no medal": advisory, like WTF) -----
+def test_like_toggles_independent_of_wtf_and_medals(tmp_storage, pool):
+    alice, bob, carl = (user(tmp_storage, n) for n in ("alice", "bob", "carl"))
+    a = tmp_storage.submit_pool_entry(alice, done_card(tmp_storage, alice))["id"]
+    b = tmp_storage.submit_pool_entry(bob, done_card(tmp_storage, bob))["id"]
+
+    assert tmp_storage.like_pool_entry(carl, a) == pool["id"]
+    tmp_storage.like_pool_entry(carl, a)  # again: still one
+    tmp_storage.like_pool_entry(carl, b)  # any number of cards
+    tmp_storage.like_pool_entry(bob, a)
+    tmp_storage.flag_pool_wtf(carl, a)  # a like, a WTF and a medal are all independent
+    tmp_storage.award_pool_medal(carl, a, "gold")
+    assert tmp_storage.pool_like_voters(pool["id"]) == {a: [carl, bob], b: [carl]}
+    assert tmp_storage.pool_wtf_voters(pool["id"]) == {a: [carl]}
+
+    assert status_of(lambda: tmp_storage.like_pool_entry(alice, a)) == 403
+    assert status_of(lambda: tmp_storage.like_pool_entry(carl, str(uuid.uuid4()))) == 404
+    assert tmp_storage.clear_pool_like(carl, a) == pool["id"]
+    tmp_storage.clear_pool_like(carl, a)  # no-op
+    assert tmp_storage.pool_like_voters(pool["id"]) == {a: [bob], b: [carl]}
+    assert tmp_storage.pool_wtf_voters(pool["id"]) == {a: [carl]}
+
+
+def test_like_cleared_on_withdraw_and_frozen_when_closed(tmp_storage, pool):
+    alice, bob = user(tmp_storage, "alice"), user(tmp_storage, "bob")
+    a = tmp_storage.submit_pool_entry(alice, done_card(tmp_storage, alice))["id"]
+    b = tmp_storage.submit_pool_entry(alice, done_card(tmp_storage, alice))["id"]
+    tmp_storage.like_pool_entry(bob, a)
+    tmp_storage.like_pool_entry(bob, b)
+    tmp_storage.withdraw_pool_entry(a, alice)
+    assert tmp_storage.pool_like_voters(pool["id"]) == {b: [bob]}
+
+    tmp_storage.close_pool(pool["id"])
+    assert status_of(lambda: tmp_storage.like_pool_entry(bob, b)) == 409
+    assert status_of(lambda: tmp_storage.clear_pool_like(bob, b)) == 409
+    assert tmp_storage.pool_like_voters(pool["id"]) == {b: [bob]}
+
+
 def test_open_pool_entry_ids(tmp_storage, pool):
     alice = user(tmp_storage, "alice")
     card = done_card(tmp_storage, alice)
@@ -331,7 +369,8 @@ def test_api_admin_create_requires_pin(client):
 
 
 ENTRY_KEYS = {"id", "cardId", "card", "username", "avatarUrl", "mine", "power", "gold", "silver", "bronze",
-              "points", "rank", "in", "tiedAtCutoff", "myMedal", "wtfBy", "myWtf", "createdAt"}
+              "points", "rank", "in", "tiedAtCutoff", "myMedal", "wtfBy", "myWtf", "likedBy", "myLike",
+              "createdAt"}
 
 
 def submit_api(client, user_id, card_id):
@@ -411,6 +450,27 @@ def test_api_full_flow(client, tmp_storage):
     assert client.post("/api/v1/pools/wtf", headers=H(ids["Bob"]), json={}).status_code == 400
     assert client.post("/api/v1/pools/wtf", json={"entryId": entries["Bob"]["id"]}).status_code == 401
 
+    # Like: "I like this, but no medal". Names shown, no effect on points or the pool line.
+    def like(voter, target, on=True):
+        res = client.post("/api/v1/pools/like" + ("" if on else "/clear"), headers=H(ids[voter]),
+                          json={"entryId": entries[target]["id"]})
+        assert res.status_code == 200, res.get_json()
+        return next(e for e in res.get_json()["entries"] if e["id"] == entries[target]["id"])
+
+    before = client.get("/api/v1/pools/current", headers=H(ids["Alice"])).get_json()
+    like("Dana", "Alice")
+    carl_sees = like("Carl", "Alice")
+    assert carl_sees["likedBy"] == ["Dana", "Carl"] and carl_sees["myLike"] is True
+    assert carl_sees["wtfBy"] == []
+    after = client.get("/api/v1/pools/current", headers=H(ids["Bob"])).get_json()
+    assert [(e["id"], e["points"], e["in"]) for e in after["entries"]] ==         [(e["id"], e["points"], e["in"]) for e in before["entries"]]
+    assert next(e for e in after["entries"] if e["id"] == entries["Alice"]["id"])["myLike"] is False
+    assert like("Dana", "Alice", on=False)["likedBy"] == ["Carl"]
+    assert client.post("/api/v1/pools/like", headers=H(ids["Alice"]),
+                       json={"entryId": entries["Alice"]["id"]}).status_code == 403
+    assert client.post("/api/v1/pools/like", headers=H(ids["Alice"]), json={}).status_code == 400
+    assert client.post("/api/v1/pools/like", json={"entryId": entries["Alice"]["id"]}).status_code == 401
+
     # The card views know which cards are in the open pool.
     mine = client.get("/api/v1/me/cards", headers=H(ids["Alice"])).get_json()
     by_id = {c["id"]: c for c in mine}
@@ -430,7 +490,10 @@ def test_api_full_flow(client, tmp_storage):
     past = client.get(f"/api/v1/pools/{pool['id']}", headers=H(ids["Bob"])).get_json()
     assert len(past["entries"]) == 4
     assert next(e for e in past["entries"] if e["id"] == entries["Bob"]["id"])["wtfBy"] == ["Carl"]
+    assert next(e for e in past["entries"] if e["id"] == entries["Alice"]["id"])["likedBy"] == ["Carl"]
     assert client.post("/api/v1/pools/wtf", headers=H(ids["Dana"]),
+                       json={"entryId": entries["Bob"]["id"]}).status_code == 409
+    assert client.post("/api/v1/pools/like", headers=H(ids["Dana"]),
                        json={"entryId": entries["Bob"]["id"]}).status_code == 409
     assert client.post("/api/v1/pools/medals", headers=H(ids["Bob"]),
                        json={"entryId": entries["Dana"]["id"], "medal": "bronze"}).status_code == 409

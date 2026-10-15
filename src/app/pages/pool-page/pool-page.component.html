@@ -44,7 +44,8 @@
           <span><strong>Vote in good faith:</strong> medal the cards you'd want everyone to have: fun and balanced,
             not broken. The power check below flags cards that look too strong for their cost.
             <strong>WTF a card you think is broken:</strong> it costs no points, it tells everyone (and the host)
-            to look hard before medaling it.</span>
+            to look hard before medaling it. <strong>Like a card you enjoy but aren't medaling:</strong>
+            also free, it just lets the maker know.</span>
         </li>
         <li>
           <span class="material-icons" aria-hidden="true">workspace_premium</span>
@@ -98,7 +99,15 @@
 
     <section class="panel">
       <div class="entries-head">
-        <h3 class="section-title">{{ isOpen ? 'Entries' : 'All entries' }}</h3>
+        <div class="entries-title">
+          <h3 class="section-title">{{ isOpen ? 'Entries' : 'All entries' }}</h3>
+          <div *ngIf="hasMine" class="segmented" role="radiogroup" aria-label="Which entries">
+            <button type="button" role="radio" class="segment segment-all"
+                    [attr.aria-checked]="!showingMine" (click)="onlyMine = false">All</button>
+            <button type="button" role="radio" class="segment segment-mine"
+                    [attr.aria-checked]="showingMine" (click)="onlyMine = true">My cards</button>
+          </div>
+        </div>
         <p class="power-key">
           Power check, a rough estimate of the rules text against the card's cost:
           <span class="power power-fair"><span class="material-icons" aria-hidden="true">balance</span> Fair</span>
@@ -113,7 +122,7 @@
       </p>
 
       <div class="entries">
-        <ng-container *ngFor="let entry of p.entries; let i = index; trackBy: trackEntry">
+        <ng-container *ngFor="let entry of shownEntries; let i = index; trackBy: trackEntry">
           <div class="entry"
                [attr.data-entry-id]="entry.id"
                [ngClass]="entry.myMedal ? 'my-' + entry.myMedal : ''"
@@ -127,6 +136,10 @@
               <span *ngIf="entry.wtfBy.length" class="flag flag-wtf" [title]="wtfTitle(entry)">
                 <span class="material-icons" aria-hidden="true">report</span>
                 WTF ×{{ entry.wtfBy.length }}
+              </span>
+              <span *ngIf="entry.likedBy.length" class="flag flag-like" [title]="likeTitle(entry)">
+                <span class="material-icons" aria-hidden="true">thumb_up</span>
+                Like ×{{ entry.likedBy.length }}
               </span>
               <span *ngIf="entry.myMedal as m" class="flag flag-medal" [ngClass]="m">Your {{ m }}</span>
               <span *ngIf="entry.mine" class="flag flag-mine">Your card</span>
@@ -180,6 +193,17 @@
                 <span class="material-icons" aria-hidden="true">report</span>
                 <span class="medal-label">WTF</span>
               </button>
+              <button *ngIf="canVote(entry)"
+                      type="button"
+                      class="like-button"
+                      [class.on]="entry.myLike"
+                      [disabled]="busy"
+                      [attr.aria-pressed]="entry.myLike"
+                      [title]="entry.myLike ? 'Take your like back' : 'Like: I like this, but no medal (no points)'"
+                      (click)="toggleLike(entry)">
+                <span class="material-icons" aria-hidden="true">thumb_up</span>
+                <span class="medal-label">Like</span>
+              </button>
               <button *ngIf="entry.mine"
                       type="button"
                       class="btn btn-ghost btn-sm withdraw-button"
@@ -190,7 +214,7 @@
             </div>
           </div>
 
-          <div *ngIf="i === lineIndex && i < p.entries.length - 1" class="pool-line" role="separator">
+          <div *ngIf="!showingMine && i === lineIndex && i < p.entries.length - 1" class="pool-line" role="separator">
             <span>Pool line · {{ inEntries.length }} {{ inEntries.length === 1 ? 'card makes' : 'cards make' }} the pool</span>
           </div>
         </ng-container>

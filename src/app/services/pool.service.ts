@@ -50,6 +50,15 @@ export class PoolService {
     return this.http.post<PoolView>(api('/pools/wtf/clear'), { entryId });
   }
 
+  /** "I like this, but no medal." Never counted, like a WTF; not your own card. */
+  like(entryId: string): Observable<PoolView> {
+    return this.http.post<PoolView>(api('/pools/like'), { entryId });
+  }
+
+  clearLike(entryId: string): Observable<PoolView> {
+    return this.http.post<PoolView>(api('/pools/like/clear'), { entryId });
+  }
+
   createPool(name: string, maxEntriesPerUser: number, pin: string): Observable<PoolView> {
     return this.http.post<PoolView>(api('/admin/pools'), { name, maxEntriesPerUser },
       { headers: this.adminHeaders(pin) });

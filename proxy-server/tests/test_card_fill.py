@@ -15,7 +15,7 @@ def test_blank_fields_lists_what_the_ai_should_fill():
 def test_blank_fields_skips_what_the_type_does_not_use():
     # A land has no mana cost and no P/T; an instant has no P/T.
     assert blank_fields({"name": "X", "type": "Land", "manaCost": "", "subtype": "Desert"}) == []
-    assert blank_fields({"name": "X", "type": "Instant", "manaCost": "{R}", "subtype": ""}) == ["subtype"]
+    assert blank_fields({"name": "X", "type": "Instant", "manaCost": "{R}", "subtype": ""}) == []
     # A creature with a cost but no body gets its P/T filled
     assert blank_fields({"name": "X", "type": "Creature", "manaCost": "{1}{G}", "subtype": "Elf"}) == \
         ["power", "toughness"]
@@ -92,3 +92,23 @@ def test_apply_fill_sets_colors_and_mana_value_from_a_filled_cost():
     # a cost the player typed keeps its colors
     kept = apply_fill({"manaCost": "{W}", "colors": ["W"], "cmc": 1}, {"name": "A"})
     assert kept["colors"] == ["W"] and kept["cmc"] == 1
+
+
+def test_blank_subtype_is_only_filled_where_the_type_has_one():
+    # Spells, artifacts, enchantments and lands usually have no subtype, so a blank stays blank.
+    for card_type in ("Instant", "Sorcery", "Enchantment", "Artifact", "Land"):
+        assert "subtype" not in blank_fields({"name": "X", "type": card_type, "manaCost": "{R}"})
+    for card_type in ("Creature", "Artifact Creature", "Planeswalker", "Battle"):
+        assert "subtype" in blank_fields({"name": "X", "type": card_type, "manaCost": "{R}"})
+
+
+def test_clean_fill_keeps_only_real_subtypes_for_a_chosen_noncreature_type():
+    params = {"name": "", "manaCost": "", "type": "", "subtype": "", "rarity": "common"}
+    fields = blank_fields(params)
+    for sub in ("Treasure Token", "Sorcery", "Construct", "Forest Spirit"):
+        out = clean_fill({"type": "Instant", "subtype": sub}, params, fields)
+        assert "subtype" not in out, sub
+    assert clean_fill({"type": "Sorcery", "subtype": "Lesson"}, params, fields)["subtype"] == "Lesson"
+    assert clean_fill({"type": "Enchantment", "subtype": "Aura"}, params, fields)["subtype"] == "Aura"
+    assert clean_fill({"type": "Artifact", "subtype": "Equipment"}, params, fields)["subtype"] == "Equipment"
+    assert clean_fill({"type": "Planeswalker", "subtype": "Vraska"}, params, fields)["subtype"] == "Vraska"

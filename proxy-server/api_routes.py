@@ -302,6 +302,7 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         ranking = pool_ranking(entries, storage.pool_medal_counts(row["id"]))
         my_medals = storage.my_pool_medals(viewer_id, row["id"]) if viewer_id else {}
         wtf_voters = storage.pool_wtf_voters(row["id"])
+        like_voters = storage.pool_like_voters(row["id"])
         pool_entry_ids = storage.open_pool_entry_ids()
         users: dict[str, dict] = {}
 
@@ -328,6 +329,8 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
                 "myMedal": my_medals.get(e["id"]),
                 "wtfBy": [maker(v)["username"] for v in wtf_voters.get(e["id"], [])],
                 "myWtf": viewer_id in wtf_voters.get(e["id"], []),
+                "likedBy": [maker(v)["username"] for v in like_voters.get(e["id"], [])],
+                "myLike": viewer_id in like_voters.get(e["id"], []),
                 "createdAt": e["created_at"],
             })
         return {**pool_summary(row),
@@ -603,6 +606,18 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     def clear_pool_wtf():
         user = require_user()
         pool_id = storage.clear_pool_wtf(user["id"], entry_id_from_body())
+        return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
+
+    @bp.post("/pools/like")
+    def like_pool_entry():
+        user = require_user()
+        pool_id = storage.like_pool_entry(user["id"], entry_id_from_body())
+        return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
+
+    @bp.post("/pools/like/clear")
+    def clear_pool_like():
+        user = require_user()
+        pool_id = storage.clear_pool_like(user["id"], entry_id_from_body())
         return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
 
     @bp.get("/queue_status")

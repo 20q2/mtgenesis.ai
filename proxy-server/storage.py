@@ -144,6 +144,16 @@ CREATE TABLE IF NOT EXISTS pool_wtfs (
     UNIQUE (voter_id, entry_id)
 );
 CREATE INDEX IF NOT EXISTS pool_wtfs_pool ON pool_wtfs(pool_id);
+
+-- "I like this, but I'm not medaling it": same shape and rules as WTF, the opposite message.
+CREATE TABLE IF NOT EXISTS pool_likes (
+    voter_id    TEXT NOT NULL,
+    pool_id     TEXT NOT NULL,
+    entry_id    TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (voter_id, entry_id)
+);
+CREATE INDEX IF NOT EXISTS pool_likes_pool ON pool_likes(pool_id);
 """
 
 POOL_NAME_MAX = 80
@@ -979,19 +989,20 @@ class Storage:
         return entry
 
     def withdraw_pool_entry(self, entry_id: str, user_id: str) -> str:
-        """Remove the user's entry, its medals and WTFs while the pool is open. Returns the pool id."""
+        """Remove the user's entry, its medals, WTFs and likes while the pool is open. Returns the pool id."""
         with self._tx() as conn:
             entry = self._open_entry(conn, entry_id)
             if entry["user_id"] != user_id:
                 raise StorageError(403, "You can only withdraw your own submissions")
             conn.execute("DELETE FROM pool_medals WHERE entry_id = ?", (entry_id,))
             conn.execute("DELETE FROM pool_wtfs WHERE entry_id = ?", (entry_id,))
+            conn.execute("DELETE FROM pool_likes WHERE entry_id = ?", (entry_id,))
             conn.execute("DELETE FROM pool_entries WHERE id = ?", (entry_id,))
         return entry["pool_id"]
 
     def _votable_entry(self, conn: sqlite3.Connection, entry_id: str, voter_id: str,
                        own_card_error: str = "You can't give a medal to your own card") -> sqlite3.Row:
-        """An open pool's entry that `voter_id` may medal or WTF (not their own card)."""
+        """An open pool's entry that `voter_id` may medal, WTF or like (not their own card)."""
         entry = self._open_entry(conn, entry_id)
         if entry["user_id"] == voter_id:
             raise StorageError(403, own_card_error)
@@ -1021,31 +1032,53 @@ class Storage:
                          (voter_id, entry_id))
         return entry["pool_id"]
 
-    def pool_wtf_voters(self, pool_id: str) -> dict[str, list[str]]:
-        """entry_id -> voter ids who WTF'd it, oldest first; only entries with WTFs."""
+    # WTFs and likes: advisory flags, one per voter per card, independent of medals and never
+    # counted in the ranking. `table` is always one of the two constants below.
+    def _pool_flag_voters(self, table: str, pool_id: str) -> dict[str, list[str]]:
         voters: dict[str, list[str]] = {}
-        for r in self._all("SELECT entry_id, voter_id FROM pool_wtfs WHERE pool_id = ? "
+        for r in self._all(f"SELECT entry_id, voter_id FROM {table} WHERE pool_id = ? "
                            "ORDER BY created_at, rowid", (pool_id,)):
             voters.setdefault(r["entry_id"], []).append(r["voter_id"])
         return voters
 
-    def flag_pool_wtf(self, voter_id: str, entry_id: str) -> str:
-        """Flag a card as broken (no-op if already flagged). Independent of medals and never
-        counted in the ranking. 403 own card, 404 unknown entry, 409 pool closed. Returns the pool id."""
+    def _set_pool_flag(self, table: str, voter_id: str, entry_id: str, on: bool,
+                       own_card_error: str) -> str:
+        """Set or clear this voter's flag on the card (both idempotent).
+        403 own card, 404 unknown entry, 409 pool closed. Returns the pool id."""
         with self._tx() as conn:
-            entry = self._votable_entry(conn, entry_id, voter_id, "You can't WTF your own card")
-            conn.execute(
-                "INSERT OR IGNORE INTO pool_wtfs (voter_id, pool_id, entry_id, created_at) "
-                "VALUES (?, ?, ?, ?)", (voter_id, entry["pool_id"], entry_id, _now()))
+            entry = self._votable_entry(conn, entry_id, voter_id, own_card_error)
+            if on:
+                conn.execute(
+                    f"INSERT OR IGNORE INTO {table} (voter_id, pool_id, entry_id, created_at) "
+                    "VALUES (?, ?, ?, ?)", (voter_id, entry["pool_id"], entry_id, _now()))
+            else:
+                conn.execute(f"DELETE FROM {table} WHERE voter_id = ? AND entry_id = ?",
+                             (voter_id, entry_id))
         return entry["pool_id"]
 
+    def pool_wtf_voters(self, pool_id: str) -> dict[str, list[str]]:
+        """entry_id -> voter ids who WTF'd it, oldest first; only entries with WTFs."""
+        return self._pool_flag_voters("pool_wtfs", pool_id)
+
+    def flag_pool_wtf(self, voter_id: str, entry_id: str) -> str:
+        """Flag a card as broken (no-op if already flagged)."""
+        return self._set_pool_flag("pool_wtfs", voter_id, entry_id, True, "You can't WTF your own card")
+
     def clear_pool_wtf(self, voter_id: str, entry_id: str) -> str:
-        """Take back this voter's WTF on the card (no-op if none). Returns the pool id."""
-        with self._tx() as conn:
-            entry = self._votable_entry(conn, entry_id, voter_id, "You can't WTF your own card")
-            conn.execute("DELETE FROM pool_wtfs WHERE voter_id = ? AND entry_id = ?",
-                         (voter_id, entry_id))
-        return entry["pool_id"]
+        """Take back this voter's WTF on the card (no-op if none)."""
+        return self._set_pool_flag("pool_wtfs", voter_id, entry_id, False, "You can't WTF your own card")
+
+    def pool_like_voters(self, pool_id: str) -> dict[str, list[str]]:
+        """entry_id -> voter ids who liked it, oldest first; only entries with likes."""
+        return self._pool_flag_voters("pool_likes", pool_id)
+
+    def like_pool_entry(self, voter_id: str, entry_id: str) -> str:
+        """Say "I like this" without a medal (no-op if already liked)."""
+        return self._set_pool_flag("pool_likes", voter_id, entry_id, True, "You can't like your own card")
+
+    def clear_pool_like(self, voter_id: str, entry_id: str) -> str:
+        """Take back this voter's like on the card (no-op if none)."""
+        return self._set_pool_flag("pool_likes", voter_id, entry_id, False, "You can't like your own card")
 
 
 def leader_flags(tally: dict[str, int], card_ids: list[str]) -> dict[str, dict]:

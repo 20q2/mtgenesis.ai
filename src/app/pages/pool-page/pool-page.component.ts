@@ -21,7 +21,8 @@ export const MEDALS: { medal: Medal; label: string; points: number }[] = [
  * /pool: the open Knowledge Pool (spec docs/superpowers/specs/2026-09-29-knowledge-pool-design.md).
  * Every entry in one ranked list; each player gives one gold, silver and bronze (3/2/1, never
  * their own card) and the top floor(players / 2) make the pool. Anyone can also WTF any card they
- * think is broken: a visible warning with names that never changes the ranking. Cards are submitted from the
+ * think is broken, or Like one they enjoy but aren't medaling: visible with names, never changing the
+ * ranking. Cards are submitted from the
  * create screen and the gallery. /pool/:id shows a pool read-only. Polls every 10s while visible.
  */
 @Component({
@@ -35,9 +36,11 @@ export class PoolPageComponent implements OnInit, OnDestroy {
   pastPools: PoolSummary[] | null = null;
   loadError: string | null = null;
   error: string | null = null;
-  /** True while a medal, WTF or withdraw request is in flight (guards double clicks). */
+  /** True while a medal, WTF, like or withdraw request is in flight (guards double clicks). */
   busy = false;
   readonly medals = MEDALS;
+  /** Show only the cards I submitted (each keeps its rank); the pool line is hidden then. */
+  onlyMine = false;
 
   private readonly refresh$ = new Subject<void>();
   private routeId: string | null = null;
@@ -79,6 +82,21 @@ export class PoolPageComponent implements OnInit, OnDestroy {
   /** The cards that make the pool (so far, while it's open). */
   get inEntries(): PoolEntryView[] {
     return this.pool?.entries.filter(e => e.in) ?? [];
+  }
+
+  /** Whether I have any card in this pool (the "My cards" toggle only shows then). */
+  get hasMine(): boolean {
+    return !!this.pool?.entries.some(e => e.mine);
+  }
+
+  get showingMine(): boolean {
+    return this.onlyMine && this.hasMine;
+  }
+
+  /** The entries listed: all of them in rank order, or just mine. */
+  get shownEntries(): PoolEntryView[] {
+    const entries = this.pool?.entries ?? [];
+    return this.showingMine ? entries.filter(e => e.mine) : entries;
   }
 
   /** Index of the last entry that is in; the pool line is drawn after it (-1: no line). */
@@ -124,6 +142,15 @@ export class PoolPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  /** "I like this, but no medal", or take it back. Never changes the ranking. */
+  toggleLike(entry: PoolEntryView): void {
+    if (entry.myLike) {
+      this.run(this.pools.clearLike(entry.id), 'Could not take your like back.');
+    } else {
+      this.run(this.pools.like(entry.id), 'Your like did not go through. Please try again.');
+    }
+  }
+
   withdraw(entry: PoolEntryView): void {
     const name = entry.card.card?.name || 'this card';
     if (!window.confirm(`Withdraw "${name}" from the pool? Its medals are cleared.`)) {
@@ -156,6 +183,10 @@ export class PoolPageComponent implements OnInit, OnDestroy {
 
   wtfTitle(entry: PoolEntryView): string {
     return `WTF from ${entry.wtfBy.join(', ')}`;
+  }
+
+  likeTitle(entry: PoolEntryView): string {
+    return `Liked by ${entry.likedBy.join(', ')}`;
   }
 
   powerTitle(power: PowerCheck): string {

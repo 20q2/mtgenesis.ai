@@ -33,7 +33,7 @@ describe('PoolPageComponent', () => {
         poolEntry({ id: 'e2', gold: 1, points: 3, rank: 2, in: true, tiedAtCutoff: true, card: card('c2') }),
         poolEntry({ id: 'e3', bronze: 1, points: 1, rank: 4, card: card('c3'),
                     power: { estimate: 3.6, budget: 0.25, verdict: 'over' },
-                    wtfBy: ['Ann', 'Bob'], myWtf: true }),
+                    wtfBy: ['Ann', 'Bob'], myWtf: true, likedBy: ['Cat'], myLike: false }),
         poolEntry({ id: 'e4', rank: 5, mine: true, username: 'Me', card: card('c4') })
       ],
       ...overrides
@@ -42,7 +42,7 @@ describe('PoolPageComponent', () => {
 
   function setup(current: PoolView | null) {
     pools = jasmine.createSpyObj<PoolService>('PoolService',
-      ['current', 'get', 'list', 'withdraw', 'medal', 'clearMedal', 'wtf', 'clearWtf']);
+      ['current', 'get', 'list', 'withdraw', 'medal', 'clearMedal', 'wtf', 'clearWtf', 'like', 'clearLike']);
     pools.current.and.returnValue(of(current));
     pools.list.and.returnValue(of([]));
     const media = jasmine.createSpyObj<MediaService>('MediaService', ['src', 'download']);
@@ -66,6 +66,29 @@ describe('PoolPageComponent', () => {
   const tile = (id: string) => el().querySelector(`[data-entry-id="${id}"]`) as HTMLElement;
   const tileIds = () => Array.from(el().querySelectorAll('.entries [data-entry-id]'))
     .map(t => (t as HTMLElement).dataset['entryId']);
+
+  it('narrows the entries to my cards and back, keeping their rank', () => {
+    setup(contested());
+    expect(tileIds()).toEqual(['e0', 'e1', 'e2', 'e3', 'e4']);
+    expect(el().querySelector('.pool-line')).not.toBeNull();
+
+    (el().querySelector('.segment-mine') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(tileIds()).toEqual(['e4']);
+    expect(tile('e4').querySelector('.flag-rank')!.textContent).toContain('#5');
+    expect(el().querySelector('.pool-line')).toBeNull();
+    expect(el().querySelector('.segment-mine')!.getAttribute('aria-checked')).toBe('true');
+
+    (el().querySelector('.segment-all') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(tileIds()).toEqual(['e0', 'e1', 'e2', 'e3', 'e4']);
+  });
+
+  it('hides the My cards toggle when I have no entries', () => {
+    const view = contested();
+    setup({ ...view, myEntryCount: 0, entries: view.entries.filter(e => !e.mine) });
+    expect(el().querySelector('.segmented')).toBeNull();
+  });
 
   it('says what the Knowledge Pool is', () => {
     setup(contested());
@@ -165,6 +188,26 @@ describe('PoolPageComponent', () => {
     expect(tile('e4').querySelector('.wtf-button')).toBeNull();
   });
 
+  it('shows likes with who gave them; Like toggles apart from medals and WTF, never on my own card', () => {
+    setup(contested());
+    pools.like.and.returnValue(of(contested()));
+
+    const flag = tile('e3').querySelector('.flag-like') as HTMLElement;
+    expect(flag.textContent!.replace(/\s+/g, ' ').trim()).toContain('Like ×1');
+    expect(flag.getAttribute('title')).toBe('Liked by Cat');
+    expect(tile('e1').querySelector('.flag-like')).toBeNull();
+
+    const button = tile('e3').querySelector('.like-button') as HTMLButtonElement;
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    expect(button.closest('.medal-buttons')).toBeNull();
+    button.click();
+    expect(pools.like).toHaveBeenCalledWith('e3');
+    expect(pools.wtf).not.toHaveBeenCalled();
+    expect(pools.clearWtf).not.toHaveBeenCalled();
+    expect(pools.medal).not.toHaveBeenCalled();
+    expect(tile('e4').querySelector('.like-button')).toBeNull();
+  });
+
   it('shows the medals I have given in the header', () => {
     setup(contested());
     const chips = Array.from(el().querySelectorAll('.my-medal')) as HTMLElement[];
@@ -187,6 +230,8 @@ describe('PoolPageComponent', () => {
     expect(el().querySelector('.withdraw-button')).toBeNull();
     expect(el().querySelector('.wtf-button')).toBeNull();
     expect(tile('e3').querySelector('.flag-wtf')).not.toBeNull();
+    expect(el().querySelector('.like-button')).toBeNull();
+    expect(tile('e3').querySelector('.flag-like')).not.toBeNull();
     const made = Array.from(el().querySelectorAll('.results [data-result-id]'))
       .map(r => (r as HTMLElement).dataset['resultId']);
     expect(made).toEqual(['e0', 'e1', 'e2']);
