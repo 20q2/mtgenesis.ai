@@ -96,7 +96,10 @@ export class TokenMakerPageComponent implements OnInit, OnDestroy {
       toughness: ['1'],
       description: ['', Validators.maxLength(300)],
       flavorText: ['', Validators.maxLength(160)],
-      artPrompt: ['', Validators.maxLength(400)]
+      artPrompt: ['', Validators.maxLength(400)],
+      // Off: a blank name / flavor text stays blank on the card instead of the AI filling it
+      aiName: [true],
+      aiFlavor: [true]
     });
   }
 
@@ -179,13 +182,21 @@ export class TokenMakerPageComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** P/T is optional, but both or neither: a filled one must be valid, and so must its partner. */
   ptInvalid(key: 'power' | 'toughness'): boolean {
-    return this.isCreature && !PT_PATTERN.test(String(this.form.value[key] ?? '').trim());
+    if (!this.isCreature) {
+      return false;
+    }
+    const power = String(this.form.value.power ?? '').trim();
+    const toughness = String(this.form.value.toughness ?? '').trim();
+    if (!power && !toughness) {
+      return false;
+    }
+    return !PT_PATTERN.test(key === 'power' ? power : toughness);
   }
 
   /** Why Make token is disabled, or null when it can go. */
   blocker(): string | null {
-    const v = this.form.value;
     if (!this.online) {
       return 'The server is offline';
     }
@@ -193,10 +204,7 @@ export class TokenMakerPageComponent implements OnInit, OnDestroy {
       return 'Some fields are too long';
     }
     if (this.ptInvalid('power') || this.ptInvalid('toughness')) {
-      return 'Creature tokens need a power and toughness';
-    }
-    if (!v.name.trim() && !v.subtype.trim() && !v.artPrompt.trim()) {
-      return 'Give it a name, a type or an art description';
+      return 'Power and toughness go together (or leave both blank)';
     }
     return null;
   }
@@ -211,7 +219,9 @@ export class TokenMakerPageComponent implements OnInit, OnDestroy {
       colors: v.colors,
       description: v.description.trim(),
       flavorText: v.flavorText.trim(),
-      artPrompt: v.artPrompt.trim()
+      artPrompt: v.artPrompt.trim(),
+      aiName: v.aiName,
+      aiFlavor: v.aiFlavor
     };
     if (this.isCreature) {
       req.power = String(v.power ?? '').trim();

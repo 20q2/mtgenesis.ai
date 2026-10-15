@@ -100,6 +100,9 @@ export interface TokenRequest {
   description: string;
   flavorText: string;
   artPrompt: string;
+  /** The AI fills a blank name / flavor text (default true); false keeps it blank. */
+  aiName?: boolean;
+  aiFlavor?: boolean;
 }
 
 export interface CardView {

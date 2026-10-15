@@ -138,15 +138,23 @@
                    class="night-input" [placeholder]="isCreature ? 'Goblin, Zombie Knight, Squirrel…' : 'Treasure, Clue, Aura…'">
           </div>
           <div class="field">
-            <label for="token-name" class="field-label">Name <span class="optional">blank: the AI names it</span></label>
+            <div class="label-row">
+              <label for="token-name" class="field-label">Name <span class="optional">optional</span></label>
+              <label class="ai-toggle" title="When the name is blank, let the AI name it">
+                <input type="checkbox" formControlName="aiName">
+                <span class="ai-switch" aria-hidden="true"></span>
+                AI fills it
+              </label>
+            </div>
             <input id="token-name" type="text" formControlName="name" maxlength="30" autocomplete="off"
-                   class="night-input name-input" placeholder="Real tokens use their type">
+                   class="night-input name-input"
+                   [placeholder]="form.value.aiName ? 'Blank: the AI names it' : 'Blank: no name'">
           </div>
         </div>
 
-        <div class="pt-row" *ngIf="isCreature">
+        <div class="pt-row" *ngIf="isCreature" title="Leave both blank for no power/toughness box">
           <div class="field">
-            <label for="token-power" class="field-label">Power</label>
+            <label for="token-power" class="field-label">Power <span class="optional">optional</span></label>
             <input id="token-power" type="text" formControlName="power" maxlength="2" autocomplete="off"
                    inputmode="numeric" class="night-input pt-input" [attr.aria-invalid]="ptInvalid('power')">
           </div>
@@ -173,9 +181,16 @@
         </div>
 
         <div class="field">
-          <label for="token-flavor" class="field-label">Flavor text <span class="optional">blank: the AI writes something funny</span></label>
+          <div class="label-row">
+            <label for="token-flavor" class="field-label">Flavor text <span class="optional">optional</span></label>
+            <label class="ai-toggle" title="When the flavor text is blank, let the AI write something funny">
+              <input type="checkbox" formControlName="aiFlavor">
+              <span class="ai-switch" aria-hidden="true"></span>
+              AI fills it
+            </label>
+          </div>
           <textarea id="token-flavor" formControlName="flavorText" rows="2" maxlength="160" class="night-input"
-                    placeholder="Leave blank for a joke"></textarea>
+                    [placeholder]="form.value.aiFlavor ? 'Blank: the AI writes something funny' : 'Blank: no flavor text'"></textarea>
           <span class="hint muted" *ngIf="selectedFrame?.hasText === false">This frame has no text box, so the flavor shows under the card.</span>
         </div>
 

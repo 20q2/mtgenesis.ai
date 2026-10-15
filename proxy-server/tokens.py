@@ -124,25 +124,29 @@ def token_params(data: dict) -> dict:
         "description": _text(data.get("description"), TEXT_MAX, "Abilities"),
         "flavorText": _text(data.get("flavorText"), FLAVOR_MAX, "Flavor text"),
         "artPrompt": _text(data.get("artPrompt"), ART_MAX, "Art description").replace("\n", " "),
+        # Whether the AI fills a blank name / flavor text; off, the field stays blank on the card
+        "aiName": data.get("aiName") is not False,
+        "aiFlavor": data.get("aiFlavor") is not False,
         # The rest of the app reads these from every card
         "manaCost": "", "cmc": 0, "rarity": "common",
     }
     if "creature" in card_type.lower():
-        for key in ("power", "toughness"):
-            value = str(data.get(key) if data.get(key) is not None else "").strip().upper()
-            if not PT_RE.match(value):
-                raise TokenError("Creature tokens need a power and toughness (0-99, * or X)")
-            params[key] = value
-    if params["name"] == "" and params["subtype"] == "" and params["artPrompt"] == "":
-        raise TokenError("Give the token a name, a creature type or an art description")
+        # Optional: both or neither (a creature token without them prints no P/T box)
+        pt = [str(data.get(k) if data.get(k) is not None else "").strip().upper()
+              for k in ("power", "toughness")]
+        if any(pt):
+            if not all(PT_RE.match(v) for v in pt):
+                raise TokenError("Power and toughness go together: 0-99, * or X")
+            params["power"], params["toughness"] = pt
     return params
 
 
 def preview_params(data: dict) -> dict:
     """Lenient params for the live preview: anything unfinished is just left off. A blank
-    name shows the subtype, as the finished token prints it when the AI names nothing."""
+    name the AI will fill shows the subtype, which the finished token prints if the AI's
+    name doesn't come through."""
     params = _preview_params(data)
-    if not params.get("name"):
+    if not params.get("name") and params.get("aiName", True):
         params["name"] = params.get("subtype") or "Token"
     return params
 
@@ -160,7 +164,8 @@ def _preview_params(data: dict) -> dict:
     params = {"kind": KIND, "frame": frame, "type": card_type,
               "colors": [c for c in COLORS if c in colors],
               "name": clip("name", NAME_MAX), "subtype": clip("subtype", SUBTYPE_MAX),
-              "description": clip("description", TEXT_MAX), "flavorText": clip("flavorText", FLAVOR_MAX)}
+              "description": clip("description", TEXT_MAX), "flavorText": clip("flavorText", FLAVOR_MAX),
+              "aiName": data.get("aiName") is not False, "aiFlavor": data.get("aiFlavor") is not False}
     if "creature" in card_type.lower():
         for key in ("power", "toughness"):
             value = str(data.get(key) or "").strip().upper()
@@ -172,7 +177,9 @@ def art_prompt(params: dict) -> str:
     """The subject handed to image_generation.build_art_prompt."""
     if params.get("artPrompt"):
         return params["artPrompt"]
-    subject = params.get("subtype") or params.get("name") or "mysterious creature"
+    card_type = (params.get("type") or "Creature").lower()
+    subject = params.get("subtype") or params.get("name") or (
+        "mysterious creature" if "creature" in card_type else f"mysterious {card_type}")
     return f"{subject}, {params.get('name')}" if params.get("name") and params.get("subtype") else subject
 
 
@@ -205,7 +212,8 @@ def build_messages(params: dict, rng: random.Random) -> list[dict]:
         facts.append("Abilities: " + params["description"].replace("\n", "; "))
     if params.get("artPrompt"):
         facts.append(f"Its painting shows: {params['artPrompt']}")
-    ask = ("Also give it a name." if not params.get("name") else "Leave name empty.")
+    wants_name = not params.get("name") and params.get("aiName", True)
+    ask = "Also give it a name." if wants_name else "Leave name empty."
     angle = rng.choice(FLAVOR_ANGLES)
     user = "\n".join(facts) + f"\n\nWrite the flavor text as {angle}. {ask}"
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
@@ -254,8 +262,8 @@ def generate_flavor(params: dict, client, model: str, *, rng=None, keep_alive="3
     """JSON {"name", "flavorText"} for the queue's text half. Never raises and never empty:
     a failed reply gives "{}" and the token prints without flavor (or named by its type)."""
     rng = rng or random.Random()
-    want_flavor = not params.get("flavorText")
-    want_name = not params.get("name")
+    want_flavor = not params.get("flavorText") and params.get("aiFlavor", True)
+    want_name = not params.get("name") and params.get("aiName", True)
     out: dict = {}
     if want_flavor or want_name:
         for _ in range(2):
@@ -296,6 +304,6 @@ def finalize_token(params: dict, generated_text: str | None, art_b64: str | None
             card["name"] = reply["name"]
         if not card.get("flavorText") and reply.get("flavorText"):
             card["flavorText"] = reply["flavorText"]
-    if not card.get("name"):
-        card["name"] = card.get("subtype") or "Token"
+    if not card.get("name") and card.get("aiName", True):
+        card["name"] = card.get("subtype") or "Token"  # the AI's name didn't come through
     return card, render(card, art_b64)

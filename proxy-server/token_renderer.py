@@ -314,12 +314,13 @@ def render_token_image(card: dict, artwork_base64: Optional[str] = None) -> Imag
         image.alpha_composite(pt_box, _scale(*PT_BOX_TOPLEFT))
 
     # Name, centred in its bar
-    name = (card.get("name") or "").strip() or "Token"
-    nx0, _ = _scale(frame.name_span[0], 0)
-    nx1, ny = _scale(frame.name_span[1], frame.name_y)
-    size = _fit_size(name, nx1 - nx0, NAME_MAX_SIZE, NAME_MIN_SIZE)
-    fill, shadow = _ink(image, (nx0, ny - 10, nx1, ny + 10))
-    _shadowed_text(image, ((nx0 + nx1) // 2, ny), name, _font(size), fill, shadow, "mm")
+    name = (card.get("name") or "").strip()  # blank when the player chose to leave it blank
+    if name:
+        nx0, _ = _scale(frame.name_span[0], 0)
+        nx1, ny = _scale(frame.name_span[1], frame.name_y)
+        size = _fit_size(name, nx1 - nx0, NAME_MAX_SIZE, NAME_MIN_SIZE)
+        fill, shadow = _ink(image, (nx0, ny - 10, nx1, ny + 10))
+        _shadowed_text(image, ((nx0 + nx1) // 2, ny), name, _font(size), fill, shadow, "mm")
 
     # Type line, with the site logo as the set symbol at its right end
     tx0, ty = _scale(frame.type_span[0], frame.type_y)

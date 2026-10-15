@@ -53,9 +53,9 @@ def test_token_params_keeps_the_form_and_marks_the_kind():
     ({"frame": "nope"}, "Unknown frame"),
     ({"type": "Instant"}, "type must be"),
     ({"colors": ["P"]}, "colors"),
-    ({"power": ""}, "power and toughness"),
+    ({"power": ""}, "go together"),
+    ({"power": "big"}, "go together"),
     ({"name": "x" * 31}, "30 characters"),
-    ({"name": "", "subtype": "", "artPrompt": ""}, "name, a creature type or an art"),
 ])
 def test_token_params_rejects_bad_input(change, message):
     with pytest.raises(tokens.TokenError, match=message):
@@ -235,3 +235,46 @@ def test_flavor_cleanup_drops_copies_markdown_and_invented_types():
     assert tokens.clean_flavor("The form said 'list all.'", "") == "The form said 'list all.'"
     assert tokens.clean_name("Goblin Gold Hoarder", "Treasure") == ""
     assert tokens.clean_name("Zombie Intern", "Zombie") == "Zombie Intern"
+
+
+# ----- leaving fields blank -----
+
+def test_every_field_can_be_left_blank():
+    params = tokens.token_params({"frame": "classic", "type": "Creature", "aiName": False, "aiFlavor": False})
+    assert params["name"] == "" and params["subtype"] == "" and "power" not in params
+    assert tokens.art_prompt(params) == "mysterious creature"
+    assert tokens.art_prompt({**params, "type": "Artifact"}) == "mysterious artifact"
+
+
+def test_the_ai_fills_blanks_by_default():
+    params = tokens.token_params(GOBLIN)
+    assert params["aiName"] is True and params["aiFlavor"] is True
+
+
+def test_blank_fields_the_ai_should_not_fill_skip_the_model():
+    client = FakeClient()
+    params = tokens.token_params({**GOBLIN, "aiName": False, "aiFlavor": False})
+    assert tokens.generate_flavor(params, client, "m") == "{}"
+    assert client.calls == []
+
+
+def test_only_the_wanted_blank_is_filled():
+    client = FakeClient({"name": "Coin Goblin", "quote": "Mine.", "speaker": ""})
+    params = tokens.token_params({**GOBLIN, "aiName": False})
+    assert json.loads(tokens.generate_flavor(params, client, "m")) == {"flavorText": "Mine."}
+    assert "Leave name empty" in client.calls[0]["messages"][1]["content"]
+
+
+def test_a_name_left_blank_stays_blank():
+    params = tokens.token_params({**GOBLIN, "aiName": False, "aiFlavor": False})
+    card, _ = tokens.finalize_token(params, "{}", None, render=lambda c, a: "PNG")
+    assert card["name"] == "" and card["flavorText"] == ""
+    assert tokens.preview_params({**GOBLIN, "aiName": False})["name"] == ""
+    assert tokens.preview_params(GOBLIN)["name"] == "Goblin"
+    token_renderer.render_token_image(card)  # an empty title bar draws fine
+
+
+def test_a_creature_without_pt_prints_no_pt_box():
+    params = tokens.token_params({**GOBLIN, "power": "", "toughness": ""})
+    assert "power" not in params
+    token_renderer.render_token_image(params)

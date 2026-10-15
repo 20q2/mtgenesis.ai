@@ -94,6 +94,76 @@ textarea.night-input {
   line-height: 1.35;
 }
 
+/* A field label with its "AI fills it" switch on the right */
+.label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+
+  .field-label {
+    margin-bottom: 0.3rem;
+  }
+}
+
+.ai-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+
+  input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+  }
+
+  .ai-switch {
+    position: relative;
+    width: 28px;
+    height: 16px;
+    border-radius: var(--r-pill);
+    background: var(--line-strong);
+    transition: background-color var(--dur-fast) ease;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-1);
+      transition: transform var(--dur) var(--ease-out);
+    }
+  }
+
+  input:checked + .ai-switch {
+    background: var(--accent);
+
+    &::after {
+      transform: translateX(12px);
+    }
+  }
+
+  &:has(input:checked) {
+    color: var(--accent-text);
+  }
+
+  input:focus-visible + .ai-switch {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}
+
 .hint {
   display: block;
   margin-top: 0.25rem;

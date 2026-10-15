@@ -134,6 +134,8 @@ Optional player faces. The spec is `docs/superpowers/specs/2026-10-14-profile-pi
 
 `/tokens` in the app (`TokenMakerPageComponent`). Players type a token (name, type, subtype, colors, P/T, abilities), pick a frame, and the AI paints the art and writes a short funny flavor text (and a name when it's blank).
 
+- Every text field may be left blank. Name and flavor have an "AI fills it" switch (`aiName` / `aiFlavor` in the params, default on). When it's off, a blank stays blank on the card. P/T is both-or-neither; a creature with neither gets no P/T box.
+
 - A token is a normal `cards` row with `card_params.kind == "token"`, so the queue, pending cap, gallery, sharing and media all apply. It never enters the Knowledge Pool (`pool_card_eligible`), and the gallery labels it "Token".
 - `proxy-server/tokens.py`: `token_params` validates the form, `generate_flavor` is the queue's text half (Ollama JSON; `num_ctx` must match rules text's 2560 or Ollama reloads the model; it never raises), and `finalize_token` is the render half. In `GenerationQueue`, tokens pass the brief stage without a director brief. app.py's `text_fn` / `art_fn` / `render_fn` dispatch on the kind.
 - `proxy-server/token_renderer.py`: the nine `FRAMES` (Card Conjurer token Regular/Tall/Textless, m15Promo, Expedition, Ixalan, Invention, Seventh, Legends), measured on the 1500×2100 template. Art is cover-fitted to each frame's `art_box` and painted at a matching SDXL size (`tokens.art_sizes`). Text is black or white depending on the paint underneath it; flavor is slanted Garamond (no italic font ships). `frame_code` is mirrored by `tokenFrameCode` in `token.service.ts`.
