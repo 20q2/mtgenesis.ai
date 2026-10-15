@@ -1,0 +1,266 @@
+/* Token Maker. The stage, overlay, toasts and downloads come from the create page's styles
+   (listed first in styleUrls); this file adds the live preview, the frame picker and the form. */
+
+.preview-card {
+  position: relative;
+  width: 100%;
+
+  img {
+    transition: filter var(--dur) ease, opacity var(--dur) ease;
+  }
+
+  /* A new preview is on its way: dim the old one a touch instead of flashing a spinner */
+  &.refreshing img {
+    opacity: 0.85;
+  }
+}
+
+.preview-placeholder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 496 / 693;
+  border-radius: 4.5% / 3.2%;
+  background: rgba(16, 14, 26, 0.55);
+}
+
+.preview-tag {
+  position: absolute;
+  left: 50%;
+  bottom: -0.9rem;
+  transform: translateX(-50%);
+  padding: 0.15rem 0.7rem;
+  border-radius: var(--r-pill);
+  background: var(--chrome);
+  color: var(--chrome-text);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: var(--shadow-1);
+}
+
+.off-card-flavor {
+  max-width: 30ch;
+  margin: 0;
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--r-md);
+  background: var(--scrim);
+  box-shadow: var(--shadow-1);
+  color: var(--text);
+  font-family: 'Palatino Linotype', 'Book Antiqua', serif;
+  font-style: italic;
+  text-align: center;
+  white-space: pre-line;
+}
+
+/* ===== Form ===== */
+.token-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 1rem;
+}
+
+.field {
+  min-width: 0;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.chip-sm {
+  min-height: 28px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.84rem;
+}
+
+.name-input {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+}
+
+textarea.night-input {
+  resize: vertical;
+  min-height: 3.6rem;
+  line-height: 1.35;
+}
+
+.hint {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+}
+
+/* ===== Frame picker ===== */
+.frame-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 0.6rem;
+}
+
+.frame-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.35rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-raised);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease-out), border-color var(--dur-fast) ease,
+              box-shadow var(--dur) var(--ease-out);
+
+  &:hover {
+    transform: translateY(-2px);
+    border-color: var(--line-gold);
+    box-shadow: var(--shadow-1);
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
+
+  &[aria-checked='true'] {
+    border-color: var(--accent);
+    background: #fbf1d3;
+    box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.45), var(--shadow-gold);
+
+    .frame-name {
+      color: var(--accent-text);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}
+
+.frame-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 496 / 693;
+  border-radius: 5% / 3.6%;
+  background: rgba(16, 14, 26, 0.18);
+  overflow: hidden;
+
+  img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    animation: fadeIn 300ms ease both;
+  }
+}
+
+.frame-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.frame-blurb {
+  margin: 0.5rem 0 0;
+  font-size: 0.86rem;
+}
+
+/* ===== Colors ===== */
+.color-row {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.color-pip {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.45;
+  filter: grayscale(0.7);
+  transition: opacity var(--dur-fast) ease, filter var(--dur-fast) ease, transform var(--dur) var(--ease-out),
+              border-color var(--dur-fast) ease;
+
+  .ms {
+    font-size: 1.45rem;
+  }
+
+  &:hover {
+    opacity: 0.8;
+    transform: translateY(-2px);
+  }
+
+  &[aria-pressed='true'] {
+    opacity: 1;
+    filter: none;
+    border-color: var(--accent);
+    box-shadow: var(--shadow-gold);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}
+
+/* ===== P/T ===== */
+.pt-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+
+  .field {
+    width: 6.5rem;
+  }
+}
+
+.pt-input {
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+}
+
+.pt-slash {
+  padding-bottom: 0.45rem;
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  color: var(--text-muted);
+}
+
+/* ===== Submit ===== */
+.submit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.make-btn {
+  min-width: 11rem;
+}
+
+.blocker {
+  font-size: 0.86rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frame-tile,
+  .color-pip {
+    transition: none;
+  }
+}

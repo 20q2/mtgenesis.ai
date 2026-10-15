@@ -72,7 +72,35 @@ export interface CardParams {
   commanderKind?: CommanderKind;
 }
 
-export interface GeneratedCardData extends CardParams { flavorText?: string; }
+export interface GeneratedCardData extends CardParams {
+  flavorText?: string;
+  /** "token" for Token Maker cards (their frame id in `frame`); absent on regular cards. */
+  kind?: 'token';
+  frame?: string;
+}
+
+// ===== Token Maker (proxy-server/tokens.py) =====
+
+export type TokenType = 'Creature' | 'Artifact Creature' | 'Enchantment Creature' | 'Artifact' | 'Enchantment' | 'Land';
+
+/** A frame the player can pick; hasText: false frames print no abilities or flavor. */
+export interface TokenFrame { id: string; label: string; blurb: string; hasText: boolean; }
+
+export interface TokenFramesResponse { frames: TokenFrame[]; types: TokenType[]; }
+
+/** The Token Maker form, as POST /tokens and /tokens/preview take it. */
+export interface TokenRequest {
+  frame: string;
+  name: string;
+  type: TokenType;
+  subtype: string;
+  colors: string[];
+  power?: string;
+  toughness?: string;
+  description: string;
+  flavorText: string;
+  artPrompt: string;
+}
 
 export interface CardView {
   id: string;

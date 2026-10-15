@@ -34,6 +34,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   readonly navLinks: NavLink[] = [
     { path: '/create', label: 'Create', short: 'Create', icon: 'auto_awesome' },
+    { path: '/tokens', label: 'Token Maker', short: 'Tokens', icon: 'toll' },
     { path: '/set', label: 'Commanders', short: 'Commanders', icon: 'style' },
     {
       label: 'Gallery', short: 'Gallery', icon: 'collections', children: [

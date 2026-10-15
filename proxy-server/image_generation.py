@@ -453,8 +453,8 @@ def _is_nsfw(image: Image.Image) -> bool:
         return False
 
 
-def _placeholder_art() -> Image.Image:
-    return Image.new("RGB", tuple(config.ART_BOX_SIZE), color=(50, 50, 50))
+def _placeholder_art(size=None) -> Image.Image:
+    return Image.new("RGB", tuple(size or config.ART_BOX_SIZE), color=(50, 50, 50))
 
 
 def _png_base64(image: Image.Image) -> str:
@@ -463,16 +463,18 @@ def _png_base64(image: Image.Image) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
-def generate_art(prompt: str, card_data: dict | None) -> str:
-    """Raw base64 PNG (no data: prefix) at config.ART_BOX_SIZE.
+def generate_art(prompt: str, card_data: dict | None, *, gen_size=None, out_size=None) -> str:
+    """Raw base64 PNG (no data: prefix) at config.ART_BOX_SIZE, or out_size painted at
+    gen_size (tokens: art shaped like the frame's art box, tokens.art_sizes).
 
     Placeholder mode returns a solid gray image without importing torch. Any model
     failure raises, so callers can mark the card failed. Art the nudity check flags is
     re-rendered (each render has a fresh random seed); if every attempt is flagged the card
     gets the gray placeholder instead.
     """
+    out_size = tuple(out_size or config.ART_BOX_SIZE)
     if config.MODEL_SIZE == "placeholder":
-        return _png_base64(_placeholder_art())
+        return _png_base64(_placeholder_art(out_size))
 
     pipe = _get_pipeline()
 
@@ -480,7 +482,7 @@ def generate_art(prompt: str, card_data: dict | None) -> str:
         return len(pipe.tokenizer(text).input_ids) - 2  # minus the start/end tokens
 
     positive, negative = build_art_prompt(prompt, card_data, count_tokens)
-    width, height = config.IMAGE_GEN_SIZE
+    width, height = gen_size or config.IMAGE_GEN_SIZE
     print(f"🎨 Generating art ({count_tokens(positive)} tokens): {positive}")
 
     for attempt in range(1, max(1, config.NSFW_ATTEMPTS) + 1):
@@ -496,10 +498,10 @@ def generate_art(prompt: str, card_data: dict | None) -> str:
             ).images[0]
             print(f"⚡ Art inference took {time.perf_counter() - start:.2f}s")
 
-        art = image.convert("RGB").resize(tuple(config.ART_BOX_SIZE), Image.LANCZOS)
+        art = image.convert("RGB").resize(out_size, Image.LANCZOS)
         if not _is_nsfw(art):
             return _png_base64(art)
         print(f"🚫 Art flagged by the nudity check (attempt {attempt}/{config.NSFW_ATTEMPTS})")
 
     print("🚫 Every render was flagged; using placeholder art")
-    return _png_base64(_placeholder_art())
+    return _png_base64(_placeholder_art(out_size))

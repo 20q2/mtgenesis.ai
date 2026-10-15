@@ -85,6 +85,9 @@ export class GalleryPageComponent implements OnInit, OnDestroy {
   }
 
   label(view: CardView): string {
+    if (view.card?.kind === 'token') {
+      return 'Token';
+    }
     return view.setId ? `Commander set · Version ${view.slot ?? '?'}` : 'Free play';
   }
 

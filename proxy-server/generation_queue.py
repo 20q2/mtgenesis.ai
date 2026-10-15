@@ -16,7 +16,8 @@ brief wait list. The text thread (the Ollama worker) serves briefs before rules 
 first card to arrive gets one brief per waiting version in one call, and a reroll gets one
 brief told to avoid the other versions' briefs. A brief that fails is simply skipped. Either
 way the card then moves to both the text and the image wait list, and its card params carry
-the brief as "brief". Without a director, enqueue() puts a card in both lists at once.
+the brief as "brief". Tokens (card_params kind "token", tokens.py) pass the brief stage
+without a brief. Without a director, enqueue() puts a card in both lists at once.
 Whichever worker picks it up first moves it to 'generating'; each worker sets
 text_ready / art_ready when its half finishes. The worker that finishes second
 moves the card to 'rendering', calls render_fn and marks it 'done'. Any failure
@@ -183,8 +184,8 @@ class GenerationQueue:
                 with self._lock:
                     self._drop(card_id)
                 return True
-            if card.get("brief") is not None:
-                return True
+            if card.get("brief") is not None or card["card_params"].get("kind") == "token":
+                return True  # tokens (tokens.py) need no brief: the player wrote their card
             group, avoid = [card], []
             if card.get("set_id"):
                 others = [c for c in self.storage.set_cards(card["set_id"]) if c["id"] != card_id]

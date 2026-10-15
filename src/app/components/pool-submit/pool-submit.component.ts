@@ -35,6 +35,9 @@ export class PoolSubmitComponent {
     if (!this.pool || this.pool.status !== 'open') {
       return 'No pool is open';
     }
+    if (this.card.card?.kind === 'token') {
+      return "Tokens can't enter the pool";
+    }
     if (!poolColorOk(this.card.card)) {
       return "Multicolor cards can't enter the pool";
     }

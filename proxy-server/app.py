@@ -31,6 +31,8 @@ import director
 import image_generation
 import rules_text
 import power_level
+import tokens
+import token_renderer
 
 # The ollama module-level client has no timeout: a stalled Ollama (hung model load,
 # driver hiccup) would block the single AI Night text worker forever. With a timeout
@@ -231,6 +233,12 @@ class RequestQueue:
                     
             except Exception as e:
                 print(f"Periodic cleanup error: {e}")
+
+def render_token_image(card_data, art_b64):
+    """A finished token as base64 PNG (token_renderer), sharing the card renderer's lock."""
+    with _RENDER_LOCK:
+        return token_renderer.render_token(card_data, art_b64)
+
 
 # Initialize global request queue
 request_queue = RequestQueue(max_concurrent=2)  # Allow max 2 concurrent card generations
@@ -1197,11 +1205,30 @@ def init_ai_night(app):
                 recent = []
             return director.write_briefs(params, count, avoid, director_client, DIRECTOR_MODEL,
                                          fill_fields=fill_fields, recent=recent)
-    gen_queue = GenerationQueue(storage, data_dir, createCardContent,
-                                image_generation.generate_art, finalize_card, brief_fn=brief_fn)
+    # Tokens (Token Maker, tokens.py) share the queue: flavor text instead of rules text,
+    # art shaped like their frame, and the token renderer.
+    def text_fn(prompt, params):
+        if tokens.is_token(params):
+            return tokens.generate_flavor(params, ollama_client, TEXT_MODEL)
+        return createCardContent(prompt, params)
+
+    def art_fn(prompt, params):
+        if tokens.is_token(params):
+            gen_size, out_size = tokens.art_sizes(params)
+            return image_generation.generate_art(prompt, tokens.art_card_data(params),
+                                                 gen_size=gen_size, out_size=out_size)
+        return image_generation.generate_art(prompt, params)
+
+    def render_fn(params, text, art_b64, force_name=None):
+        if tokens.is_token(params):
+            return tokens.finalize_token(params, text, art_b64, render=render_token_image)
+        return finalize_card(params, text, art_b64, force_name)
+
+    gen_queue = GenerationQueue(storage, data_dir, text_fn, art_fn, render_fn, brief_fn=brief_fn)
     gen_queue.recover_on_startup()
     app.register_blueprint(create_api_blueprint(storage, gen_queue, data_dir, ADMIN_PIN,
-                                                render_card=render_card_image),
+                                                render_card=render_card_image,
+                                                render_token=render_token_image),
                            url_prefix="/api/v1")
     print(f"🌙 AI Night ready: data in {data_dir}")
     print(f"🎬 Card director: {'on, ' + DIRECTOR_MODEL if DIRECTOR_ENABLED else 'off (MTG_DIRECTOR=0)'}")
@@ -1223,6 +1250,7 @@ if __name__ == '__main__':
     print("  POST /api/v1/generations - Queue 1 free-play card or a 3-card commander set")
     print("  GET  /api/v1/cards/<id> - Card status, queue position and ETA")
     print("  POST /api/v1/cards/<id>/reroll - Reroll a set card")
+    print("  GET  /api/v1/tokens/frames | POST /api/v1/tokens/preview | POST /api/v1/tokens - Token Maker")
     print("  POST /api/v1/sets/<id>/lock | /unlock - Lock a set into the open event, or unlock it")
     print("  GET  /api/v1/events/current | /events | /events/<id> - Events and their locked sets")
     print("  POST /api/v1/votes - Vote for a card in a locked set")

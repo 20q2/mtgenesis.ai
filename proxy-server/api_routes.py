@@ -12,6 +12,7 @@ so pending cards already show their name and type.
 Host errata: GET /admin/errata, POST /admin/cards/<id>/errata[/revert] (docs/superpowers/specs/2026-10-14-errata-design.md).
 Profile pictures: GET /me, PUT/DELETE /me/avatar (docs/superpowers/specs/2026-10-14-profile-pictures-design.md).
 Reroll requests: POST /cards/<id>/reroll-request (docs/superpowers/specs/2026-10-14-reroll-requests-design.md).
+Token Maker: GET /tokens/frames[/<frame>/<code>.png], POST /tokens/preview, POST /tokens (tokens.py).
 
 Auth: user-scoped routes require X-User-Id (401 if missing or unknown). Read-only
 event/card routes accept it optionally (for myVoteCardId) but still reject an unknown
@@ -27,6 +28,7 @@ from __future__ import annotations
 import base64
 import collections
 import hmac
+import io
 import re
 import threading
 import time
@@ -42,6 +44,8 @@ from generation_queue import GenerationQueue
 from storage import (MEDAL_POINTS, PENDING_STATUSES, POOL_DEFAULT_ENTRIES, REROLL_REQUESTS_NEEDED,
                      Storage, StorageError, clean_commander_name, leader_flags, pool_cutoff,
                      pool_ranking)
+import token_renderer
+import tokens
 
 try:  # the power heuristic is advisory: pools still work without it
     import power_level
@@ -68,6 +72,7 @@ NOT_ERRATABLE = ("Errata is for cards in the commander vote, a closed event's re
                  "or the Knowledge Pool")
 # (card dict, art as raw base64 PNG or None) -> rendered card as base64 PNG (app.py: the card renderer)
 RenderCard = Callable[[dict, "str | None"], "str | None"]
+TOKEN_THUMB_CACHE_SECONDS = 86400
 
 
 def has_body(card: dict) -> bool:
@@ -140,11 +145,13 @@ def admin_pin_warning(admin_pin) -> str | None:
 
 def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir: Path,
                          admin_pin: str, clock=time.monotonic,
-                         render_card: RenderCard | None = None) -> Blueprint:
+                         render_card: RenderCard | None = None,
+                         render_token: RenderCard = token_renderer.render_token) -> Blueprint:
     """All spec §4 endpoints; app.py registers the result with url_prefix="/api/v1".
 
     `clock` (seconds, monotonic) is injectable so tests can expire the admin lockout.
     `render_card` re-draws a card for host errata (None: errata answer 503).
+    `render_token` draws Token Maker previews and frame thumbnails (app.py adds its render lock).
     """
     bp = Blueprint("ai_night_api", __name__)
     data_dir = Path(data_dir)
@@ -453,6 +460,58 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         gen_queue.enqueue_many([card["id"] for card in cards])
         return jsonify({"setId": set_id,
                         "cards": [card_view(storage.get_card(c["id"])) for c in cards]})
+
+    # ----- Token Maker -----
+    token_thumbs: dict[tuple[str, str], bytes] = {}
+
+    def token_body() -> dict:
+        data = required_body().get("token")
+        if not isinstance(data, dict):
+            raise StorageError(400, "token must be an object")
+        return data
+
+    @bp.get("/tokens/frames")
+    def token_frames():
+        return jsonify({"frames": [{"id": f.id, "label": f.label, "blurb": f.blurb,
+                                    "hasText": f.has_text} for f in token_renderer.FRAMES],
+                        "types": list(tokens.TYPES)})
+
+    @bp.get("/tokens/frames/<frame_id>/<code>.png")
+    def token_frame_thumbnail(frame_id, code):
+        """Public like media: the frame picker's <img> tags can't send headers."""
+        if frame_id not in token_renderer.FRAMES_BY_ID or code not in token_renderer.TINTS:
+            raise StorageError(404, "No such frame")
+        key = (frame_id, code)
+        if key not in token_thumbs:
+            rendered = render_token(token_renderer.sample_token(frame_id, code), None)
+            if not rendered:
+                raise StorageError(500, "Could not draw the frame")
+            token_thumbs[key] = token_renderer.thumbnail(rendered)
+        response = send_file(io.BytesIO(token_thumbs[key]), mimetype="image/png")
+        response.headers["Cache-Control"] = f"public, max-age={TOKEN_THUMB_CACHE_SECONDS}"
+        return response
+
+    @bp.post("/tokens/preview")
+    def token_preview():
+        """The token as typed so far, on placeholder art (the Token Maker's live preview)."""
+        require_user()
+        rendered = render_token(tokens.preview_params(token_body()), None)
+        if not rendered:
+            raise StorageError(500, "Could not draw the preview")
+        return jsonify({"image": f"data:image/png;base64,{rendered}"})
+
+    @bp.post("/tokens")
+    def create_token():
+        user = require_user()
+        try:
+            params = tokens.token_params(token_body())
+        except tokens.TokenError as err:
+            raise StorageError(400, str(err))
+        with create_lock:
+            check_pending_cap(user["id"], 1)
+            card = storage.create_card(user["id"], tokens.art_prompt(params), params)
+        gen_queue.enqueue(card["id"])
+        return jsonify(card_view(storage.get_card(card["id"])))
 
     @bp.post("/cards/<card_id>/reroll")
     def reroll(card_id):

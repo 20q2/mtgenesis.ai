@@ -10,12 +10,14 @@ import { VotePageComponent } from './pages/vote-page/vote-page.component';
 import { EventHistoryPageComponent } from './pages/event-history-page/event-history-page.component';
 import { AdminPageComponent } from './pages/admin-page/admin-page.component';
 import { PoolPageComponent } from './pages/pool-page/pool-page.component';
+import { TokenMakerPageComponent } from './pages/token-maker-page/token-maker-page.component';
 
 /** Spec §7 routes. Everything except /login needs a stored user. */
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'create' },
   { path: 'login', component: LoginPageComponent, title: 'Log in · MTGenesis.AI' },
   { path: 'create', component: CreatePageComponent, canActivate: [authGuard], title: 'Create · MTGenesis.AI' },
+  { path: 'tokens', component: TokenMakerPageComponent, canActivate: [authGuard], title: 'Token Maker · MTGenesis.AI' },
   { path: 'set', component: SetBuilderPageComponent, canActivate: [authGuard], title: 'Commanders · MTGenesis.AI' },
   { path: 'gallery', component: GalleryPageComponent, canActivate: [authGuard], title: 'My Gallery · MTGenesis.AI' },
   { path: 'community', component: CommunityPageComponent, canActivate: [authGuard], title: 'Community Gallery · MTGenesis.AI' },

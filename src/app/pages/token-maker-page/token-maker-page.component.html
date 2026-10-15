@@ -1,0 +1,206 @@
+<div class="page token-page">
+  <div *ngIf="!online" class="alert alert-error health-banner" role="alert">
+    <span class="material-icons" aria-hidden="true">cloud_off</span>
+    <span><strong>Server offline</strong> &middot; You can design a token; making it waits for the server.</span>
+  </div>
+
+  <div class="create-layout">
+    <!-- The stage: the live preview while designing, the finished token after -->
+    <section class="stage" aria-label="Token preview">
+      <div class="stage-card" [class.is-generating]="isGenerating">
+        <div class="complete-card-display" appTilt *ngIf="finished; else livePreview">
+          <img *ngIf="finished.cardImageUrl | media | async as src" [src]="src"
+               [alt]="finished.card?.name || 'Your token'"
+               class="complete-card-image">
+        </div>
+        <ng-template #livePreview>
+          <div class="preview-card" [class.refreshing]="previewLoading">
+            <img *ngIf="previewImage" [src]="previewImage" alt="Preview of your token" class="complete-card-image">
+            <div *ngIf="!previewImage" class="preview-placeholder" aria-hidden="true">
+              <mat-spinner diameter="28"></mat-spinner>
+            </div>
+            <span class="preview-tag" *ngIf="previewImage && !isGenerating">Preview &middot; the AI paints the art</span>
+          </div>
+        </ng-template>
+
+        <!-- Generation progress, laid over the preview -->
+        <div *ngIf="isGenerating" class="loading-overlay" role="status" aria-live="polite">
+          <div class="progress-icon" aria-hidden="true">
+            <span class="material-icons">toll</span>
+          </div>
+          <h3 class="progress-title">Minting your token</h3>
+          <div class="job-status">
+            <div class="job-line">{{ job ? statusLine(job) : 'Sending to the server…' }}</div>
+            <div class="job-checklist" *ngIf="job && (job.status === 'generating' || job.status === 'rendering')">
+              <span [class.ready]="job.textReady">
+                <span class="material-icons" aria-hidden="true">{{ job.textReady ? 'check_circle' : 'radio_button_unchecked' }}</span>
+                Flavor text
+              </span>
+              <span [class.ready]="job.artReady">
+                <span class="material-icons" aria-hidden="true">{{ job.artReady ? 'check_circle' : 'radio_button_unchecked' }}</span>
+                Artwork
+              </span>
+            </div>
+          </div>
+          <p class="progress-note">You can leave this page &mdash; finished tokens are saved to My Gallery.</p>
+        </div>
+      </div>
+
+      <p class="off-card-flavor" *ngIf="offCardFlavor as flavor">{{ flavor }}</p>
+
+      <div class="download-section" *ngIf="finished">
+        <button type="button" class="btn btn-gold btn-sm" (click)="downloadCard()">
+          <span class="material-icons" aria-hidden="true">download</span>
+          Download token
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm" *ngIf="finished.artImageUrl" (click)="downloadArt()">
+          <span class="material-icons" aria-hidden="true">image</span>
+          Artwork
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm" [attr.aria-pressed]="finished.shared"
+                [disabled]="sharing" (click)="toggleShare()">
+          <span class="material-icons" aria-hidden="true">{{ finished.shared ? 'public' : 'share' }}</span>
+          {{ finished.shared ? 'Shared · Unshare' : 'Share to gallery' }}
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm" (click)="startOver()">
+          <span class="material-icons" aria-hidden="true">edit</span>
+          Back to editing
+        </button>
+      </div>
+    </section>
+
+    <section class="panel form-panel" aria-labelledby="token-title">
+      <h2 class="page-title" id="token-title">Token Maker</h2>
+      <p class="muted intro">
+        Design a token and pick a frame. The AI paints the art and writes the flavor text,
+        which is usually a joke.
+      </p>
+
+      <form [formGroup]="form" (ngSubmit)="makeToken()" class="token-form">
+        <div class="field">
+          <span class="field-label" id="presets-label">Quick start</span>
+          <div class="chips" role="group" aria-labelledby="presets-label">
+            <button type="button" class="chip chip-sm" *ngFor="let preset of presets" (click)="applyPreset(preset)">
+              {{ preset.label }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Frames -->
+        <div class="field">
+          <span class="field-label" id="frame-label">Frame</span>
+          <div class="frame-grid" role="radiogroup" aria-labelledby="frame-label">
+            <button type="button" *ngFor="let frame of frames; trackBy: trackFrame"
+                    class="frame-tile" role="radio"
+                    [attr.aria-checked]="form.value.frame === frame.id"
+                    [title]="frame.blurb"
+                    (click)="selectFrame(frame.id)">
+              <span class="frame-thumb">
+                <img *ngIf="thumbnail(frame) | media | async as src" [src]="src" alt="" width="124" height="173">
+              </span>
+              <span class="frame-name">{{ frame.label }}</span>
+            </button>
+          </div>
+          <p class="frame-blurb muted" *ngIf="selectedFrame as frame">
+            <strong>{{ frame.label }}</strong> &middot; {{ frame.blurb }}
+          </p>
+        </div>
+
+        <!-- Colors -->
+        <div class="field">
+          <span class="field-label" id="colors-label">Colors <span class="optional">none = colorless</span></span>
+          <div class="color-row" role="group" aria-labelledby="colors-label">
+            <button type="button" *ngFor="let c of colorOptions" class="color-pip"
+                    [attr.aria-pressed]="colors.includes(c.code)"
+                    [attr.aria-label]="c.label" [title]="c.label"
+                    (click)="toggleColor(c.code)">
+              <i class="ms ms-{{ c.code.toLowerCase() }} ms-cost" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Type line -->
+        <div class="field">
+          <span class="field-label" id="type-label">Card type</span>
+          <div class="chips" role="radiogroup" aria-labelledby="type-label">
+            <button type="button" class="chip chip-sm" *ngFor="let type of types" role="radio"
+                    [attr.aria-checked]="form.value.type === type" [attr.aria-pressed]="form.value.type === type"
+                    (click)="selectType(type)">
+              {{ type }}
+            </button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="field">
+            <label for="token-subtype" class="field-label">{{ isCreature ? 'Creature type' : 'Subtype' }} <span class="optional">optional</span></label>
+            <input id="token-subtype" type="text" formControlName="subtype" maxlength="40" autocomplete="off"
+                   class="night-input" [placeholder]="isCreature ? 'Goblin, Zombie Knight, Squirrel…' : 'Treasure, Clue, Aura…'">
+          </div>
+          <div class="field">
+            <label for="token-name" class="field-label">Name <span class="optional">blank: the AI names it</span></label>
+            <input id="token-name" type="text" formControlName="name" maxlength="30" autocomplete="off"
+                   class="night-input name-input" placeholder="Real tokens use their type">
+          </div>
+        </div>
+
+        <div class="pt-row" *ngIf="isCreature">
+          <div class="field">
+            <label for="token-power" class="field-label">Power</label>
+            <input id="token-power" type="text" formControlName="power" maxlength="2" autocomplete="off"
+                   inputmode="numeric" class="night-input pt-input" [attr.aria-invalid]="ptInvalid('power')">
+          </div>
+          <span class="pt-slash" aria-hidden="true">/</span>
+          <div class="field">
+            <label for="token-toughness" class="field-label">Toughness</label>
+            <input id="token-toughness" type="text" formControlName="toughness" maxlength="2" autocomplete="off"
+                   inputmode="numeric" class="night-input pt-input" [attr.aria-invalid]="ptInvalid('toughness')">
+          </div>
+        </div>
+
+        <div class="field" *ngIf="selectedFrame?.hasText !== false">
+          <label for="token-text" class="field-label">Abilities <span class="optional">optional, one per line</span></label>
+          <textarea id="token-text" formControlName="description" rows="2" maxlength="300"
+                    class="night-input" placeholder="Flying&#10;When this token dies, draw a card."></textarea>
+          <span class="hint muted">Mana symbols in braces: {{ '{' }}T{{ '}' }}, {{ '{' }}2{{ '}' }}, {{ '{' }}R{{ '}' }}.</span>
+        </div>
+
+        <div class="field">
+          <label for="token-art" class="field-label">Art <span class="optional">optional</span></label>
+          <textarea id="token-art" formControlName="artPrompt" rows="2" maxlength="400" class="night-input"
+                    placeholder="A goblin in a tiny accountant's visor, buried in gold coins"></textarea>
+          <span class="hint muted">Leave it blank and the AI paints the creature type.</span>
+        </div>
+
+        <div class="field">
+          <label for="token-flavor" class="field-label">Flavor text <span class="optional">blank: the AI writes something funny</span></label>
+          <textarea id="token-flavor" formControlName="flavorText" rows="2" maxlength="160" class="night-input"
+                    placeholder="Leave blank for a joke"></textarea>
+          <span class="hint muted" *ngIf="selectedFrame?.hasText === false">This frame has no text box, so the flavor shows under the card.</span>
+        </div>
+
+        <div class="submit-row">
+          <button type="submit" class="btn btn-gold make-btn" [disabled]="isGenerating || !!blocker()">
+            <span class="material-icons" aria-hidden="true">toll</span>
+            {{ isGenerating ? 'Making…' : 'Make token' }}
+          </button>
+          <span class="muted blocker" *ngIf="!isGenerating && blocker() as reason">{{ reason }}</span>
+        </div>
+      </form>
+    </section>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div class="status-container" aria-live="polite">
+  <div *ngIf="successMessage" class="alert alert-success toast">
+    <span class="material-icons" aria-hidden="true">check_circle</span>
+    <span>{{ successMessage }}</span>
+    <button type="button" class="alert-close" (click)="successMessage = null" aria-label="Dismiss">×</button>
+  </div>
+  <div *ngIf="error" class="alert alert-error toast" role="alert">
+    <span class="material-icons" aria-hidden="true">error</span>
+    <span>{{ error }}</span>
+    <button type="button" class="alert-close" (click)="error = null" aria-label="Dismiss">×</button>
+  </div>
+</div>

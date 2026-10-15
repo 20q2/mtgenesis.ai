@@ -21,6 +21,7 @@ import { VotePageComponent } from './pages/vote-page/vote-page.component';
 import { EventHistoryPageComponent } from './pages/event-history-page/event-history-page.component';
 import { AdminPageComponent } from './pages/admin-page/admin-page.component';
 import { PoolPageComponent } from './pages/pool-page/pool-page.component';
+import { TokenMakerPageComponent } from './pages/token-maker-page/token-maker-page.component';
 import { QueueBadgeComponent } from './components/queue-badge/queue-badge.component';
 import { MediaPipe } from './pipes/media.pipe';
 import { CmcGroupsPipe } from './pipes/cmc-groups.pipe';
@@ -54,6 +55,7 @@ import { ErrataEditorComponent } from './components/errata-editor/errata-editor.
     EventHistoryPageComponent,
     AdminPageComponent,
     PoolPageComponent,
+    TokenMakerPageComponent,
     QueueBadgeComponent,
     CardSlotComponent,
     CommanderPanelComponent,

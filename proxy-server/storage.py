@@ -175,8 +175,8 @@ def card_colors(card: dict) -> set[str]:
 
 
 def pool_card_eligible(card: dict) -> bool:
-    """Only colorless or mono-colored cards can enter the Knowledge Pool."""
-    return len(card_colors(card)) <= 1
+    """Only colorless or mono-colored cards can enter the Knowledge Pool, and never tokens."""
+    return (card or {}).get("kind") != "token" and len(card_colors(card)) <= 1
 
 
 _clock_lock = threading.Lock()
@@ -959,6 +959,8 @@ class Storage:
             if card["status"] != "done":
                 raise StorageError(400, "Only finished cards can be submitted")
             data = card["card"] if card["card"] is not None else card["card_params"]
+            if (data or {}).get("kind") == "token":
+                raise StorageError(400, "Tokens can't enter the pool")
             if not pool_card_eligible(data):
                 raise StorageError(400, "Only colorless or mono-colored cards can enter the pool")
             if conn.execute("SELECT 1 FROM pool_entries WHERE pool_id = ? AND card_id = ?",
