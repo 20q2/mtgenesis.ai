@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { AvatarComponent } from '../../components/avatar/avatar.component';
 import { HttpErrorResponse } from '@angular/common/http';
 import { RouterTestingModule } from '@angular/router/testing';
 import { of, throwError } from 'rxjs';
@@ -31,7 +32,8 @@ describe('PoolPageComponent', () => {
                     card: card('c1'), username: 'Bob' }),
         poolEntry({ id: 'e2', gold: 1, points: 3, rank: 2, in: true, tiedAtCutoff: true, card: card('c2') }),
         poolEntry({ id: 'e3', bronze: 1, points: 1, rank: 4, card: card('c3'),
-                    power: { estimate: 3.6, budget: 0.25, verdict: 'over' } }),
+                    power: { estimate: 3.6, budget: 0.25, verdict: 'over' },
+                    wtfBy: ['Ann', 'Bob'], myWtf: true }),
         poolEntry({ id: 'e4', rank: 5, mine: true, username: 'Me', card: card('c4') })
       ],
       ...overrides
@@ -40,14 +42,14 @@ describe('PoolPageComponent', () => {
 
   function setup(current: PoolView | null) {
     pools = jasmine.createSpyObj<PoolService>('PoolService',
-      ['current', 'get', 'list', 'withdraw', 'medal', 'clearMedal']);
+      ['current', 'get', 'list', 'withdraw', 'medal', 'clearMedal', 'wtf', 'clearWtf']);
     pools.current.and.returnValue(of(current));
     pools.list.and.returnValue(of([]));
     const media = jasmine.createSpyObj<MediaService>('MediaService', ['src', 'download']);
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
     TestBed.configureTestingModule({
       imports: [RouterTestingModule],
-      declarations: [PoolPageComponent, CardSlotComponent, MediaPipe],
+      declarations: [PoolPageComponent, CardSlotComponent, AvatarComponent, MediaPipe],
       providers: [
         { provide: PoolService, useValue: pools },
         { provide: MediaService, useValue: media },
@@ -80,6 +82,7 @@ describe('PoolPageComponent', () => {
     expect(rules).toContain('never your own');
     expect(rules).toContain('Giving a medal again moves it');
     expect(rules).toContain('good faith');
+    expect(rules).toContain('WTF a card you think is broken');
     expect(rules).toContain('As many cards as half the players make the pool');
     expect(rules).toContain('A card with no medals never does');
     expect(rules).not.toContain('top half');
@@ -118,7 +121,9 @@ describe('PoolPageComponent', () => {
     expect(tile('e1').textContent).toContain('Tied · in');
     expect(tile('e3').textContent).not.toContain('In ');
     expect(tile('e3').textContent).toContain('Over the curve');
-    expect(tile('e1').textContent).toContain('by Bob');
+    expect(tile('e1').textContent).toContain('by');
+    expect(tile('e1').querySelector('.byline app-avatar')).not.toBeNull();
+    expect(tile('e1').querySelector('.byline')!.textContent!.trim()).toMatch(/Bob$/);
   });
 
   it('gives, moves and takes back medals; your own card gets Withdraw instead', () => {
@@ -136,6 +141,28 @@ describe('PoolPageComponent', () => {
 
     expect(tile('e4').querySelector('.medal-button')).toBeNull();
     expect(tile('e4').querySelector('.withdraw-button')).not.toBeNull();
+  });
+
+  it('flags WTFs with who gave them; WTF toggles separately from medals, never on my own card', () => {
+    setup(contested());
+    pools.wtf.and.returnValue(of(contested()));
+    pools.clearWtf.and.returnValue(of(contested()));
+
+    const flag = tile('e3').querySelector('.flag-wtf') as HTMLElement;
+    expect(flag.textContent!.replace(/\s+/g, ' ').trim()).toContain('WTF ×2');
+    expect(flag.getAttribute('title')).toBe('WTF from Ann, Bob');
+    expect(tile('e1').querySelector('.flag-wtf')).toBeNull();
+
+    const mine = tile('e3').querySelector('.wtf-button') as HTMLButtonElement;
+    expect(mine.getAttribute('aria-pressed')).toBe('true');
+    expect(mine.closest('.medal-buttons')).toBeNull();
+    mine.click();
+    expect(pools.clearWtf).toHaveBeenCalledWith('e3');
+
+    (tile('e1').querySelector('.wtf-button') as HTMLButtonElement).click();
+    expect(pools.wtf).toHaveBeenCalledWith('e1');
+    expect(pools.medal).not.toHaveBeenCalled();
+    expect(tile('e4').querySelector('.wtf-button')).toBeNull();
   });
 
   it('shows the medals I have given in the header', () => {
@@ -158,6 +185,8 @@ describe('PoolPageComponent', () => {
     setup(contested({ status: 'closed', closedAt: '2026-10-01T23:00:00+00:00' }));
     expect(el().querySelector('.medal-button')).toBeNull();
     expect(el().querySelector('.withdraw-button')).toBeNull();
+    expect(el().querySelector('.wtf-button')).toBeNull();
+    expect(tile('e3').querySelector('.flag-wtf')).not.toBeNull();
     const made = Array.from(el().querySelectorAll('.results [data-result-id]'))
       .map(r => (r as HTMLElement).dataset['resultId']);
     expect(made).toEqual(['e0', 'e1', 'e2']);

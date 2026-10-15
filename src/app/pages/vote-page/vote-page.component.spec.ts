@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { AvatarComponent } from '../../components/avatar/avatar.component';
 import { HttpErrorResponse } from '@angular/common/http';
 import { RouterTestingModule } from '@angular/router/testing';
 import { Subject, of, throwError } from 'rxjs';
@@ -10,6 +11,7 @@ import { TiltDirective } from '../../directives/tilt.directive';
 import { CmcGroupsPipe } from '../../pipes/cmc-groups.pipe';
 import { MediaPipe } from '../../pipes/media.pipe';
 import { EventService } from '../../services/event.service';
+import { GenerationService } from '../../services/generation.service';
 import { MediaService } from '../../services/media.service';
 import { PageVisibilityService } from '../../services/page-visibility.service';
 import { UserService } from '../../services/user.service';
@@ -21,6 +23,7 @@ import { VOTE_POLL_MS, VotePageComponent } from './vote-page.component';
 describe('VotePageComponent', () => {
   let fixture: ComponentFixture<VotePageComponent>;
   let events: jasmine.SpyObj<EventService>;
+  let generation: jasmine.SpyObj<GenerationService>;
   let visibility: ReturnType<typeof fakeVisibility>;
 
   function setA(overrides: Partial<SetView> = {}): SetView {
@@ -48,7 +51,8 @@ describe('VotePageComponent', () => {
   }
 
   function setup(current: EventView | null, me = 'u-me', latest: EventView | null = null) {
-    events = jasmine.createSpyObj<EventService>('EventService', ['current', 'vote', 'get', 'list']);
+    events = jasmine.createSpyObj<EventService>('EventService', ['current', 'vote', 'get', 'list', 'requestReroll']);
+    generation = jasmine.createSpyObj<GenerationService>('GenerationService', ['reroll']);
     events.list.and.returnValue(of([]));
     events.current.and.returnValue(of(current));
     if (latest) {
@@ -61,10 +65,11 @@ describe('VotePageComponent', () => {
     visibility = fakeVisibility();
     TestBed.configureTestingModule({
       imports: [RouterTestingModule],
-      declarations: [VotePageComponent, BallotPlayerComponent, PlayerSheetComponent, WinnersBannerComponent,
+      declarations: [VotePageComponent, BallotPlayerComponent, PlayerSheetComponent, AvatarComponent, WinnersBannerComponent,
                      MediaPipe, CmcGroupsPipe, NightStepsComponent, TiltDirective],
       providers: [
         { provide: EventService, useValue: events },
+        { provide: GenerationService, useValue: generation },
         { provide: MediaService, useValue: media },
         { provide: PageVisibilityService, useValue: visibility },
         { provide: UserService, useValue: { currentUser: () => ({ id: me, username: 'Me' }) } }
@@ -368,6 +373,128 @@ describe('VotePageComponent', () => {
     voteButtons()[2].click();
     fixture.componentInstance.vote(setA(), setA().cards[2]);
     expect(events.vote).toHaveBeenCalledTimes(1);
+  });
+
+  describe('reroll requests', () => {
+    const askButtons = () => Array.from(el().querySelectorAll('button.reroll-ask')) as HTMLButtonElement[];
+    const mine = (overrides: Partial<SetView> = {}) => setA({ userId: 'u-me', username: 'Me', ...overrides });
+
+    it('explains them in how voting works', () => {
+      setup(eventView({ sets: [setA()] }));
+      const rules = text(el().querySelector('.how-to-vote'));
+      expect(rules).toContain('Ask its owner for a reroll');
+      expect(rules).toContain('Once 3 players ask');
+    });
+
+    it("lets me ask for a reroll of someone else's version, and take it back", () => {
+      setup(eventView({ sets: [setA()] }));
+      open('u-a');
+      expect(askButtons().length).toBe(3);
+      expect(text(askButtons()[0])).toContain('Broken? Ask for a reroll');
+
+      const asked = setA();
+      asked.cards[0] = { ...asked.cards[0], rerollRequests: 1, myRerollRequest: true };
+      events.requestReroll.and.returnValue(of(asked));
+      askButtons()[0].click();
+      fixture.detectChanges();
+      expect(events.requestReroll).toHaveBeenCalledOnceWith('a1', true);
+      expect(askButtons()[0].getAttribute('aria-pressed')).toBe('true');
+      expect(text(askButtons()[0])).toContain('You asked for a reroll');
+      expect(text(cardEl('a1').querySelector('.reroll-count'))).toContain('1 of 3 asked');
+
+      events.requestReroll.and.returnValue(of(setA()));
+      askButtons()[0].click();
+      expect(events.requestReroll).toHaveBeenCalledWith('a1', false);
+    });
+
+    it('shows a failed request in the sheet', () => {
+      setup(eventView({ sets: [setA()] }));
+      open('u-a');
+      events.requestReroll.and.returnValue(throwError(() => new HttpErrorResponse({
+        status: 409, error: { error: "That version isn't ready yet" }
+      })));
+      askButtons()[1].click();
+      fixture.detectChanges();
+      expect(text(el().querySelector('.sheet-foot .alert'))).toContain("That version isn't ready yet");
+    });
+
+    it('shows the owner the count, then a Reroll button once enough players asked', () => {
+      const set = mine();
+      set.cards[0] = { ...set.cards[0], rerollRequests: 2 };
+      set.cards[1] = { ...set.cards[1], rerollRequests: 3, canReroll: true };
+      setup(eventView({ sets: [set] }));
+      open('u-me');
+      expect(askButtons().length).toBe(0);
+      expect(text(cardEl('a1'))).toContain('2 of 3 asked for a reroll');
+      expect(cardEl('a1').querySelector('.reroll-now')).toBeNull();
+      expect(text(cardEl('a2'))).toContain("3 players say it doesn't work");
+      expect(cardEl('a3').querySelector('.reroll-bar')).toBeNull();
+
+      const confirm = spyOn(window, 'confirm').and.returnValue(true);
+      generation.reroll.and.returnValue(of(setCard({ id: 'a2-new', slot: 2, status: 'queued' })));
+      const before = events.current.calls.count();
+      (cardEl('a2').querySelector('.reroll-now') as HTMLButtonElement).click();
+      expect(confirm.calls.mostRecent().args[0]).toContain('votes on it are cleared');
+      expect(generation.reroll).toHaveBeenCalledOnceWith('a2');
+      expect(events.current.calls.count()).toBe(before + 1);
+    });
+
+    it("doesn't reroll when the owner cancels", () => {
+      const set = mine();
+      set.cards[1] = { ...set.cards[1], rerollRequests: 3, canReroll: true };
+      setup(eventView({ sets: [set] }));
+      open('u-me');
+      spyOn(window, 'confirm').and.returnValue(false);
+      (cardEl('a2').querySelector('.reroll-now') as HTMLButtonElement).click();
+      expect(generation.reroll).not.toHaveBeenCalled();
+    });
+
+    it('tells the owner when a version can be rerolled, and Review opens it', () => {
+      const set = mine({ cmc: 4 });
+      set.cards[1] = { ...set.cards[1], rerollRequests: 3, canReroll: true };
+      setup(eventView({ sets: [setB(), set] }));
+      expect(text(el().querySelector('.reroll-notice'))).toContain("Players say version 2 of Zur'ka, Élan of Ash doesn't work");
+      (el().querySelector('.reroll-notice button') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(fixture.componentInstance.sheetUserId).toBe('u-me');
+      expect(fixture.componentInstance.sheetFocusSetId).toBe('sA');
+    });
+
+    it('shows a version being rerolled, with no vote or ask button, and a failed one to the owner', () => {
+      const theirs = setA();
+      theirs.cards[0] = setCard({ id: 'a1', slot: 1, setId: 'sA', status: 'generating', cardImageUrl: null });
+      setup(eventView({ sets: [theirs] }));
+      expect(slot('sA').querySelectorAll('img.fan-card').length).toBe(2);
+      expect(slot('sA').querySelector('.fan-blank')).not.toBeNull();
+      open('u-a');
+      expect(text(cardEl('a1'))).toContain('Rerolling version 1…');
+      expect(cardEl('a1').querySelector('.vote-button')).toBeNull();
+      expect(cardEl('a1').querySelector('.reroll-ask')).toBeNull();
+      expect(voteButtons().length).toBe(2);
+
+      fixture.destroy();
+      TestBed.resetTestingModule();
+      const failed = mine();
+      failed.cards[0] = setCard({ id: 'a1', slot: 1, setId: 'sA', status: 'failed', cardImageUrl: null, canReroll: true });
+      setup(eventView({ sets: [failed] }));
+      expect(text(el().querySelector('.reroll-notice'))).toContain('Version 1 of');
+      open('u-me');
+      expect(text(cardEl('a1'))).toContain('Version 1 failed');
+      expect(cardEl('a1').querySelector('.reroll-now')).not.toBeNull();
+    });
+
+    it('shows no reroll controls once voting is closed', () => {
+      const set = mine();
+      set.cards[1] = { ...set.cards[1], rerollRequests: 3, canReroll: true };
+      setup(eventView({ status: 'closed', closedAt: '2026-09-28T23:00:00+00:00', sets: [set, setB()] }));
+      expect(el().querySelector('.reroll-notice')).toBeNull();
+      open('u-me');
+      expect(el().querySelector('.reroll-bar')).toBeNull();
+      fixture.componentInstance.reroll(set, set.cards[1]);
+      fixture.componentInstance.requestReroll(setB().cards[0], true);
+      expect(generation.reroll).not.toHaveBeenCalled();
+      expect(events.requestReroll).not.toHaveBeenCalled();
+    });
   });
 
   it("after a reload once voting has closed, shows the latest event's results", () => {

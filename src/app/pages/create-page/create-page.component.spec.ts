@@ -98,16 +98,6 @@ describe('CreatePageComponent (jobs)', () => {
     expect(component.successMessage).toContain('generated');
   });
 
-  it('fills the form fields the player left blank with what the AI chose', () => {
-    const form = jasmine.createSpyObj<CardFormComponent>('CardFormComponent', ['fillBlanks', 'setGenerating']);
-    component.cardFormComponent = form;
-    gen.submit.and.returnValue(of({ setId: null, cards: [cardView({ id: 'j-1' })] }));
-    component.generateCard(card);
-    const done = doneCard({ id: 'j-1' });
-    watch$.next(done);
-    expect(form.fillBlanks).toHaveBeenCalledOnceWith(done.card!);
-  });
-
   it('offers Share once the card is done and toggles it', () => {
     gen.submit.and.returnValue(of({ setId: null, cards: [cardView({ id: 'j-1' })] }));
     component.generateCard(card);
@@ -169,7 +159,7 @@ describe('CreatePageComponent (jobs)', () => {
 });
 
 describe('CreatePageComponent with the real card form', () => {
-  it('keeps showing the finished card after the AI fills the blank fields', fakeAsync(() => {
+  it('shows the finished card and leaves the blank form fields blank', fakeAsync(() => {
     const watch$ = new Subject<CardView>();
     const gen = jasmine.createSpyObj<GenerationService>('GenerationService',
       ['submit', 'watch', 'toCard', 'cardParams', 'promptFor', 'share']);
@@ -203,7 +193,7 @@ describe('CreatePageComponent with the real card form', () => {
     tick(1000);  // past the card-exit animation, if one (wrongly) starts
     fixture.detectChanges();
 
-    expect(page.cardFormComponent.cardForm.value.name).toBe('Stormcaller');
+    expect(page.cardFormComponent.cardForm.value.name).toBe('');
     expect(page.currentCard.cardImageUrl).toBe(`${environment.apiUrl}/api/v1/media/cards/j-1.png`);
     expect(page.cardExiting).toBeFalse();
     fixture.destroy();

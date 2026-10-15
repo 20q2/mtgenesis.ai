@@ -1,0 +1,117 @@
+<dialog #dialog
+        class="picture-dialog"
+        aria-labelledby="picture-title"
+        (cancel)="onCancel($event)"
+        (click)="onDialogClick($event)">
+  <div class="picture-card" [attr.aria-busy]="busy">
+    <header class="picture-head">
+      <button *ngIf="step !== 'choose'" type="button" class="icon-btn" (click)="back()" [disabled]="busy" aria-label="Back">
+        <span class="material-icons" aria-hidden="true">arrow_back</span>
+      </button>
+      <h2 id="picture-title" class="picture-title" tabindex="-1" autofocus>{{ title }}</h2>
+      <button type="button" class="icon-btn" (click)="close()" [disabled]="busy" aria-label="Close">
+        <span class="material-icons" aria-hidden="true">close</span>
+      </button>
+    </header>
+
+    <!-- 1. Where the picture comes from -->
+    <div *ngIf="step === 'choose'" class="choose">
+      <div class="current">
+        <app-avatar [url]="user.avatarUrl" [name]="user.username" [size]="104"></app-avatar>
+        <p class="who">{{ user.username }}</p>
+      </div>
+      <p class="pitch">
+        {{ user.avatarUrl ? 'Your face is next to your commanders, your cards and your name on the vote.'
+                          : 'Put a face to your name. It shows next to your commanders, your cards and your name on the vote.' }}
+      </p>
+
+      <div class="sources">
+        <button type="button" class="btn btn-gold source" (click)="chooseFile()" [disabled]="busy">
+          <span class="material-icons" aria-hidden="true">add_a_photo</span>
+          {{ user.avatarUrl ? 'New photo' : 'Choose a photo' }}
+        </button>
+        <button type="button" class="btn btn-ghost source" (click)="showCards()" [disabled]="busy">
+          <span class="material-icons" aria-hidden="true">palette</span>
+          Use a card's art
+        </button>
+        <input #fileInput type="file" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" (change)="onFile($event)">
+      </div>
+
+      <div class="choose-foot">
+        <button *ngIf="user.avatarUrl" type="button" class="text-btn danger" (click)="remove()" [disabled]="busy">
+          <span class="material-icons" aria-hidden="true">delete_outline</span>
+          Remove picture
+        </button>
+        <button type="button" class="text-btn later" (click)="close()" [disabled]="busy">
+          {{ prompted && !user.avatarUrl ? 'Not now' : 'Done' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 2. One of my cards' art -->
+    <div *ngIf="step === 'cards'" class="cards">
+      <p *ngIf="cards === null" class="muted cards-note">Loading your cards…</p>
+      <p *ngIf="cards?.length === 0 && !error" class="muted cards-note">
+        No finished cards yet. Make one on <a routerLink="/create" class="night-link" (click)="close()">Create</a>, then come back.
+      </p>
+      <div *ngIf="cards?.length" class="art-grid">
+        <button *ngFor="let card of cards; trackBy: trackCard"
+                type="button"
+                class="art-pick"
+                [disabled]="busy"
+                (click)="pickCard(card)"
+                [attr.aria-label]="'Use the art of ' + (card.card?.name || 'this card')">
+          <img [src]="card.artImageUrl | media | async" alt="" loading="lazy">
+          <span class="art-name">{{ card.card?.name || 'Untitled' }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 3. Framing: drag, pinch, wheel, slider or keys -->
+    <div *ngIf="step === 'frame' && source" class="frame">
+      <div class="framer"
+           tabindex="0"
+           role="group"
+           aria-label="Frame your picture: drag or use the arrow keys to move it, plus and minus to zoom"
+           [style.width.px]="viewSize"
+           [style.height.px]="viewSize"
+           (pointerdown)="onPointerDown($event)"
+           (pointermove)="onPointerMove($event)"
+           (pointerup)="onPointerUp($event)"
+           (pointercancel)="onPointerUp($event)"
+           (wheel)="onWheel($event)"
+           (keydown)="onFramerKey($event)">
+        <img class="framed"
+             [src]="source.url"
+             alt=""
+             draggable="false"
+             [style.width.px]="placement.width"
+             [style.height.px]="placement.height"
+             [style.transform]="'translate(' + placement.x + 'px, ' + placement.y + 'px)'">
+        <span class="window" aria-hidden="true"></span>
+      </div>
+
+      <label class="zoom">
+        <span class="sr-only">Zoom</span>
+        <span class="material-icons" aria-hidden="true">zoom_out</span>
+        <input type="range" min="1" [max]="maxZoom" step="0.01" [value]="frame.zoom" (input)="onZoomInput($event)">
+        <span class="material-icons" aria-hidden="true">zoom_in</span>
+      </label>
+      <p class="frame-hint muted">Drag to move · pinch or scroll to zoom</p>
+
+      <div class="frame-foot">
+        <button type="button" class="btn btn-ghost" (click)="back()" [disabled]="busy">Back</button>
+        <button type="button" class="btn btn-gold" (click)="save()" [disabled]="busy">
+          <span *ngIf="busy" class="mini-spinner" aria-hidden="true"></span>
+          <span *ngIf="!busy" class="material-icons" aria-hidden="true">check</span>
+          {{ busy ? 'Saving…' : 'Save picture' }}
+        </button>
+      </div>
+    </div>
+
+    <div *ngIf="error" class="alert alert-error" role="alert">
+      <span class="material-icons" aria-hidden="true">error</span>
+      <span>{{ error }}</span>
+    </div>
+  </div>
+</dialog>

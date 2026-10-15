@@ -80,7 +80,7 @@
 
         <div class="tile-info">
           <strong class="tile-name">{{ view.card?.name || 'Untitled card' }}</strong>
-          <span class="muted maker">by {{ view.username }}</span>
+          <span class="muted maker">by <span class="byline"><app-avatar [url]="view.avatarUrl" [name]="view.username" [size]="20"></app-avatar>{{ view.username }}</span></span>
         </div>
 
         <div class="tile-actions">

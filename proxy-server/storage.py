@@ -22,6 +22,9 @@ USERNAME_RE = re.compile(r"^[A-Za-z0-9 _-]{1,24}$")
 COMMANDER_NAME_MAX = 40
 EVENT_NAME_MAX = 80
 PENDING_STATUSES = ("queued", "generating", "rendering")
+# Players asking for a version to be rerolled during the vote before its owner may reroll it
+# (docs/superpowers/specs/2026-10-14-reroll-requests-design.md).
+REROLL_REQUESTS_NEEDED = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -89,6 +92,15 @@ CREATE TABLE IF NOT EXISTS votes (
 );
 CREATE INDEX IF NOT EXISTS votes_set ON votes(set_id);
 
+-- A player asking the owner to reroll a broken version of a commander in the vote
+-- (docs/superpowers/specs/2026-10-14-reroll-requests-design.md).
+CREATE TABLE IF NOT EXISTS reroll_requests (
+    card_id     TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (card_id, user_id)
+);
+
 -- Knowledge Pool (docs/superpowers/specs/2026-09-29-knowledge-pool-design.md)
 CREATE TABLE IF NOT EXISTS pools (
     id                    TEXT PRIMARY KEY,
@@ -121,6 +133,17 @@ CREATE TABLE IF NOT EXISTS pool_medals (
     UNIQUE (voter_id, entry_id)
 );
 CREATE INDEX IF NOT EXISTS pool_medals_pool ON pool_medals(pool_id);
+
+-- "WTF, this is broken": one per voter per card, any number of cards. Advisory only:
+-- shown with names, never counted in the ranking.
+CREATE TABLE IF NOT EXISTS pool_wtfs (
+    voter_id    TEXT NOT NULL,
+    pool_id     TEXT NOT NULL,
+    entry_id    TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (voter_id, entry_id)
+);
+CREATE INDEX IF NOT EXISTS pool_wtfs_pool ON pool_wtfs(pool_id);
 """
 
 POOL_NAME_MAX = 80
@@ -239,6 +262,12 @@ class Storage:
             conn.execute("ALTER TABLE cards ADD COLUMN shared_at TEXT")
         if "brief_json" not in card_cols:
             conn.execute("ALTER TABLE cards ADD COLUMN brief_json TEXT")
+        # Host errata (docs/superpowers/specs/2026-10-14-errata-design.md): the card as printed,
+        # kept from the first erratum so it can be reverted, and when the latest one landed.
+        if "original_card_json" not in card_cols:
+            conn.execute("ALTER TABLE cards ADD COLUMN original_card_json TEXT")
+        if "errata_at" not in card_cols:
+            conn.execute("ALTER TABLE cards ADD COLUMN errata_at TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS cards_shared ON cards(shared_at) "
                      "WHERE shared_at IS NOT NULL")
         # A set is one commander (docs/superpowers/specs/2026-10-03-commander-rules-design.md);
@@ -248,6 +277,11 @@ class Storage:
             conn.execute("ALTER TABLE sets ADD COLUMN cmc INTEGER")
         if "rarity" not in set_cols:
             conn.execute("ALTER TABLE sets ADD COLUMN rarity TEXT")
+        # Profile pictures (docs/superpowers/specs/2026-10-14-profile-pictures-design.md):
+        # data/avatars/<avatar_id>.jpg, a new id per upload; NULL means no picture.
+        user_cols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+        if "avatar_id" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN avatar_id TEXT")
 
     # ----- connection helpers -----
     def _conn(self) -> sqlite3.Connection:
@@ -285,7 +319,7 @@ class Storage:
     # ----- users -----
     def login(self, username: str) -> dict:
         """Create-or-get by case-insensitive username. Trimmed, 1-24 chars of [A-Za-z0-9 _-], else 400.
-        Returns {id, username} with the originally stored casing."""
+        Returns {id, username, avatar_id} with the originally stored casing."""
         if not isinstance(username, str):
             raise StorageError(400, "Username is required")
         name = username.strip()
@@ -294,24 +328,34 @@ class Storage:
                 400, "Username must be 1-24 characters: letters, digits, spaces, _ or -")
         with self._tx() as conn:
             row = conn.execute(
-                "SELECT id, username FROM users WHERE lower(username) = lower(?)", (name,)
+                "SELECT id, username, avatar_id FROM users WHERE lower(username) = lower(?)", (name,)
             ).fetchone()
             if row is not None:
                 return dict(row)
-            user = {"id": _new_id(), "username": name}
+            user = {"id": _new_id(), "username": name, "avatar_id": None}
             conn.execute("INSERT INTO users (id, username, created_at) VALUES (?, ?, ?)",
                          (user["id"], name, _now()))
         return user
 
     def get_user(self, user_id: str) -> dict | None:
-        return self._one("SELECT id, username FROM users WHERE id = ?", (user_id,))
+        return self._one("SELECT id, username, avatar_id FROM users WHERE id = ?", (user_id,))
+
+    def set_avatar(self, user_id: str, avatar_id: str | None) -> str | None:
+        """Points the user at a new picture (None: no picture); returns the one it replaced."""
+        with self._tx() as conn:
+            row = conn.execute("SELECT avatar_id FROM users WHERE id = ?", (user_id,)).fetchone()
+            if row is None:
+                raise StorageError(404, "User not found")
+            conn.execute("UPDATE users SET avatar_id = ? WHERE id = ?", (avatar_id, user_id))
+        return row["avatar_id"]
 
     # ----- cards -----
     # Row keys: id, user_id, set_id, slot, replaced, prompt, card_params, card, art_path,
-    # card_path, status, text_ready, art_ready, error, created_at, finished_at, shared_at, brief
+    # card_path, status, text_ready, art_ready, error, created_at, finished_at, shared_at, brief,
+    # original_card, errata_at
     _CARD_COLS = ("id, user_id, set_id, slot, replaced, prompt, card_params_json, card_json, "
                   "art_path, card_path, status, text_ready, art_ready, error, created_at, "
-                  "finished_at, shared_at, brief_json")
+                  "finished_at, shared_at, brief_json, original_card_json, errata_at")
     _CARD_UPDATABLE = frozenset({"status", "text_ready", "art_ready", "card", "art_path",
                                  "card_path", "error", "finished_at"})
 
@@ -321,9 +365,11 @@ class Storage:
             return None
         d = dict(row)
         params, card, brief = d.pop("card_params_json"), d.pop("card_json"), d.pop("brief_json")
+        original = d.pop("original_card_json")
         d["card_params"] = json.loads(params) if params is not None else None
         d["card"] = json.loads(card) if card is not None else None
         d["brief"] = json.loads(brief) if brief is not None else None
+        d["original_card"] = json.loads(original) if original is not None else None
         return d
 
     @staticmethod
@@ -346,6 +392,31 @@ class Storage:
     def get_card(self, card_id: str) -> dict | None:
         return self._decode_card(
             self._one(f"SELECT {self._CARD_COLS} FROM cards WHERE id = ?", (card_id,)))
+
+    # ----- host errata (docs/superpowers/specs/2026-10-14-errata-design.md) -----
+    def errata_eligible(self, card_id: str) -> bool:
+        """A card the host may errata: a current version of a set locked in an event (voting now,
+        or a closed event's result), or an entry in a Knowledge Pool."""
+        row = self._one(
+            "SELECT 1 FROM cards c WHERE c.id = ? AND ("
+            " EXISTS (SELECT 1 FROM sets s WHERE s.id = c.set_id AND s.status = 'locked' "
+            "         AND s.event_id IS NOT NULL AND c.replaced = 0)"
+            " OR EXISTS (SELECT 1 FROM pool_entries e WHERE e.card_id = c.id))", (card_id,))
+        return row is not None
+
+    def errata_card(self, card_id: str, card: dict) -> dict:
+        """Replaces the card's text; the first erratum keeps the printed card for a revert."""
+        with self._tx() as conn:
+            conn.execute("UPDATE cards SET original_card_json = COALESCE(original_card_json, card_json), "
+                         "card_json = ?, errata_at = ? WHERE id = ?", (_dumps(card), _now(), card_id))
+        return self.get_card(card_id)
+
+    def revert_errata(self, card_id: str) -> dict:
+        """Back to the card as printed (a no-op for a card without errata)."""
+        with self._tx() as conn:
+            conn.execute("UPDATE cards SET card_json = COALESCE(original_card_json, card_json), "
+                         "original_card_json = NULL, errata_at = NULL WHERE id = ?", (card_id,))
+        return self.get_card(card_id)
 
     def update_card(self, card_id: str, **fields) -> None:
         """Accepts status, text_ready, art_ready, card (dict), art_path, card_path, error, finished_at."""
@@ -423,9 +494,9 @@ class Storage:
         return self.get_card(card_id)
 
     def list_shared_cards(self, limit: int = 200) -> list[dict]:
-        """Shared cards with their maker's `username`, most recently shared first."""
+        """Shared cards with their maker's `username` and `avatar_id`, most recently shared first."""
         cols = ", ".join(f"c.{c.strip()}" for c in self._CARD_COLS.split(","))
-        rows = self._all(f"SELECT {cols}, u.username FROM cards c JOIN users u ON u.id = c.user_id "
+        rows = self._all(f"SELECT {cols}, u.username, u.avatar_id FROM cards c JOIN users u ON u.id = c.user_id "
                          "WHERE c.shared_at IS NOT NULL ORDER BY c.shared_at DESC, c.rowid DESC "
                          "LIMIT ?", (limit,))
         return [self._decode_card(r) for r in rows]
@@ -517,30 +588,61 @@ class Storage:
 
     def reroll_card(self, card_id: str, user_id: str) -> dict:
         """Mark the card replaced and create a new queued card in the same slot with the same
-        prompt/card_params. 403 not owner, 400 free-play card, 409 set not draft or card still in progress."""
+        prompt/card_params. Errors as _reroll_check. A locked commander's old version takes its
+        votes and reroll requests with it; its other versions keep theirs."""
         new_id = _new_id()
         with self._tx() as conn:
-            card = conn.execute(
-                "SELECT user_id, set_id, slot, replaced, prompt, card_params_json, status "
-                "FROM cards WHERE id = ?", (card_id,)).fetchone()
-            if card is None:
-                raise StorageError(404, "Card not found")
-            if card["user_id"] != user_id:
-                raise StorageError(403, "You can only reroll your own cards")
-            if card["set_id"] is None:
-                raise StorageError(400, "Only commander set cards can be rerolled")
-            set_row = conn.execute("SELECT status FROM sets WHERE id = ?",
-                                   (card["set_id"],)).fetchone()
-            if set_row is None or set_row["status"] != "draft":
-                raise StorageError(409, "Rerolls are only allowed on draft sets")
-            if card["replaced"]:
-                raise StorageError(409, "This card has already been rerolled")
-            if card["status"] in PENDING_STATUSES:
-                raise StorageError(409, "This card is still being generated")
+            card = self._reroll_check(conn, card_id, user_id)
             conn.execute("UPDATE cards SET replaced = 1 WHERE id = ?", (card_id,))
+            conn.execute("DELETE FROM votes WHERE card_id = ?", (card_id,))
+            conn.execute("DELETE FROM reroll_requests WHERE card_id = ?", (card_id,))
             self._insert_card(conn, new_id, user_id, card["prompt"], card["card_params_json"],
                               card["set_id"], card["slot"])
         return self.get_card(new_id)
+
+    def can_reroll(self, card_id: str, user_id: str) -> bool:
+        """Whether reroll_card would take this card from this user right now."""
+        try:
+            self._reroll_check(self._conn(), card_id, user_id)
+        except StorageError:
+            return False
+        return True
+
+    def _reroll_check(self, conn: sqlite3.Connection, card_id: str, user_id: str) -> sqlite3.Row:
+        """The card, if its owner may reroll it: a draft's version any time; a locked commander's
+        version while voting is open, once REROLL_REQUESTS_NEEDED players asked or if it failed (so a
+        failed reroll is never stuck). 404 unknown, 403 not owner, 400 free-play card, 409 otherwise."""
+        card = conn.execute(
+            "SELECT user_id, set_id, slot, replaced, prompt, card_params_json, status "
+            "FROM cards WHERE id = ?", (card_id,)).fetchone()
+        if card is None:
+            raise StorageError(404, "Card not found")
+        if card["user_id"] != user_id:
+            raise StorageError(403, "You can only reroll your own cards")
+        if card["set_id"] is None:
+            raise StorageError(400, "Only commander set cards can be rerolled")
+        set_row = conn.execute("SELECT status, event_id FROM sets WHERE id = ?",
+                               (card["set_id"],)).fetchone()
+        if set_row is None or set_row["status"] not in ("draft", "locked"):
+            raise StorageError(409, "Rerolls are only allowed on draft sets")
+        if card["replaced"]:
+            raise StorageError(409, "This card has already been rerolled")
+        if card["status"] in PENDING_STATUSES:
+            raise StorageError(409, "This card is still being generated")
+        if set_row["status"] == "locked":
+            if not self._event_open(conn, set_row["event_id"]):
+                raise StorageError(409, "Voting is closed")
+            requests = conn.execute("SELECT COUNT(*) FROM reroll_requests WHERE card_id = ?",
+                                    (card_id,)).fetchone()[0]
+            if card["status"] != "failed" and requests < REROLL_REQUESTS_NEEDED:
+                raise StorageError(409, f"A locked commander's version can be rerolled once "
+                                        f"{REROLL_REQUESTS_NEEDED} players ask for it")
+        return card
+
+    @staticmethod
+    def _event_open(conn: sqlite3.Connection, event_id: str | None) -> bool:
+        row = conn.execute("SELECT status FROM events WHERE id = ?", (event_id,)).fetchone()
+        return row is not None and row["status"] == "open"
 
     def lock_set(self, set_id: str, user_id: str, commander_name: str | None = None) -> dict:
         """Requires open event, all 3 current cards done, owner, non-empty commander name, a
@@ -667,10 +769,13 @@ class Storage:
                                  (s["event_id"],)).fetchone()
             if event is None or event["status"] != "open":
                 raise StorageError(409, "Voting is closed")
-            card = conn.execute("SELECT set_id, replaced FROM cards WHERE id = ?",
+            card = conn.execute("SELECT set_id, replaced, status FROM cards WHERE id = ?",
                                 (card_id,)).fetchone()
             if card is None or card["set_id"] != set_id or card["replaced"]:
                 raise StorageError(400, "That card is not one of this set's versions")
+            # A version rerolled during the vote can't be voted on until it's finished.
+            if card["status"] != "done":
+                raise StorageError(409, "That version isn't ready yet")
             # Upsert: a double-click or two tabs racing still leave exactly one row.
             conn.execute(
                 "INSERT INTO votes (voter_id, set_id, card_id, created_at) VALUES (?, ?, ?, ?) "
@@ -701,6 +806,53 @@ class Storage:
             "SELECT card_id FROM votes WHERE voter_id = ? AND set_id = ?",
             (voter_id, set_id)).fetchone()
         return row["card_id"] if row is not None else None
+
+    # ----- reroll requests (docs/superpowers/specs/2026-10-14-reroll-requests-design.md) -----
+    def set_reroll_request(self, card_id: str, user_id: str, requested: bool) -> str:
+        """Asks the owner to reroll a broken version, or takes the request back; returns its set id.
+        Only on a finished, current version of a commander locked in the open event, and never on
+        your own. 404 unknown card, 400 not a commander version, 403 your own, 409 otherwise."""
+        with self._tx() as conn:
+            card = conn.execute("SELECT user_id, set_id, replaced, status FROM cards WHERE id = ?",
+                                (card_id,)).fetchone()
+            if card is None:
+                raise StorageError(404, "Card not found")
+            if card["set_id"] is None:
+                raise StorageError(400, "Only a commander's versions can be rerolled")
+            if card["user_id"] == user_id:
+                raise StorageError(403, "This is your commander: you can reroll it once players ask")
+            s = conn.execute("SELECT status, event_id FROM sets WHERE id = ?",
+                             (card["set_id"],)).fetchone()
+            if s is None or s["status"] != "locked":
+                raise StorageError(409, "This commander is not locked in")
+            if not self._event_open(conn, s["event_id"]):
+                raise StorageError(409, "Voting is closed")
+            if card["replaced"]:
+                raise StorageError(409, "That version was already rerolled")
+            if card["status"] != "done":
+                raise StorageError(409, "That version isn't ready yet")
+            if requested:
+                conn.execute("INSERT INTO reroll_requests (card_id, user_id, created_at) "
+                             "VALUES (?, ?, ?) ON CONFLICT(card_id, user_id) DO NOTHING",
+                             (card_id, user_id, _now()))
+            else:
+                conn.execute("DELETE FROM reroll_requests WHERE card_id = ? AND user_id = ?",
+                             (card_id, user_id))
+        return card["set_id"]
+
+    def reroll_request_counts(self, set_id: str) -> dict[str, int]:
+        """card_id -> requests, for the set's current versions that have any."""
+        rows = self._conn().execute(
+            "SELECT r.card_id, COUNT(*) AS n FROM reroll_requests r JOIN cards c ON c.id = r.card_id "
+            "WHERE c.set_id = ? AND c.replaced = 0 GROUP BY r.card_id", (set_id,)).fetchall()
+        return {r["card_id"]: r["n"] for r in rows}
+
+    def my_reroll_requests(self, user_id: str, set_id: str) -> set[str]:
+        """The set's current versions this user asked to have rerolled."""
+        rows = self._conn().execute(
+            "SELECT r.card_id FROM reroll_requests r JOIN cards c ON c.id = r.card_id "
+            "WHERE r.user_id = ? AND c.set_id = ? AND c.replaced = 0", (user_id, set_id)).fetchall()
+        return {r["card_id"] for r in rows}
 
     # ----- knowledge pool -----
     # Pool row keys: id, name, status, max_entries_per_user, created_at, closed_at
@@ -827,20 +979,22 @@ class Storage:
         return entry
 
     def withdraw_pool_entry(self, entry_id: str, user_id: str) -> str:
-        """Remove the user's entry and its medals while the pool is open. Returns the pool id."""
+        """Remove the user's entry, its medals and WTFs while the pool is open. Returns the pool id."""
         with self._tx() as conn:
             entry = self._open_entry(conn, entry_id)
             if entry["user_id"] != user_id:
                 raise StorageError(403, "You can only withdraw your own submissions")
             conn.execute("DELETE FROM pool_medals WHERE entry_id = ?", (entry_id,))
+            conn.execute("DELETE FROM pool_wtfs WHERE entry_id = ?", (entry_id,))
             conn.execute("DELETE FROM pool_entries WHERE id = ?", (entry_id,))
         return entry["pool_id"]
 
-    def _votable_entry(self, conn: sqlite3.Connection, entry_id: str, voter_id: str) -> sqlite3.Row:
-        """An open pool's entry that `voter_id` may medal (not their own card)."""
+    def _votable_entry(self, conn: sqlite3.Connection, entry_id: str, voter_id: str,
+                       own_card_error: str = "You can't give a medal to your own card") -> sqlite3.Row:
+        """An open pool's entry that `voter_id` may medal or WTF (not their own card)."""
         entry = self._open_entry(conn, entry_id)
         if entry["user_id"] == voter_id:
-            raise StorageError(403, "You can't give a medal to your own card")
+            raise StorageError(403, own_card_error)
         return entry
 
     def award_pool_medal(self, voter_id: str, entry_id: str, medal: str) -> str:
@@ -864,6 +1018,32 @@ class Storage:
         with self._tx() as conn:
             entry = self._votable_entry(conn, entry_id, voter_id)
             conn.execute("DELETE FROM pool_medals WHERE voter_id = ? AND entry_id = ?",
+                         (voter_id, entry_id))
+        return entry["pool_id"]
+
+    def pool_wtf_voters(self, pool_id: str) -> dict[str, list[str]]:
+        """entry_id -> voter ids who WTF'd it, oldest first; only entries with WTFs."""
+        voters: dict[str, list[str]] = {}
+        for r in self._all("SELECT entry_id, voter_id FROM pool_wtfs WHERE pool_id = ? "
+                           "ORDER BY created_at, rowid", (pool_id,)):
+            voters.setdefault(r["entry_id"], []).append(r["voter_id"])
+        return voters
+
+    def flag_pool_wtf(self, voter_id: str, entry_id: str) -> str:
+        """Flag a card as broken (no-op if already flagged). Independent of medals and never
+        counted in the ranking. 403 own card, 404 unknown entry, 409 pool closed. Returns the pool id."""
+        with self._tx() as conn:
+            entry = self._votable_entry(conn, entry_id, voter_id, "You can't WTF your own card")
+            conn.execute(
+                "INSERT OR IGNORE INTO pool_wtfs (voter_id, pool_id, entry_id, created_at) "
+                "VALUES (?, ?, ?, ?)", (voter_id, entry["pool_id"], entry_id, _now()))
+        return entry["pool_id"]
+
+    def clear_pool_wtf(self, voter_id: str, entry_id: str) -> str:
+        """Take back this voter's WTF on the card (no-op if none). Returns the pool id."""
+        with self._tx() as conn:
+            entry = self._votable_entry(conn, entry_id, voter_id, "You can't WTF your own card")
+            conn.execute("DELETE FROM pool_wtfs WHERE voter_id = ? AND entry_id = ?",
                          (voter_id, entry_id))
         return entry["pool_id"]
 

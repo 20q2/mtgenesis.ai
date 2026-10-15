@@ -1,0 +1,86 @@
+<dialog #dialog
+        class="errata-dialog"
+        aria-labelledby="errata-title"
+        (cancel)="onCancel($event)"
+        (click)="onDialogClick($event)">
+  <div class="errata-sheet" [attr.aria-busy]="!!busy">
+    <header class="errata-head">
+      <div class="errata-id">
+        <h2 id="errata-title" class="errata-title" tabindex="-1" autofocus>Errata · {{ item.label }}</h2>
+        <p class="errata-meta">{{ item.username }}<ng-container *ngIf="item.detail"> · {{ item.detail }}</ng-container></p>
+      </div>
+      <button type="button" class="icon-btn" (click)="close()" [disabled]="!!busy" aria-label="Close">
+        <span class="material-icons" aria-hidden="true">close</span>
+      </button>
+    </header>
+
+    <div class="errata-body">
+      <figure class="errata-figure" [class.stale]="previewStale">
+        <img *ngIf="preview; else now" class="errata-image" [src]="preview.image" [alt]="item.label + ', preview'">
+        <ng-template #now>
+          <img *ngIf="item.card.cardImageUrl | media | async as src" class="errata-image" [src]="src" [alt]="item.label">
+        </ng-template>
+        <figcaption>
+          <span class="caption" [class.is-preview]="!!preview">{{ caption }}</span>
+          <span *ngIf="preview?.power as p" class="power power-{{ p.verdict }}" [title]="powerTitle(p)">
+            <span class="material-icons" aria-hidden="true">{{ p.verdict === 'fair' ? 'balance' : 'warning' }}</span>
+            {{ powerLabel(p) }}
+          </span>
+        </figcaption>
+      </figure>
+
+      <form class="errata-form" [formGroup]="form" (ngSubmit)="save()">
+        <label class="field-label" for="errata-text">Rules text</label>
+        <textarea id="errata-text"
+                  class="night-input rules-input"
+                  rows="9"
+                  [formControl]="description"
+                  spellcheck="true"></textarea>
+        <p class="hint">Symbols as <code>{{ '{' }}T{{ '}' }}</code>, <code>{{ '{' }}2{{ '}' }}{{ '{' }}R{{ '}' }}</code>; a line per ability; <code>~</code> becomes the card's name.</p>
+
+        <div *ngIf="hasBody" class="pt-row">
+          <label class="pt-field">
+            <span class="field-label">Power</span>
+            <input class="night-input" [formControl]="power" maxlength="3" inputmode="numeric" autocomplete="off">
+          </label>
+          <span class="pt-slash" aria-hidden="true">/</span>
+          <label class="pt-field">
+            <span class="field-label">Toughness</span>
+            <input class="night-input" [formControl]="toughness" maxlength="3" inputmode="numeric" autocomplete="off">
+          </label>
+        </div>
+
+        <p class="locked muted">
+          <span class="material-icons" aria-hidden="true">lock</span>
+          Name, mana cost, type and rarity stay as printed.
+        </p>
+
+        <details *ngIf="item.original as printed" class="printed">
+          <summary>As printed</summary>
+          <p class="printed-text">{{ printed.description }}</p>
+          <p *ngIf="printed.power" class="printed-pt">{{ printed.power }}/{{ printed.toughness }}</p>
+        </details>
+
+        <div *ngIf="error" class="alert alert-error" role="alert">
+          <span class="material-icons" aria-hidden="true">error</span>
+          <span>{{ error }}</span>
+        </div>
+
+        <div class="errata-actions">
+          <button *ngIf="item.card.errata" type="button" class="text-btn danger" (click)="revert()" [disabled]="!!busy">
+            <span class="material-icons" aria-hidden="true">undo</span>
+            {{ busy === 'revert' ? 'Reverting…' : 'Revert to printed' }}
+          </button>
+          <button type="button" class="btn btn-ghost" (click)="doPreview()" [disabled]="!!busy">
+            <span class="material-icons" aria-hidden="true">visibility</span>
+            {{ busy === 'preview' ? 'Drawing…' : 'Preview' }}
+          </button>
+          <button type="submit" class="btn btn-gold" [disabled]="!!busy || !dirty">
+            <span class="material-icons" aria-hidden="true">auto_fix_high</span>
+            {{ busy === 'save' ? 'Saving…' : 'Save errata' }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</dialog>

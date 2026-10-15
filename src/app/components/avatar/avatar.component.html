@@ -1,0 +1,7 @@
+<span class="avatar" [class.picture]="showPicture" [style.--size]="size + 'px'" aria-hidden="true">
+  <!-- Only once the media pipe has a src: a null src would load "null" and fire (error) -->
+  <ng-container *ngIf="showPicture; else letter">
+    <img *ngIf="url | media | async as src" [src]="src" alt="" (error)="failed = true">
+  </ng-container>
+  <ng-template #letter>{{ initial }}</ng-template>
+</span>

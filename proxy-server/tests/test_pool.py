@@ -147,6 +147,42 @@ def test_closed_pool_is_frozen(tmp_storage, pool):
         assert status_of(call) == 409
 
 
+# ----- WTF flags (advisory, separate from medals) -----
+def test_wtf_toggles_per_voter_and_never_own(tmp_storage, pool):
+    alice, bob, carl = (user(tmp_storage, n) for n in ("alice", "bob", "carl"))
+    a = tmp_storage.submit_pool_entry(alice, done_card(tmp_storage, alice))["id"]
+    b = tmp_storage.submit_pool_entry(bob, done_card(tmp_storage, bob))["id"]
+
+    assert tmp_storage.flag_pool_wtf(carl, a) == pool["id"]
+    tmp_storage.flag_pool_wtf(carl, a)  # again: still one
+    tmp_storage.flag_pool_wtf(carl, b)  # any number of cards
+    tmp_storage.flag_pool_wtf(bob, a)
+    tmp_storage.award_pool_medal(carl, a, "gold")  # a medal and a WTF are independent
+    assert tmp_storage.pool_wtf_voters(pool["id"]) == {a: [carl, bob], b: [carl]}
+    assert tmp_storage.my_pool_medals(carl, pool["id"]) == {a: "gold"}
+
+    assert status_of(lambda: tmp_storage.flag_pool_wtf(alice, a)) == 403
+    assert status_of(lambda: tmp_storage.flag_pool_wtf(carl, str(uuid.uuid4()))) == 404
+    assert tmp_storage.clear_pool_wtf(carl, a) == pool["id"]
+    tmp_storage.clear_pool_wtf(carl, a)  # no-op
+    assert tmp_storage.pool_wtf_voters(pool["id"]) == {a: [bob], b: [carl]}
+
+
+def test_wtf_cleared_on_withdraw_and_frozen_when_closed(tmp_storage, pool):
+    alice, bob = user(tmp_storage, "alice"), user(tmp_storage, "bob")
+    a = tmp_storage.submit_pool_entry(alice, done_card(tmp_storage, alice))["id"]
+    b = tmp_storage.submit_pool_entry(alice, done_card(tmp_storage, alice))["id"]
+    tmp_storage.flag_pool_wtf(bob, a)
+    tmp_storage.flag_pool_wtf(bob, b)
+    tmp_storage.withdraw_pool_entry(a, alice)
+    assert tmp_storage.pool_wtf_voters(pool["id"]) == {b: [bob]}
+
+    tmp_storage.close_pool(pool["id"])
+    assert status_of(lambda: tmp_storage.flag_pool_wtf(bob, b)) == 409
+    assert status_of(lambda: tmp_storage.clear_pool_wtf(bob, b)) == 409
+    assert tmp_storage.pool_wtf_voters(pool["id"]) == {b: [bob]}
+
+
 def test_open_pool_entry_ids(tmp_storage, pool):
     alice = user(tmp_storage, "alice")
     card = done_card(tmp_storage, alice)
@@ -294,8 +330,8 @@ def test_api_admin_create_requires_pin(client):
     assert client.get("/api/v1/pools/current").get_json() is None
 
 
-ENTRY_KEYS = {"id", "cardId", "card", "username", "mine", "power", "gold", "silver", "bronze",
-              "points", "rank", "in", "tiedAtCutoff", "myMedal", "createdAt"}
+ENTRY_KEYS = {"id", "cardId", "card", "username", "avatarUrl", "mine", "power", "gold", "silver", "bronze",
+              "points", "rank", "in", "tiedAtCutoff", "myMedal", "wtfBy", "myWtf", "createdAt"}
 
 
 def submit_api(client, user_id, card_id):
@@ -353,6 +389,28 @@ def test_api_full_flow(client, tmp_storage):
                       json={"entryId": entries["Alice"]["id"]})
     assert res.get_json()["myMedals"]["silver"] is None
 
+    # WTF: a warning with names, no effect on points or the pool line.
+    def wtf(voter, target, on=True):
+        res = client.post("/api/v1/pools/wtf" + ("" if on else "/clear"), headers=H(ids[voter]),
+                          json={"entryId": entries[target]["id"]})
+        assert res.status_code == 200, res.get_json()
+        return next(e for e in res.get_json()["entries"] if e["id"] == entries[target]["id"])
+
+    before = client.get("/api/v1/pools/current", headers=H(ids["Alice"])).get_json()
+    wtf("Alice", "Bob")
+    alice_sees = wtf("Alice", "Bob")  # again: still one
+    assert alice_sees["wtfBy"] == ["Alice"] and alice_sees["myWtf"] is True
+    carl_sees = wtf("Carl", "Bob")
+    assert carl_sees["wtfBy"] == ["Alice", "Carl"] and carl_sees["myWtf"] is True
+    after = client.get("/api/v1/pools/current", headers=H(ids["Dana"])).get_json()
+    assert [(e["id"], e["points"], e["in"]) for e in after["entries"]] ==         [(e["id"], e["points"], e["in"]) for e in before["entries"]]
+    assert next(e for e in after["entries"] if e["id"] == entries["Bob"]["id"])["myWtf"] is False
+    assert wtf("Alice", "Bob", on=False)["wtfBy"] == ["Carl"]
+    assert client.post("/api/v1/pools/wtf", headers=H(ids["Bob"]),
+                       json={"entryId": entries["Bob"]["id"]}).status_code == 403
+    assert client.post("/api/v1/pools/wtf", headers=H(ids["Bob"]), json={}).status_code == 400
+    assert client.post("/api/v1/pools/wtf", json={"entryId": entries["Bob"]["id"]}).status_code == 401
+
     # The card views know which cards are in the open pool.
     mine = client.get("/api/v1/me/cards", headers=H(ids["Alice"])).get_json()
     by_id = {c["id"]: c for c in mine}
@@ -371,6 +429,9 @@ def test_api_full_flow(client, tmp_storage):
     assert [p["id"] for p in client.get("/api/v1/pools").get_json()] == [pool["id"]]
     past = client.get(f"/api/v1/pools/{pool['id']}", headers=H(ids["Bob"])).get_json()
     assert len(past["entries"]) == 4
+    assert next(e for e in past["entries"] if e["id"] == entries["Bob"]["id"])["wtfBy"] == ["Carl"]
+    assert client.post("/api/v1/pools/wtf", headers=H(ids["Dana"]),
+                       json={"entryId": entries["Bob"]["id"]}).status_code == 409
     assert client.post("/api/v1/pools/medals", headers=H(ids["Bob"]),
                        json={"entryId": entries["Dana"]["id"], "medal": "bronze"}).status_code == 409
     assert client.post(f"/api/v1/pools/entries/{entries['Dana']['id']}/withdraw",

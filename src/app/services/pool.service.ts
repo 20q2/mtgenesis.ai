@@ -41,6 +41,15 @@ export class PoolService {
     return this.http.post<PoolView>(api('/pools/medals/clear'), { entryId });
   }
 
+  /** Flag a card as broken. Separate from medals and never counted; not your own card. */
+  wtf(entryId: string): Observable<PoolView> {
+    return this.http.post<PoolView>(api('/pools/wtf'), { entryId });
+  }
+
+  clearWtf(entryId: string): Observable<PoolView> {
+    return this.http.post<PoolView>(api('/pools/wtf/clear'), { entryId });
+  }
+
   createPool(name: string, maxEntriesPerUser: number, pin: string): Observable<PoolView> {
     return this.http.post<PoolView>(api('/admin/pools'), { name, maxEntriesPerUser },
       { headers: this.adminHeaders(pin) });

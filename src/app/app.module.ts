@@ -34,6 +34,10 @@ import { PoolAdminComponent } from './components/pool-admin/pool-admin.component
 import { PoolSubmitComponent } from './components/pool-submit/pool-submit.component';
 import { BallotPlayerComponent } from './components/ballot-player/ballot-player.component';
 import { PlayerSheetComponent } from './components/player-sheet/player-sheet.component';
+import { AvatarComponent } from './components/avatar/avatar.component';
+import { ProfilePictureComponent } from './components/profile-picture/profile-picture.component';
+import { ErrataPanelComponent } from './components/errata-panel/errata-panel.component';
+import { ErrataEditorComponent } from './components/errata-editor/errata-editor.component';
 
 @NgModule({
   declarations: [
@@ -59,6 +63,10 @@ import { PlayerSheetComponent } from './components/player-sheet/player-sheet.com
     PoolSubmitComponent,
     BallotPlayerComponent,
     PlayerSheetComponent,
+    AvatarComponent,
+    ProfilePictureComponent,
+    ErrataPanelComponent,
+    ErrataEditorComponent,
     MediaPipe,
     CmcGroupsPipe,
     TiltDirective

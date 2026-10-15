@@ -112,7 +112,7 @@ def test_share_endpoint_and_community_list(client, tmp_storage):
     listed = client.get("/api/v1/cards/shared").get_json()
     assert [c["id"] for c in listed] == [card["id"]]
     assert listed[0]["username"] == "Andrew" and listed[0]["shared"] is True
-    assert set(listed[0]) == CARD_VIEW_KEYS | {"username"}
+    assert set(listed[0]) == CARD_VIEW_KEYS | {"username", "avatarUrl"}
 
     res = client.post(f"/api/v1/cards/{card['id']}/share", headers=H(uid), json={"shared": False})
     assert res.get_json()["shared"] is False

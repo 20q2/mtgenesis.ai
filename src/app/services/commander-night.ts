@@ -54,6 +54,7 @@ export interface BallotSlot { cmc: number | null; set: SetView | null; }
 export interface BallotPlayer {
   userId: string;
   username: string;
+  avatarUrl: string | null;
   mine: boolean;
   /** 3, 4 and 5 CMC (gaps included), then sets from before the commander rules. */
   slots: BallotSlot[];
@@ -76,7 +77,8 @@ export function ballot(sets: SetView[], userId: string | null): BallotPlayer[] {
     ];
     const ordered = slots.map(s => s.set).filter((s): s is SetView => !!s);
     return {
-      userId: id, username: own[0].username, mine: !!userId && id === userId, slots, sets: ordered,
+      userId: id, username: own[0].username, avatarUrl: own[0].avatarUrl ?? null,
+      mine: !!userId && id === userId, slots, sets: ordered,
       voted: ordered.filter(s => !!s.myVoteCardId).length
     };
   });

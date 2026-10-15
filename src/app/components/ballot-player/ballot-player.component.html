@@ -4,7 +4,7 @@
          [attr.data-user-id]="player.userId"
          (click)="open.emit(null)">
   <header class="player-head">
-    <span class="avatar" aria-hidden="true">{{ player.username.charAt(0) }}</span>
+    <app-avatar [url]="player.avatarUrl" [name]="player.username" [size]="32"></app-avatar>
     <div class="player-id">
       <h3 class="player-name">{{ player.username }}</h3>
       <span *ngIf="player.mine" class="player-sub">{{ closed ? 'Your commanders' : 'Yours · your vote counts double' }}</span>
@@ -30,13 +30,19 @@
               [attr.aria-label]="slotLabel(set)"
               (click)="onSlot($event, set)">
         <span class="fan" aria-hidden="true">
-          <img *ngFor="let card of set.cards; let i = index; trackBy: trackCard"
-               class="fan-card"
-               [style.--o]="i - (set.cards.length - 1) / 2"
-               [class.front]="card.id === frontId(set)"
-               [class.back]="!!frontId(set) && card.id !== frontId(set)"
-               [src]="card.cardImageUrl | media | async"
-               alt="">
+          <ng-container *ngFor="let card of set.cards; let i = index; trackBy: trackCard">
+            <img *ngIf="card.cardImageUrl; else blank"
+                 class="fan-card"
+                 [style.--o]="i - (set.cards.length - 1) / 2"
+                 [class.front]="card.id === frontId(set)"
+                 [class.back]="!!frontId(set) && card.id !== frontId(set)"
+                 [src]="card.cardImageUrl | media | async"
+                 alt="">
+            <!-- A version being rerolled during the vote has no image yet -->
+            <ng-template #blank>
+              <span class="fan-card fan-blank" [style.--o]="i - (set.cards.length - 1) / 2"></span>
+            </ng-template>
+          </ng-container>
           <span *ngIf="set.cmc" class="fan-pip"><i class="ms ms-cost ms-{{ set.cmc }}"></i></span>
         </span>
         <span class="slot-name">{{ set.commanderName }}</span>

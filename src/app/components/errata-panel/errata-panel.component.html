@@ -1,0 +1,83 @@
+<section class="panel errata-panel" aria-labelledby="errata-panel-title">
+  <div class="panel-head">
+    <h3 id="errata-panel-title" class="section-title">Errata</h3>
+    <button type="button" class="icon-btn" (click)="reload()" [disabled]="!pin.trim() || loading"
+            aria-label="Reload the cards" title="Reload">
+      <span class="material-icons" aria-hidden="true">refresh</span>
+    </button>
+  </div>
+  <p class="muted intro">
+    Fix a card's rules text or power/toughness. It re-renders for everyone, and players see an Errata tag on it.
+  </p>
+
+  <p *ngIf="!pin.trim()" class="muted note">Enter the host PIN above to load the cards.</p>
+  <p *ngIf="loading && !groups" class="muted note">Loading the cards…</p>
+
+  <div *ngIf="error" class="alert alert-error" role="alert">
+    <span class="material-icons" aria-hidden="true">error</span>
+    <span>{{ error }}</span>
+  </div>
+  <div *ngIf="success" class="alert alert-success" role="status">
+    <span class="material-icons" aria-hidden="true">check_circle</span>
+    <span>{{ success }}</span>
+    <button type="button" class="alert-close" (click)="success = null" aria-label="Dismiss">×</button>
+  </div>
+
+  <ng-container *ngIf="groups as gs">
+    <p *ngIf="!gs.length" class="muted note">
+      Nothing to errata yet: there's no commander vote, closed event or Knowledge Pool.
+    </p>
+
+    <div *ngIf="gs.length" class="sources" role="tablist" aria-label="Which cards">
+      <button *ngFor="let g of gs"
+              type="button"
+              role="tab"
+              class="source"
+              [attr.aria-selected]="g.id === activeId"
+              [class.selected]="g.id === activeId"
+              (click)="activeId = g.id">
+        <span class="source-name">{{ tabLabel(g) }}</span>
+        <span class="source-sub">{{ tabSub(g) }}</span>
+        <span class="source-count">
+          {{ g.items.length }} {{ g.items.length === 1 ? 'card' : 'cards' }}<ng-container *ngIf="errataCount(g)"> · {{ errataCount(g) }} with errata</ng-container>
+        </span>
+      </button>
+    </div>
+
+    <ng-container *ngIf="active as group">
+      <input *ngIf="group.items.length > 6"
+             class="night-input filter"
+             type="search"
+             placeholder="Filter by card or player"
+             aria-label="Filter the cards"
+             [value]="filter"
+             (input)="onFilter($event)">
+
+      <p *ngIf="!group.items.length" class="muted note">No cards here.</p>
+      <p *ngIf="group.items.length && !shown.length" class="muted note">No cards match "{{ filter }}".</p>
+
+      <div class="errata-grid" role="tabpanel">
+        <button *ngFor="let item of shown; trackBy: trackItem"
+                type="button"
+                class="errata-tile"
+                [class.has-errata]="item.card.errata"
+                [attr.data-card-id]="item.card.id"
+                (click)="open(item)"
+                [attr.aria-label]="'Errata ' + item.label + ', ' + item.detail + (item.card.errata ? ', has errata' : '')">
+          <span class="thumb">
+            <img *ngIf="item.card.cardImageUrl | media | async as src" [src]="src" alt="" loading="lazy">
+            <span *ngIf="item.card.errata" class="errata-tag">Errata</span>
+          </span>
+          <span class="tile-label">{{ item.label }}</span>
+          <span class="tile-meta">{{ item.username }}<ng-container *ngIf="item.detail"> · {{ item.detail }}</ng-container></span>
+        </button>
+      </div>
+    </ng-container>
+  </ng-container>
+</section>
+
+<app-errata-editor *ngIf="editing as item"
+                   [item]="item"
+                   [pin]="pin"
+                   (saved)="onSaved($event)"
+                   (closed)="editing = null"></app-errata-editor>

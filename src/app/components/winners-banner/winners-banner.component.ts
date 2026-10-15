@@ -26,6 +26,11 @@ export class WinnersBannerComponent {
     }
   }
 
+  /** The host changed a winning (or tied) version after the vote. */
+  hasErrata(set: SetView): boolean {
+    return setOutcome(set).cards.some(c => c.errata);
+  }
+
   trackSet(_index: number, set: SetView): string {
     return set.id;
   }

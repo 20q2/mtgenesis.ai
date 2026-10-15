@@ -13,8 +13,8 @@
         </div>
         <div class="winner-text">
           <strong class="winner-name">{{ set.commanderName }}</strong>
-          <span class="muted"> by {{ set.username }}</span>
-          <div class="winner-version">{{ label(outcome(set)) }}</div>
+          <span class="muted"> by <span class="byline"><app-avatar [url]="set.avatarUrl" [name]="set.username" [size]="18"></app-avatar>{{ set.username }}</span></span>
+          <div class="winner-version">{{ label(outcome(set)) }} <span *ngIf="hasErrata(set)" class="errata-badge" title="The host changed this card's rules text or P/T">Errata</span></div>
         </div>
       </li>
     </ul>

@@ -112,6 +112,15 @@
   }
 }
 
+.reroll-notice {
+  margin: 0.75rem 0 0;
+
+  .btn {
+    margin-left: auto;
+    flex: none;
+  }
+}
+
 /* The rules, folded away: the sheet repeats the one that matters at the moment of voting */
 .how-to {
   margin-top: 0.6rem;

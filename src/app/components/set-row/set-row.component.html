@@ -7,7 +7,7 @@
     <span *ngIf="set.cmc" class="row-meta rarity-{{ set.rarity }}">
       {{ set.cmc }} CMC<ng-container *ngIf="rarityLabel"> · <span class="gem" aria-hidden="true"></span>{{ rarityLabel }}</ng-container>
     </span>
-    <span class="by muted">by {{ set.username }}</span>
+    <span class="by muted">by <span class="byline"><app-avatar [url]="set.avatarUrl" [name]="set.username" [size]="20"></app-avatar>{{ set.username }}</span></span>
   </header>
 
   <p class="swipe-hint muted"><span class="material-icons" aria-hidden="true">swipe</span> Swipe to compare all 3 versions</p>

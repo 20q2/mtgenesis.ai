@@ -54,8 +54,8 @@
         "files": [
           "src/app/pages/vote-page/vote-page.component.html"
         ],
-        "createdAt": "2026-10-03T06:25:40.924Z",
-        "reason": "Claude: src is bound at runtime via [src]=\"card.cardImageUrl | media | async\" (same pattern as winners-banner); static scan can't see it"
+        "createdAt": "2026-10-13T15:19:59.913Z",
+        "reason": "Claude: src is an Angular [src] binding via the media pipe (blob URLs loaded at runtime), not an empty src"
       },
       {
         "rule": "broken-image",
@@ -79,10 +79,37 @@
         "rule": "broken-image",
         "value": "*",
         "files": [
-          "src/app/pages/vote-page/vote-page.component.html"
+          "src/app/components/avatar/avatar.component.html"
         ],
-        "createdAt": "2026-10-13T15:19:59.913Z",
-        "reason": "Claude: src is an Angular [src] binding via the media pipe (blob URLs loaded at runtime), not an empty src"
+        "createdAt": "2026-10-14T22:10:24.839Z",
+        "reason": "Claude: src is an Angular [src] binding via the media pipe; (error) falls back to the initial"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/components/profile-picture/profile-picture.component.html"
+        ],
+        "createdAt": "2026-10-14T22:11:49.229Z",
+        "reason": "Claude: both imgs use Angular [src] bindings (media pipe / object URL) set at runtime"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/components/errata-editor/errata-editor.component.html"
+        ],
+        "createdAt": "2026-10-14T23:29:32.454Z",
+        "reason": "Claude: imgs render only once an Angular [src] (preview data URL or media pipe) exists"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/components/errata-panel/errata-panel.component.html"
+        ],
+        "createdAt": "2026-10-14T23:30:26.121Z",
+        "reason": "Claude: img renders only once the media pipe resolves its Angular [src]"
       }
     ]
   }

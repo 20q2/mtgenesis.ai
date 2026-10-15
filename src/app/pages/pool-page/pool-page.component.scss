@@ -5,6 +5,8 @@
   --medal-silver-bg: #eef1f4;
   --medal-bronze: #b0703a;
   --medal-bronze-bg: #f7e8dc;
+  --wtf: #b42318;
+  --wtf-bg: #fde8e6;
 }
 
 .loading {
@@ -234,6 +236,13 @@
   &.bronze { background: var(--medal-bronze-bg); color: #7a4418; border: 1px solid var(--medal-bronze); }
 }
 
+.flag-wtf {
+  background: var(--wtf-bg);
+  color: var(--wtf);
+  border: 1px solid var(--wtf);
+  cursor: help;
+}
+
 .flag-mine {
   background: var(--chrome);
   color: var(--chrome-text);
@@ -382,6 +391,26 @@
   &.on.bronze { background: var(--medal-bronze); border-color: var(--medal-bronze); color: #fff; }
 }
 
+/* Apart from the medal group: a warning, not a fourth medal. */
+.wtf-button {
+  @extend .medal-button;
+  flex: none;
+  min-width: 44px;
+  border-style: dashed;
+
+  .material-icons { color: var(--wtf); }
+
+  &:hover:not(:disabled) { border-color: var(--wtf); color: var(--wtf); }
+
+  &.on {
+    background: var(--wtf);
+    border: 1px solid var(--wtf);
+    color: #fff;
+
+    .material-icons { color: #fff; }
+  }
+}
+
 .no-entries {
   grid-column: 1 / -1;
 }
@@ -432,7 +461,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .medal-button:active:not(:disabled) {
+  .medal-button:active:not(:disabled),
+  .wtf-button:active:not(:disabled) {
     transform: none;
   }
 }

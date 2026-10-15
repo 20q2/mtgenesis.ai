@@ -42,7 +42,9 @@
         <li>
           <span class="material-icons" aria-hidden="true">balance</span>
           <span><strong>Vote in good faith:</strong> medal the cards you'd want everyone to have: fun and balanced,
-            not broken. The power check below flags cards that look too strong for their cost.</span>
+            not broken. The power check below flags cards that look too strong for their cost.
+            <strong>WTF a card you think is broken:</strong> it costs no points, it tells everyone (and the host)
+            to look hard before medaling it.</span>
         </li>
         <li>
           <span class="material-icons" aria-hidden="true">workspace_premium</span>
@@ -83,7 +85,8 @@
           <figcaption>
             <span class="muted">
               <ng-container *ngIf="e.tiedAtCutoff">Tied at the line · </ng-container>
-              {{ e.points }} {{ e.points === 1 ? 'point' : 'points' }} · by {{ e.username }}
+              {{ e.points }} {{ e.points === 1 ? 'point' : 'points' }} · by <span class="byline"><app-avatar [url]="e.avatarUrl" [name]="e.username" [size]="18"></app-avatar>{{ e.username }}</span>
+              <span *ngIf="e.card.errata" class="errata-badge" title="The host changed this card's rules text or P/T">Errata</span>
             </span>
             <button type="button" class="btn btn-ghost btn-sm" (click)="download(e)" *ngIf="e.card.cardImageUrl">
               <span class="material-icons">download</span> Card
@@ -121,6 +124,10 @@
                 <span class="material-icons" aria-hidden="true">workspace_premium</span>
                 {{ entry.tiedAtCutoff ? 'Tied · in' : 'In' }}
               </span>
+              <span *ngIf="entry.wtfBy.length" class="flag flag-wtf" [title]="wtfTitle(entry)">
+                <span class="material-icons" aria-hidden="true">report</span>
+                WTF ×{{ entry.wtfBy.length }}
+              </span>
               <span *ngIf="entry.myMedal as m" class="flag flag-medal" [ngClass]="m">Your {{ m }}</span>
               <span *ngIf="entry.mine" class="flag flag-mine">Your card</span>
             </div>
@@ -135,7 +142,8 @@
                 <span class="material-icons" aria-hidden="true">{{ power.verdict === 'fair' ? 'balance' : 'warning' }}</span>
                 {{ powerLabel(power) }}
               </span>
-              <span class="muted by" *ngIf="!entry.mine">by {{ entry.username }}</span>
+              <span *ngIf="entry.card.errata" class="errata-badge" title="The host changed this card's rules text or P/T">Errata</span>
+              <span class="muted by" *ngIf="!entry.mine">by <span class="byline"><app-avatar [url]="entry.avatarUrl" [name]="entry.username" [size]="20"></app-avatar>{{ entry.username }}</span></span>
             </div>
 
             <div class="tally" [attr.aria-label]="entry.points + ' points'">
@@ -161,6 +169,17 @@
                   <span class="medal-label">{{ m.label }}</span>
                 </button>
               </div>
+              <button *ngIf="canVote(entry)"
+                      type="button"
+                      class="wtf-button"
+                      [class.on]="entry.myWtf"
+                      [disabled]="busy"
+                      [attr.aria-pressed]="entry.myWtf"
+                      [title]="entry.myWtf ? 'Take your WTF back' : 'WTF: flag this card as broken (no points)'"
+                      (click)="toggleWtf(entry)">
+                <span class="material-icons" aria-hidden="true">report</span>
+                <span class="medal-label">WTF</span>
+              </button>
               <button *ngIf="entry.mine"
                       type="button"
                       class="btn btn-ghost btn-sm withdraw-button"

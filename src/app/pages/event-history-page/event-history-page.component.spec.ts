@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { AvatarComponent } from '../../components/avatar/avatar.component';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { RouterTestingModule } from '@angular/router/testing';
 import { BehaviorSubject, of } from 'rxjs';
@@ -33,7 +34,7 @@ describe('EventHistoryPageComponent', () => {
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
     TestBed.configureTestingModule({
       imports: [RouterTestingModule],
-      declarations: [EventHistoryPageComponent, SetRowComponent, WinnersBannerComponent, CardSlotComponent, MediaPipe,
+      declarations: [EventHistoryPageComponent, SetRowComponent, AvatarComponent, WinnersBannerComponent, CardSlotComponent, MediaPipe,
                      CmcGroupsPipe],
       providers: [
         { provide: EventService, useValue: events },

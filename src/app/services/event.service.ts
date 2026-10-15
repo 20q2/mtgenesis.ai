@@ -1,7 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { EventSummary, EventView, SetView } from '../models/api.model';
+import { Observable, map } from 'rxjs';
+import {
+  ErrataFields, ErrataGroup, ErrataItem, ErrataPreview, EventSummary, EventView, SetView
+} from '../models/api.model';
 import { api } from './api.util';
 
 /** Events, sets, votes and host (admin) actions (spec §4). */
@@ -40,6 +42,11 @@ export class EventService {
     return this.http.post<SetView>(api('/votes'), { setId, cardId });
   }
 
+  /** Asks the owner to reroll a broken version, or takes the request back. Returns the updated set. */
+  requestReroll(cardId: string, requested: boolean): Observable<SetView> {
+    return this.http.post<SetView>(api(`/cards/${encodeURIComponent(cardId)}/reroll-request`), { requested });
+  }
+
   createEvent(name: string, pin: string): Observable<EventView> {
     return this.http.post<EventView>(api('/admin/events'), { name }, { headers: this.adminHeaders(pin) });
   }
@@ -48,6 +55,28 @@ export class EventService {
   closeEvent(id: string, pin: string): Observable<EventView> {
     return this.http.post<EventView>(
       api(`/admin/events/${encodeURIComponent(id)}/close`), {}, { headers: this.adminHeaders(pin) });
+  }
+
+  /** Host errata: the cards in the vote, the last closed event's legal commanders and the pool. */
+  errataList(pin: string): Observable<ErrataGroup[]> {
+    return this.http.get<{ groups: ErrataGroup[] }>(api('/admin/errata'), { headers: this.adminHeaders(pin) })
+      .pipe(map(body => body.groups));
+  }
+
+  /** The card re-rendered with these changes, not saved. */
+  previewErrata(cardId: string, fields: ErrataFields, pin: string): Observable<ErrataPreview> {
+    return this.http.post<ErrataPreview>(api(`/admin/cards/${encodeURIComponent(cardId)}/errata`),
+      { ...fields, preview: true }, { headers: this.adminHeaders(pin) });
+  }
+
+  saveErrata(cardId: string, fields: ErrataFields, pin: string): Observable<ErrataItem> {
+    return this.http.post<ErrataItem>(api(`/admin/cards/${encodeURIComponent(cardId)}/errata`),
+      fields, { headers: this.adminHeaders(pin) });
+  }
+
+  revertErrata(cardId: string, pin: string): Observable<ErrataItem> {
+    return this.http.post<ErrataItem>(api(`/admin/cards/${encodeURIComponent(cardId)}/errata/revert`),
+      {}, { headers: this.adminHeaders(pin) });
   }
 
   private adminHeaders(pin: string): HttpHeaders {

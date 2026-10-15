@@ -120,17 +120,40 @@
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(243, 233, 210, 0.12);
 
-  .avatar {
-    display: inline-grid;
-    place-items: center;
-    width: 26px;
-    height: 26px;
+  /* Your face; it opens the profile picture dialog. No picture yet: a small + invites one. */
+  .avatar-btn {
+    position: relative;
+    display: inline-flex;
+    padding: 0;
+    border: 0;
     border-radius: 50%;
-    background: linear-gradient(150deg, var(--gold-bright), var(--gold-deep));
+    background: none;
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease-out);
+
+    &:hover {
+      transform: scale(1.08);
+    }
+
+    &:focus-visible {
+      outline-color: var(--gold-bright);
+    }
+  }
+
+  .avatar-add {
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    display: grid;
+    place-items: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1.5px solid #1a1626;
+    background: var(--gold-bright);
     color: var(--text-on-gold);
-    font-family: var(--font-display);
-    font-size: 0.95rem;
-    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 700;
   }
 
   .username {

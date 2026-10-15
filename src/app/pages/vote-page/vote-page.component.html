@@ -48,6 +48,13 @@
         </ng-template>
       </div>
 
+      <!-- Players asked me to reroll a version (or one of mine failed) -->
+      <div *ngIf="rerollNotice as notice" class="alert alert-info reroll-notice" role="status">
+        <span class="material-icons" aria-hidden="true">casino</span>
+        <span>{{ notice }}</span>
+        <button type="button" class="btn btn-sm btn-ghost" (click)="reviewRerolls()">Review</button>
+      </div>
+
       <details *ngIf="!isClosed" class="how-to">
         <summary>
           <span class="material-icons" aria-hidden="true">help_outline</span>
@@ -63,6 +70,8 @@
             <span><strong>Your vote on your own commander counts as two,</strong> so vote on your own first, then everyone else's.</span></li>
           <li><span class="material-icons" aria-hidden="true">edit</span>
             <span>You can change a vote until the host closes voting.</span></li>
+          <li><span class="material-icons" aria-hidden="true">outlined_flag</span>
+            <span><strong>A version doesn't work at all?</strong> Ask its owner for a reroll. Once {{ rerollsNeeded }} players ask, the owner can reroll it, and the votes on that version are cleared.</span></li>
         </ul>
       </details>
       <p class="muted closed-note" *ngIf="isClosed">Voting is closed and the results are final. The winning versions are legal on the event night.</p>
@@ -76,7 +85,7 @@
           <span class="legal-mana"><i class="ms ms-cost ms-shadow ms-{{ l.set.cmc }}" aria-hidden="true"></i></span>
           <span class="legal-text">
             <strong>{{ l.set.commanderName }}</strong>
-            <span class="muted">{{ legalLabel(l) }}</span>
+            <span class="muted">{{ legalLabel(l) }} <span *ngIf="hasErrata(l)" class="errata-badge" title="The host changed this card's rules text or P/T">Errata</span></span>
           </span>
           <img *ngFor="let card of l.cards" class="legal-thumb"
                [src]="card.cardImageUrl | media | async"
@@ -131,12 +140,15 @@
                       [player]="sp"
                       [closed]="isClosed"
                       [busy]="voting"
+                      [cardBusy]="cardBusy"
                       [error]="error"
                       [focusSetId]="sheetFocusSetId"
                       [position]="sheetIndex"
                       [count]="players.length"
                       [nextPlayer]="nextPlayer"
                       (vote)="vote($event.set, $event.card)"
+                      (requestReroll)="requestReroll($event.card, $event.requested)"
+                      (reroll)="reroll($event.set, $event.card)"
                       (step)="stepPlayer($event)"
                       (goTo)="openPlayer($event)"
                       (dismiss)="closeSheet()"

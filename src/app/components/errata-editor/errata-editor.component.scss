@@ -1,0 +1,326 @@
+/* One card's errata: the card (as it is, or a preview) beside the form. */
+:host {
+  display: contents;
+}
+
+.errata-dialog {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 1rem;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  overflow: auto;
+
+  &[open] {
+    display: grid;
+    place-items: center;
+  }
+
+  &::backdrop {
+    background: rgba(16, 14, 26, 0.6);
+    backdrop-filter: blur(5px) saturate(110%);
+    -webkit-backdrop-filter: blur(5px) saturate(110%);
+    animation: fade-in 200ms ease-out;
+  }
+
+  @media (max-width: 640px) {
+    padding: 0;
+  }
+}
+
+.errata-sheet {
+  width: min(100%, 54rem);
+  border-radius: var(--r-lg);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  background: #fffdf9;
+  box-shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.65), 0 2px 6px rgba(0, 0, 0, 0.12);
+  animation: sheet-in 280ms var(--ease-out);
+
+  @media (max-width: 640px) {
+    min-height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.99); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+
+.errata-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.8rem 0.75rem 0.7rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunken);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+
+  .icon-btn {
+    flex: none;
+    width: 36px;
+    height: 36px;
+    margin-left: auto;
+  }
+}
+
+.errata-id {
+  min-width: 0;
+}
+
+.errata-title {
+  outline: none;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.errata-meta {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.errata-body {
+  display: grid;
+  grid-template-columns: minmax(0, 19rem) minmax(0, 1fr);
+  gap: 1.5rem;
+  padding: 1.25rem;
+
+  @media (max-width: 760px) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+}
+
+/* ===== The card ===== */
+.errata-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+
+  @media (max-width: 760px) {
+    max-width: 17rem;
+    margin: 0 auto;
+  }
+}
+
+.errata-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 63 / 88;
+  border-radius: 4.5% / 3.2%;
+  background: var(--surface-sunken);
+  box-shadow: 0 14px 28px -14px rgba(20, 16, 40, 0.6), 0 1px 3px rgba(20, 16, 40, 0.15);
+  transition: filter var(--dur) ease, opacity var(--dur) ease;
+
+  .stale & {
+    filter: saturate(0.4);
+    opacity: 0.7;
+  }
+}
+
+figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.caption {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-muted);
+
+  &.is-preview {
+    color: var(--accent-text);
+  }
+}
+
+/* Same verdict colors as the Knowledge Pool's power check */
+.power {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: help;
+
+  .material-icons {
+    font-size: 0.9rem;
+  }
+
+  &.power-fair {
+    background: var(--success-bg);
+    border-color: rgba(18, 113, 74, 0.3);
+    color: var(--success);
+  }
+
+  &.power-pushed {
+    background: #fbf1d3;
+    border-color: var(--line-gold);
+    color: var(--accent-text);
+  }
+
+  &.power-over {
+    background: var(--danger-bg);
+    border-color: rgba(180, 35, 24, 0.3);
+    color: var(--danger);
+  }
+}
+
+/* ===== The form ===== */
+.errata-form {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rules-input {
+  min-height: 12rem;
+  resize: vertical;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+
+  code {
+    padding: 0 0.25rem;
+    border-radius: 4px;
+    background: var(--surface-tint);
+    font-size: 0.78rem;
+  }
+}
+
+.pt-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.pt-field {
+  width: 6rem;
+
+  .night-input {
+    text-align: center;
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+  }
+}
+
+.pt-slash {
+  padding-bottom: 0.45rem;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  color: var(--text-muted);
+}
+
+.locked {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.9rem;
+  font-size: 0.82rem;
+
+  .material-icons {
+    font-size: 0.95rem;
+  }
+}
+
+.printed {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--r-md);
+  background: var(--surface-tint);
+
+  summary {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--accent-text);
+    cursor: pointer;
+  }
+}
+
+.printed-text {
+  margin-top: 0.4rem;
+  font-size: 0.88rem;
+  white-space: pre-line;
+  color: var(--text-muted);
+}
+
+.printed-pt {
+  margin-top: 0.25rem;
+  font-family: var(--font-display);
+}
+
+.alert {
+  margin: 0.75rem 0 0;
+}
+
+.errata-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 1.25rem;
+}
+
+.text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 38px;
+  margin-right: auto;
+  padding: 0.3rem 0.55rem;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
+
+  .material-icons {
+    font-size: 1.1rem;
+  }
+
+  &.danger:hover:not(:disabled) {
+    background: var(--danger-bg);
+    color: var(--danger);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .errata-sheet {
+    animation-name: fade-in;
+  }
+}

@@ -52,7 +52,8 @@ export interface ApiErrorResponse {
 
 export type CardStatus = 'queued' | 'generating' | 'rendering' | 'done' | 'failed';
 
-export interface User { id: string; username: string; }
+/** avatarUrl: the profile picture (GET /me); missing on users stored before pictures existed. */
+export interface User { id: string; username: string; avatarUrl?: string | null; }
 
 /** Card properties sent to the generator (same shape as the legacy cardData) */
 export interface CardParams {
@@ -96,10 +97,12 @@ export interface CardView {
   shared: boolean;
   /** The card's entry in the open Knowledge Pool, if it has one */
   poolEntryId: string | null;
+  /** The host changed its rules text or P/T after it was made (cardImageUrl then carries ?v=). */
+  errata: boolean;
 }
 
 /** A card on the gallery's Community tab (GET /cards/shared), with its maker. */
-export interface SharedCardView extends CardView { username: string; }
+export interface SharedCardView extends CardView { username: string; avatarUrl: string | null; }
 
 /** votes are weighted: the set owner's own vote counts 2, and ownerVote marks that card. */
 export interface SetCardView extends CardView {
@@ -107,12 +110,19 @@ export interface SetCardView extends CardView {
   leader: boolean;
   tied: boolean;
   ownerVote: boolean;
+  /** Players asking the owner to reroll this version (docs/superpowers/specs/2026-10-14-reroll-requests-design.md). */
+  rerollRequests: number;
+  myRerollRequest: boolean;
+  /** Only ever true for the owner: the version can be rerolled now (enough requests, or it failed). */
+  canReroll: boolean;
 }
 
 export interface SetView {
   id: string;
   userId: string;
   username: string;
+  /** The owner's profile picture, or null. */
+  avatarUrl: string | null;
   eventId: string | null;
   commanderName: string;
   prompt: string;
@@ -123,6 +133,8 @@ export interface SetView {
   rarity: string | null;
   cards: SetCardView[];
   myVoteCardId: string | null;
+  /** Reroll requests a version needs before its owner may reroll it during the vote. */
+  rerollRequestsNeeded: number;
 }
 
 export interface EventSummary {
@@ -172,6 +184,7 @@ export interface PoolEntryView {
   card: CardView;
   /** Who submitted the card (everything is visible, open or closed). */
   username: string;
+  avatarUrl: string | null;
   /** The viewer submitted this card. */
   mine: boolean;
   power: PowerCheck | null;
@@ -187,6 +200,9 @@ export interface PoolEntryView {
   /** In, but level with other cards at the pool line. */
   tiedAtCutoff: boolean;
   myMedal: Medal | null;
+  /** Who flagged the card as broken (usernames, oldest first). Advisory: never affects rank or `in`. */
+  wtfBy: string[];
+  myWtf: boolean;
   createdAt: string;
 }
 
@@ -209,4 +225,38 @@ export interface PoolView extends PoolSummary {
   myMedals: Record<Medal, string | null>;
   /** Sorted by rank, then oldest first. */
   entries: PoolEntryView[];
+}
+
+// ===== Host errata (docs/superpowers/specs/2026-10-14-errata-design.md) =====
+
+/** A card the host may errata, with where it's from (GET /admin/errata). */
+export interface ErrataItem {
+  card: CardView;
+  /** The card as printed, once it has errata; null otherwise. */
+  original: GeneratedCardData | null;
+  /** Commander name, or the card's name. */
+  label: string;
+  username: string;
+  /** "Version 2", "Winner", "Tied", "In · 9 points"... */
+  detail: string;
+}
+
+export interface ErrataGroup {
+  id: 'vote' | 'legal' | 'pool';
+  title: string;
+  items: ErrataItem[];
+}
+
+/** What the host can change: name, cost, type and rarity stay as printed. */
+export interface ErrataFields {
+  description: string;
+  power?: string;
+  toughness?: string;
+}
+
+/** An erratum drawn but not saved. */
+export interface ErrataPreview {
+  /** data: URL of the rendered card */
+  image: string;
+  power: PowerCheck | null;
 }

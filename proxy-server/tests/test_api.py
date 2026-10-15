@@ -11,9 +11,9 @@ CARD_DATA = {"name": "Placeholder", "manaCost": "{2}{B}{R}", "colors": ["B", "R"
              "power": "3", "toughness": "4"}
 CARD_VIEW_KEYS = {"id", "userId", "setId", "slot", "replaced", "status", "error", "textReady",
                   "artReady", "queuePosition", "etaSeconds", "card", "cardImageUrl",
-                  "artImageUrl", "createdAt", "shared", "poolEntryId"}
-SET_VIEW_KEYS = {"id", "userId", "username", "eventId", "commanderName", "prompt", "status",
-                 "lockedAt", "cards", "myVoteCardId", "cmc", "rarity"}
+                  "artImageUrl", "createdAt", "shared", "poolEntryId", "errata"}
+SET_VIEW_KEYS = {"id", "userId", "username", "avatarUrl", "eventId", "commanderName", "prompt", "status",
+                 "lockedAt", "cards", "myVoteCardId", "cmc", "rarity", "rerollRequestsNeeded"}
 # A commander request: pips only, a commander rarity, P/T left to the point buy.
 SET_DATA = {"name": "Placeholder", "manaCost": "{B}{R}", "colors": ["B", "R"], "type": "Creature",
             "subtype": "Human Wizard", "rarity": "rare"}
@@ -97,7 +97,7 @@ def test_login_and_auth(client):
     res = client.post("/api/v1/users/login", json={"username": " Andrew "})
     assert res.status_code == 200
     body = res.get_json()
-    assert set(body) == {"id", "username"} and body["username"] == "Andrew"
+    assert set(body) == {"id", "username", "avatarUrl"} and body["username"] == "Andrew"
     assert client.post("/api/v1/users/login", json={"username": "andrew"}).get_json() == body
 
     bad = client.post("/api/v1/users/login", json={"username": "bad!name"})
@@ -317,7 +317,8 @@ def test_lock_vote_flow(client, queue, tmp_storage):
     assert locked["status"] == "locked" and locked["eventId"] == event["id"]
     assert locked["username"] == "Andrew" and locked["lockedAt"]
     assert [c["slot"] for c in locked["cards"]] == [1, 2, 3]
-    assert all(set(c) == CARD_VIEW_KEYS | {"votes", "leader", "tied", "ownerVote"}
+    assert all(set(c) == CARD_VIEW_KEYS | {"votes", "leader", "tied", "ownerVote", "rerollRequests",
+                                           "myRerollRequest", "canReroll"}
                for c in locked["cards"])
     assert locked["cmc"] == 4 and locked["rarity"] == "rare"
 

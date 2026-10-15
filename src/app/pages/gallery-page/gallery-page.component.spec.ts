@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { AvatarComponent } from '../../components/avatar/avatar.component';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { RouterTestingModule } from '@angular/router/testing';
 import { of } from 'rxjs';
@@ -23,7 +24,7 @@ describe('GalleryPageComponent', () => {
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, RouterTestingModule],
-      declarations: [GalleryPageComponent, CardSlotComponent, PoolSubmitComponent, MediaPipe],
+      declarations: [GalleryPageComponent, CardSlotComponent, AvatarComponent, PoolSubmitComponent, MediaPipe],
       providers: [
         { provide: MediaService, useValue: media },
         { provide: PageVisibilityService, useValue: fakeVisibility() }
@@ -112,7 +113,9 @@ describe('GalleryPageComponent', () => {
     fixture.detectChanges();
 
     const tile = el().querySelector('[data-card-id="x1"]') as HTMLElement;
-    expect(tile.textContent).toContain('by Beth');
+    expect(tile.querySelector('.maker')!.textContent).toContain('by');
+    expect(tile.querySelector('.byline app-avatar')).not.toBeNull();
+    expect(tile.querySelector('.byline')!.textContent!.trim()).toMatch(/Beth$/);
     expect(tile.querySelector('button.share')).toBeNull();
     expect(tile.querySelector('button.pool-submit')).toBeNull();
     expect(tile.querySelector('.download')).not.toBeNull();
@@ -161,7 +164,7 @@ describe('GalleryPageComponent polling', () => {
     visibility = fakeVisibility();
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, RouterTestingModule],
-      declarations: [GalleryPageComponent, CardSlotComponent, MediaPipe],
+      declarations: [GalleryPageComponent, CardSlotComponent, AvatarComponent, MediaPipe],
       providers: [
         { provide: MediaService, useValue: media },
         { provide: PageVisibilityService, useValue: visibility }

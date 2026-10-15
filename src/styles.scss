@@ -580,6 +580,35 @@ a {
   }
 }
 
+/* ===== Errata: a card the host changed after it was made ===== */
+.errata-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-gold);
+  background: #fbf1d3;
+  color: var(--accent-text);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
+/* ===== Bylines: "by <face> alice" ===== */
+.byline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  vertical-align: middle;
+  white-space: nowrap;
+
+  app-avatar {
+    margin: -2px 0;
+  }
+}
+
 /* ===== Dialogs: the page behind a modal <dialog> stays put ===== */
 html:has(dialog[open]) {
   overflow: hidden;

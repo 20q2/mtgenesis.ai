@@ -9,11 +9,17 @@ import {
 } from '../../services/commander-night';
 import { apiErrorMessage } from '../../services/api.util';
 import { EventService } from '../../services/event.service';
+import { GenerationService } from '../../services/generation.service';
 import { PageVisibilityService } from '../../services/page-visibility.service';
 import { UserService } from '../../services/user.service';
 import { versionLabel } from '../../services/winners';
 
 export const VOTE_POLL_MS = 10000;
+
+export function rerollConfirm(set: SetView, card: SetCardView): string {
+  return `Reroll version ${card.slot} of ${set.commanderName}? It's made again from scratch, `
+    + 'and the votes on it are cleared.';
+}
 
 /**
  * /vote: every commander locked in the current event, one vote per commander, live counts
@@ -21,6 +27,8 @@ export const VOTE_POLL_MS = 10000;
  * marked voted or not; a player opens in a sheet with all their commanders' versions to vote
  * on. The player's own commanders come first: the rules ask owners to vote first, and their
  * own vote counts ×2. After the vote it lists the player's legal commanders.
+ * Players can ask an owner to reroll a version that doesn't work; once enough ask, the owner
+ * rerolls it from here (docs/superpowers/specs/2026-10-14-reroll-requests-design.md).
  * Polls every 10s while the page is visible (paused while hidden, refreshed at once
  * when shown again). If the event being shown gets closed, it keeps showing that event
  * (now with the winners banner) instead of dropping to "No event open".
@@ -37,6 +45,8 @@ export class VotePageComponent implements OnInit, OnDestroy {
   loadError: string | null = null;
   /** Sets with a vote request in flight (guards double clicks). */
   readonly voting = new Set<string>();
+  /** Versions with a reroll request or a reroll in flight. */
+  readonly cardBusy = new Set<string>();
   /** The vote by player, mine first. */
   players: BallotPlayer[] = [];
   /** The player open in the sheet, and the commander to bring into view there. */
@@ -48,7 +58,7 @@ export class VotePageComponent implements OnInit, OnDestroy {
   private sub?: Subscription;
 
   constructor(private events: EventService, private visibility: PageVisibilityService,
-              private users: UserService) {}
+              private users: UserService, private generation: GenerationService) {}
 
   ngOnInit(): void {
     // refresh() restarts the poll timer with an immediate fetch.
@@ -86,6 +96,39 @@ export class VotePageComponent implements OnInit, OnDestroy {
       return `${mineUnvoted} of yours still to vote on`;
     }
     return mine.length === 1 ? 'Vote on yours first' : `Vote on your ${mine.length} first`;
+  }
+
+  /** How many players must ask before an owner can reroll a version. */
+  get rerollsNeeded(): number {
+    return this.event?.sets[0]?.rerollRequestsNeeded ?? 3;
+  }
+
+  /** While voting: my versions I can reroll now (enough players asked, or it failed). */
+  get myRerolls(): { set: SetView; card: SetCardView }[] {
+    if (this.isClosed) {
+      return [];
+    }
+    return this.progress.mine.flatMap(set => set.cards.filter(c => c.canReroll).map(card => ({ set, card })));
+  }
+
+  get rerollNotice(): string | null {
+    const ready = this.myRerolls;
+    if (ready.length !== 1) {
+      return ready.length ? `${ready.length} of your versions can be rerolled.` : null;
+    }
+    const { set, card } = ready[0];
+    return card.status === 'failed'
+      ? `Version ${card.slot} of ${set.commanderName} failed. You can reroll it.`
+      : `Players say version ${card.slot} of ${set.commanderName} doesn't work. You can reroll it.`;
+  }
+
+  /** Opens my commanders at the first one with a version to reroll. */
+  reviewRerolls(): void {
+    const first = this.myRerolls[0];
+    const me = this.players.find(p => p.mine);
+    if (first && me) {
+      this.openPlayer(me, first.set);
+    }
   }
 
   /** The first player with something left to vote on (mine come first); null when I'm done. */
@@ -145,6 +188,10 @@ export class VotePageComponent implements OnInit, OnDestroy {
     }
   }
 
+  hasErrata(l: LegalCommander): boolean {
+    return l.cards.some(c => c.errata);
+  }
+
   trackLegal(_index: number, l: LegalCommander): string {
     return l.set.id;
   }
@@ -174,6 +221,43 @@ export class VotePageComponent implements OnInit, OnDestroy {
         this.error = err instanceof HttpErrorResponse && err.status === 409
           ? apiErrorMessage(err, 'Voting is closed')
           : apiErrorMessage(err, 'Your vote did not go through. Please try again.');
+        this.refresh();
+      }
+    });
+  }
+
+  /** Asks the owner to reroll a version that doesn't work, or takes the request back. */
+  requestReroll(card: SetCardView, requested: boolean): void {
+    if (!this.event || this.isClosed || this.cardBusy.has(card.id)) {
+      return;
+    }
+    this.error = null;
+    this.cardBusy.add(card.id);
+    this.events.requestReroll(card.id, requested).pipe(
+      finalize(() => this.cardBusy.delete(card.id))
+    ).subscribe({
+      next: updated => this.replaceSet(updated),
+      error: (err: unknown) => {
+        this.error = apiErrorMessage(err, 'Your request did not go through. Please try again.');
+        this.refresh();
+      }
+    });
+  }
+
+  /** My version, once enough players asked (or it failed): made again, its votes cleared. */
+  reroll(set: SetView, card: SetCardView): void {
+    if (!this.event || this.isClosed || !card.canReroll || this.cardBusy.has(card.id)
+        || !window.confirm(rerollConfirm(set, card))) {
+      return;
+    }
+    this.error = null;
+    this.cardBusy.add(card.id);
+    this.generation.reroll(card.id).pipe(
+      finalize(() => this.cardBusy.delete(card.id))
+    ).subscribe({
+      next: () => this.refresh(),
+      error: (err: unknown) => {
+        this.error = apiErrorMessage(err, 'Could not reroll this version. Please try again.');
         this.refresh();
       }
     });

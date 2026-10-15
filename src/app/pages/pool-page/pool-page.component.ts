@@ -20,7 +20,8 @@ export const MEDALS: { medal: Medal; label: string; points: number }[] = [
 /**
  * /pool: the open Knowledge Pool (spec docs/superpowers/specs/2026-09-29-knowledge-pool-design.md).
  * Every entry in one ranked list; each player gives one gold, silver and bronze (3/2/1, never
- * their own card) and the top floor(players / 2) make the pool. Cards are submitted from the
+ * their own card) and the top floor(players / 2) make the pool. Anyone can also WTF any card they
+ * think is broken: a visible warning with names that never changes the ranking. Cards are submitted from the
  * create screen and the gallery. /pool/:id shows a pool read-only. Polls every 10s while visible.
  */
 @Component({
@@ -34,7 +35,7 @@ export class PoolPageComponent implements OnInit, OnDestroy {
   pastPools: PoolSummary[] | null = null;
   loadError: string | null = null;
   error: string | null = null;
-  /** True while a medal or withdraw request is in flight (guards double clicks). */
+  /** True while a medal, WTF or withdraw request is in flight (guards double clicks). */
   busy = false;
   readonly medals = MEDALS;
 
@@ -114,6 +115,15 @@ export class PoolPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  /** Flag the card as broken, or take the flag back. Separate from medals; never changes the ranking. */
+  toggleWtf(entry: PoolEntryView): void {
+    if (entry.myWtf) {
+      this.run(this.pools.clearWtf(entry.id), 'Could not take your WTF back.');
+    } else {
+      this.run(this.pools.wtf(entry.id), 'Your WTF did not go through. Please try again.');
+    }
+  }
+
   withdraw(entry: PoolEntryView): void {
     const name = entry.card.card?.name || 'this card';
     if (!window.confirm(`Withdraw "${name}" from the pool? Its medals are cleared.`)) {
@@ -142,6 +152,10 @@ export class PoolPageComponent implements OnInit, OnDestroy {
   // ----- display helpers -----
   powerLabel(power: PowerCheck): string {
     return power.verdict === 'over' ? 'Over the curve' : power.verdict === 'pushed' ? 'Pushed' : 'Fair';
+  }
+
+  wtfTitle(entry: PoolEntryView): string {
+    return `WTF from ${entry.wtfBy.join(', ')}`;
   }
 
   powerTitle(power: PowerCheck): string {

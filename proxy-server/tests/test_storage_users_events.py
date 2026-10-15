@@ -8,7 +8,7 @@ def test_login_creates_then_reuses(tmp_storage):
     again = tmp_storage.login(" andrew ")
     assert again["id"] == first["id"]
     assert again["username"] == "Andrew"
-    assert tmp_storage.get_user(first["id"]) == {"id": first["id"], "username": "Andrew"}
+    assert tmp_storage.get_user(first["id"]) == {"id": first["id"], "username": "Andrew", "avatar_id": None}
 
 
 def test_login_distinct_users(tmp_storage):

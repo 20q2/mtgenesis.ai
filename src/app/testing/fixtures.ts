@@ -25,6 +25,7 @@ export function cardView(overrides: Partial<CardView> = {}): CardView {
     createdAt: '2026-09-28T20:00:00+00:00',
     shared: false,
     poolEntryId: null,
+    errata: false,
     ...overrides
   };
 }
@@ -39,8 +40,11 @@ export function doneCard(overrides: Partial<CardView> = {}): CardView {
 }
 
 export function setCard(overrides: Partial<SetCardView> = {}): SetCardView {
-  const { votes = 0, leader = false, tied = false, ownerVote = false, ...rest } = overrides;
-  return { ...doneCard(rest), votes, leader, tied, ownerVote };
+  const {
+    votes = 0, leader = false, tied = false, ownerVote = false,
+    rerollRequests = 0, myRerollRequest = false, canReroll = false, ...rest
+  } = overrides;
+  return { ...doneCard(rest), votes, leader, tied, ownerVote, rerollRequests, myRerollRequest, canReroll };
 }
 
 export function setView(overrides: Partial<SetView> = {}): SetView {
@@ -49,6 +53,7 @@ export function setView(overrides: Partial<SetView> = {}): SetView {
     id,
     userId: 'u-1',
     username: 'Alice',
+    avatarUrl: null,
     eventId: 'e-1',
     commanderName: 'Zur\'ka, Élan of Ash',
     prompt: 'a fire elemental queen',
@@ -58,6 +63,7 @@ export function setView(overrides: Partial<SetView> = {}): SetView {
     rarity: 'rare',
     cards: [1, 2, 3].map(slot => setCard({ id: `${id}-c${slot}`, setId: id, slot })),
     myVoteCardId: null,
+    rerollRequestsNeeded: 3,
     ...overrides
   };
 }
@@ -81,6 +87,7 @@ export function poolEntry(overrides: Partial<PoolEntryView> = {}): PoolEntryView
     cardId: `${id}-card`,
     card: doneCard({ id: `${id}-card` }),
     username: 'Beth',
+    avatarUrl: null,
     mine: false,
     power: { estimate: 1, budget: 1.25, verdict: 'fair' },
     gold: 0,
@@ -91,6 +98,8 @@ export function poolEntry(overrides: Partial<PoolEntryView> = {}): PoolEntryView
     in: false,
     tiedAtCutoff: false,
     myMedal: null,
+    wtfBy: [],
+    myWtf: false,
     createdAt: '2026-09-29T19:00:00+00:00',
     ...overrides
   };

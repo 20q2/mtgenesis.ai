@@ -1,10 +1,11 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { FormControl, FormGroup } from '@angular/forms';
 import { Subscription, finalize } from 'rxjs';
 import { EventSummary, EventView } from '../../models/api.model';
 import { apiErrorMessage } from '../../services/api.util';
 import { EventService } from '../../services/event.service';
+import { ErrataPanelComponent } from '../../components/errata-panel/errata-panel.component';
 
 export const ADMIN_PIN_STORAGE_KEY = 'mtgenesis.adminPin';
 
@@ -34,6 +35,8 @@ export class AdminPageComponent implements OnInit, OnDestroy {
   success: string | null = null;
 
   private pinSub?: Subscription;
+  /** Closing an event changes what can get errata (its winners join the list). */
+  @ViewChild(ErrataPanelComponent) private errataPanel?: ErrataPanelComponent;
 
   constructor(private events: EventService) {}
 
@@ -99,6 +102,7 @@ export class AdminPageComponent implements OnInit, OnDestroy {
         this.closedResult = closed;
         this.success = `"${closed.name}" is closed.`;
         this.loadHistory();
+        this.errataPanel?.reload();
       },
       error: err => this.handleAdminError(err, 'Could not close the event.')
     });

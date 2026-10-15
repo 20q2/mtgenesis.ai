@@ -43,6 +43,18 @@ print(f"🔍 Python path: {sys.path[:3]}...")  # Show first 3 paths
 import threading
 import concurrent.futures
 from card_renderer import card_renderer
+
+# The renderer's asset cache isn't built for two threads at once: the generation queue's worker
+# and a host erratum (api_routes) both draw through render_card_image.
+_RENDER_LOCK = threading.Lock()
+
+
+def render_card_image(card_data, art_b64):
+    """A finished card as base64 PNG (card_renderer.generate_card_image), one render at a time."""
+    with _RENDER_LOCK:
+        return card_renderer.generate_card_image(card_data, art_b64)
+
+
 import queue
 import time
 import uuid
@@ -355,7 +367,7 @@ def finalize_card(card_params, generated_text, art_b64, force_name=None):
 
     # Step 3: Card image rendering
     rendering_start = time.time()
-    card_image_data = card_renderer.generate_card_image(updated_card_data, art_b64)
+    card_image_data = render_card_image(updated_card_data, art_b64)
     rendering_time = time.time() - rendering_start
     print(f"   🎨 Card rendering: {rendering_time:.2f}s")
 
@@ -1180,7 +1192,8 @@ def init_ai_night(app):
     gen_queue = GenerationQueue(storage, data_dir, createCardContent,
                                 image_generation.generate_art, finalize_card, brief_fn=brief_fn)
     gen_queue.recover_on_startup()
-    app.register_blueprint(create_api_blueprint(storage, gen_queue, data_dir, ADMIN_PIN),
+    app.register_blueprint(create_api_blueprint(storage, gen_queue, data_dir, ADMIN_PIN,
+                                                render_card=render_card_image),
                            url_prefix="/api/v1")
     print(f"🌙 AI Night ready: data in {data_dir}")
     print(f"🎬 Card director: {'on, ' + DIRECTOR_MODEL if DIRECTOR_ENABLED else 'off (MTG_DIRECTOR=0)'}")

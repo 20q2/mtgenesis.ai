@@ -16,6 +16,7 @@ This year players submit cards, everyone votes with medals, and the best-voted h
 | Eligibility | Only finished cards the player owns. **Only colorless or mono-colored cards**: a card's colors are its `colors` list, else the WUBRG symbols in its mana cost (`card_colors`); more than one color is rejected. |
 | Entries | At most `maxEntriesPerUser` cards per player. A card can be entered once. Players submit from the create screen (the card they just made) or from a finished tile in the gallery's My cards. They can withdraw an entry from `/pool` while the pool is open, which also removes that card's medals. |
 | Medals | Each player has **one gold (3 points), one silver (2) and one bronze (1) for the whole pool**. Giving a medal that is already on another card moves it. A player gives at most one medal per card, and **never to their own card**. |
+| WTF | Added 2026-10-14. Separate from medals, any player can **WTF** any number of entries to say "this card is broken and shouldn't be in the pool": one per player per card, never their own, pressed again to take it back. It is **a warning only**: it never changes points, rank or the pool line. Every card shows how many WTFs it has and who gave them. Withdrawing a card clears its WTFs. |
 | Cutoff | **N = ⌊submitters / 2⌋**, where submitters are players with at least one entry. It is computed live, so the line moves as players join. |
 | Ranking | Entries rank by points, then golds, then silvers. The top N are **in**. Every card level with the Nth card on points, golds and silvers is also in (`tiedAtCutoff`), so the pool can be slightly bigger than N. A card with 0 points is never in. |
 | Visibility | Everything is open while voting: who submitted each card, live medal counts and points. |
@@ -33,6 +34,7 @@ Tables:
 - `pools(id, name, status open|closed, max_entries_per_user, created_at, closed_at)`, at most one open (unchanged)
 - `pool_entries(id, pool_id, card_id, user_id, created_at)`, unique on `(pool_id, card_id)`
 - `pool_medals(voter_id, pool_id, entry_id, medal gold|silver|bronze, created_at)`, unique on `(voter_id, pool_id, medal)` and `(voter_id, entry_id)`
+- `pool_wtfs(voter_id, pool_id, entry_id, created_at)`, unique on `(voter_id, entry_id)`; never read by `pool_ranking`
 
 `pool_slots` and `pool_bans` are removed, along with `card_fits_slot`, `slot_rule_text`, `clean_pool_slots`, `POOL_BANS_PER_PLAYER` and `POOL_BAN_THRESHOLD`.
 
@@ -40,7 +42,7 @@ Tables:
 
 **Ranking** is a pure function, `pool_ranking(entries, medal_counts) -> {entry_id: {gold, silver, bronze, points, rank, in, tiedAtCutoff}}`, with the cutoff derived from the distinct `user_id`s in `entries`. `rank` is 1-based and equal keys share a rank.
 
-Storage methods: `create_pool(name, max_entries_per_user)`, `close_pool`, `current_pool`, `get_pool`, `list_pools`, `pool_entries`, `pool_medal_counts`, `my_pool_medals`, `submit_pool_entry(user_id, card_id)`, `withdraw_pool_entry`, `award_pool_medal`, `clear_pool_medal`, and `open_pool_entry_ids() -> {card_id: entry_id}` for the open pool (one query per list request).
+Storage methods: `create_pool(name, max_entries_per_user)`, `close_pool`, `current_pool`, `get_pool`, `list_pools`, `pool_entries`, `pool_medal_counts`, `my_pool_medals`, `submit_pool_entry(user_id, card_id)`, `withdraw_pool_entry`, `award_pool_medal`, `clear_pool_medal`, `flag_pool_wtf`, `clear_pool_wtf`, `pool_wtf_voters`, and `open_pool_entry_ids() -> {card_id: entry_id}` for the open pool (one query per list request).
 
 ## 4. API (`api_routes.py`, under `/api/v1`)
 
@@ -53,6 +55,8 @@ Storage methods: `create_pool(name, max_entries_per_user)`, `close_pool`, `curre
 | `POST /pools/entries/<id>/withdraw` | | `PoolView` |
 | `POST /pools/medals` | `{entryId, medal}` | `PoolView` |
 | `POST /pools/medals/clear` | `{entryId}` | `PoolView` |
+| `POST /pools/wtf` | `{entryId}` | `PoolView` (403 own card, 409 closed) |
+| `POST /pools/wtf/clear` | `{entryId}` | `PoolView` |
 | `POST /admin/pools` | `{name, maxEntriesPerUser}` | `PoolView` (admin PIN) |
 | `POST /admin/pools/<id>/close` | | `PoolView` (admin PIN) |
 
@@ -76,11 +80,14 @@ interface PoolEntryView {
   username: string; mine: boolean; power: PowerCheck | null;
   gold: number; silver: number; bronze: number; points: number;
   rank: number; in: boolean; tiedAtCutoff: boolean;
-  myMedal: Medal | null; createdAt: string;
+  myMedal: Medal | null;
+  wtfBy: string[];           // usernames, oldest first
+  myWtf: boolean;
+  createdAt: string;
 }
 ```
 
-`PoolView` is personalized by `X-User-Id` (`mine`, `myMedal`, `myMedals`, `myEntryCount`).
+`PoolView` is personalized by `X-User-Id` (`mine`, `myMedal`, `myMedals`, `myEntryCount`, `myWtf`).
 
 `CardView` gains `poolEntryId: string | null`: the card's entry in the open pool, so the create screen and gallery can show "In the pool".
 
@@ -88,7 +95,7 @@ interface PoolEntryView {
 
 - **`/pool` (the "Knowledge Pool" nav item):**
   - Header: pool name and status; a rules line ("Colorless or mono-colored cards only · up to 3 per player · gold 3 / silver 2 / bronze 1 · the top half make the pool"); "*S* players → top *N* make the pool"; "your entries *k* / cap"; three medal chips lit when given.
-  - One grid of entries sorted by rank. Each tile: the card, maker, power check, points and medal counts, then Gold / Silver / Bronze buttons (pressed when it's the viewer's medal) or Withdraw on the viewer's own card.
+  - One grid of entries sorted by rank. Each tile: the card, maker, power check, points and medal counts, then Gold / Silver / Bronze buttons (pressed when it's the viewer's medal) and a separate red WTF toggle, or Withdraw on the viewer's own card. A red "WTF ×n" flag (hover: who) sits in the tile's flags when n > 0, open or closed.
   - A visible "pool line" divider after the last card that is in. Cards above it carry an "In" badge, and cards tied at the line "Tied · in".
   - Empty state: points to the create screen.
   - Closed pool: no buttons; a **"The pool"** section at the top shows the cards that are in.

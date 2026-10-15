@@ -82,19 +82,6 @@
   }
 }
 
-.avatar {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: linear-gradient(150deg, var(--gold-bright), var(--gold-deep));
-  color: var(--text-on-gold);
-  font-family: var(--font-display);
-  font-size: 1.1rem;
-  text-transform: uppercase;
-}
 
 .sheet-id {
   flex: 1;
@@ -427,6 +414,11 @@
     color: var(--text-muted);
     font-weight: 600;
     cursor: default;
+
+    &.failed {
+      border-color: rgba(180, 35, 24, 0.45);
+      color: var(--danger);
+    }
   }
 }
 
@@ -473,6 +465,59 @@
       background: #1b5486;
     }
   }
+}
+
+/* ===== Reroll requests: quiet, under the vote ===== */
+.reroll-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
+  min-height: 28px;
+  font-size: 0.8rem;
+}
+
+.reroll-ask {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.1rem;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  transition: color var(--dur) ease;
+
+  .material-icons {
+    font-size: 1rem;
+  }
+
+  &:not(:disabled):hover {
+    color: var(--text);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  &.asked {
+    color: var(--danger);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+}
+
+.reroll-count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.reroll-now {
+  margin-left: auto;
 }
 
 /* ===== Footer: on to the next player ===== */

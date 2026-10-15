@@ -2,15 +2,17 @@ import { TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { environment } from '../../environments/environment';
 import { User } from '../models/api.model';
-import { USER_STORAGE_KEY, UserService } from './user.service';
+import { AVATAR_PROMPT_KEY_PREFIX, USER_STORAGE_KEY, UserService } from './user.service';
 
 describe('UserService', () => {
   let service: UserService;
   let http: HttpTestingController;
-  const alice: User = { id: 'u-1', username: 'Alice' };
+  const alice: User = { id: 'u-1', username: 'Alice', avatarUrl: null };
+  const me = `${environment.apiUrl}/api/v1/me`;
 
   beforeEach(() => {
     localStorage.removeItem(USER_STORAGE_KEY);
+    localStorage.removeItem(AVATAR_PROMPT_KEY_PREFIX + 'u-1');
     TestBed.configureTestingModule({ imports: [HttpClientTestingModule] });
     service = TestBed.inject(UserService);
     http = TestBed.inject(HttpTestingController);
@@ -20,7 +22,69 @@ describe('UserService', () => {
     http.verify();
   });
 
-  afterAll(() => localStorage.removeItem(USER_STORAGE_KEY));
+  afterAll(() => {
+    localStorage.removeItem(USER_STORAGE_KEY);
+    localStorage.removeItem(AVATAR_PROMPT_KEY_PREFIX + 'u-1');
+  });
+
+  function loginAlice(): void {
+    service.login('Alice').subscribe();
+    http.expectOne(`${environment.apiUrl}/api/v1/users/login`).flush(alice);
+  }
+
+  it('reads a user stored before profile pictures as having none', () => {
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify({ id: 'u-1', username: 'Alice' }));
+    expect(service.currentUser()).toEqual(alice);
+  });
+
+  it('loggedIn$ emits on each login', () => {
+    const seen: User[] = [];
+    service.loggedIn$.subscribe(u => seen.push(u));
+    loginAlice();
+    expect(seen).toEqual([alice]);
+  });
+
+  it('refresh GETs /me and stores the picture', () => {
+    loginAlice();
+    const withPic = { ...alice, avatarUrl: '/api/v1/media/avatars/x.jpg' };
+    service.refresh().subscribe();
+    http.expectOne(me).flush(withPic);
+    expect(service.currentUser()).toEqual(withPic);
+  });
+
+  it('refresh does not store a user after logging out', () => {
+    loginAlice();
+    service.refresh().subscribe();
+    service.logout();
+    http.expectOne(me).flush(alice);
+    expect(service.currentUser()).toBeNull();
+  });
+
+  it('setAvatar PUTs the picture as the body and stores the new URL; removeAvatar DELETEs it', () => {
+    loginAlice();
+    const picture = new Blob(['jpeg'], { type: 'image/jpeg' });
+    service.setAvatar(picture).subscribe();
+    const put = http.expectOne(`${me}/avatar`);
+    expect(put.request.method).toBe('PUT');
+    expect(put.request.body).toBe(picture);
+    expect(put.request.headers.get('Content-Type')).toBe('image/jpeg');
+    put.flush({ ...alice, avatarUrl: '/api/v1/media/avatars/y.jpg' });
+    expect(service.currentUser()?.avatarUrl).toBe('/api/v1/media/avatars/y.jpg');
+
+    service.removeAvatar().subscribe();
+    const del = http.expectOne(`${me}/avatar`);
+    expect(del.request.method).toBe('DELETE');
+    del.flush(alice);
+    expect(service.currentUser()?.avatarUrl).toBeNull();
+  });
+
+  it('remembers per user that the picture prompt was shown', () => {
+    expect(service.wasPrompted('u-1')).toBeFalse();
+    service.markPrompted('u-1');
+    expect(service.wasPrompted('u-1')).toBeTrue();
+    expect(service.wasPrompted('u-2')).toBeFalse();
+    expect(localStorage.getItem(AVATAR_PROMPT_KEY_PREFIX + 'u-1')).toBe('1');
+  });
 
   it('uses the mtgenesis.user storage key', () => {
     expect(USER_STORAGE_KEY).toBe('mtgenesis.user');

@@ -58,7 +58,7 @@ Every service and component imports from `src/app/models/` (`card.model.ts`, `ap
   - `GenerationQueue` runs it as a brief stage that the Ollama worker serves before rules text. The brief is stored in `cards.brief_json` (never in `CardView`) and passed to text and art as `card_params["brief"]`.
   - `rules_text.build_messages` swaps the random color hook for the brief's identity and mechanic; `image_generation.build_art_prompt` builds the subject from the brief's art fields instead of the request prompt.
   - It never fails a card: any problem gives no brief, and both prompts are then exactly what they were before. `MTG_DIRECTOR=0` turns it off.
-  - **Filling the blanks** (`proxy-server/card_fill.py`, normal create only): any of name, mana cost, type, subtype and P/T left empty is chosen in the same director call (a `fill` object beside the brief). `clean_fill` validates each value (name ≤ 30 chars, a type from the form's list, real mana symbols with mana value ≤ 10, creature types only, P/T within the stat curve's total) and drops what fails. The queue writes the fill into the card's stored params (`storage.set_card_params`) before text and art, and the create page copies it into the blank form fields when the card finishes. Supertype is never filled.
+  - **Filling the blanks** (`proxy-server/card_fill.py`, normal create only): any of name, mana cost, type, subtype and P/T left empty is chosen in the same director call (a `fill` object beside the brief). `clean_fill` validates each value (name ≤ 30 chars, a type from the form's list, real mana symbols with mana value ≤ 10, creature types only, P/T within the stat curve's total) and drops what fails. The queue writes the fill into the card's stored params (`storage.set_card_params`) before text and art. The form fields stay blank; only the card gets the AI's picks. Supertype is never filled.
 - **The image pipeline loads lazily** in `get_image_pipeline()`. `_models_loaded` tracks whether the cold-start or warm timeout applies.
 - **Rules text lives in `proxy-server/rules_text.py`**; `createCardContent` in app.py just calls `generate_rules_text`:
   - `build_messages` sends a system prompt (Oracle templating rules, card-type rules, few-shot examples) plus the card's facts, an ability budget by rarity, type-specific requirements, and one random color "design hook" for variety.
@@ -87,6 +87,10 @@ AI Night's commander rules, enforced on `/set` and `/vote`. The spec is `docs/su
   - P/T as a point buy: at most CMC + 1 points (Vehicles +2), whole numbers only, never X or `*`; blank means an even split that spends every point (`auto_stats`)
 - `storage.py` checks across a player's commanders: one draft per CMC and one locked per CMC in the open event; each rarity once among the locked ones (drafts may share a rarity while the player reassigns them). Sets with `cmc` NULL predate the rules: they still show (under "Earlier sets") but can't be locked.
 - Votes stay one per voter per commander. `vote_tally` counts the owner's own vote as 2 (not on legacy sets), and `SetView.cards[].ownerVote` marks it.
+- **Reroll requests** (spec `docs/superpowers/specs/2026-10-14-reroll-requests-design.md`): on `/vote`, other players can ask the owner to reroll a version that doesn't work (`POST /cards/<id>/reroll-request`, table `reroll_requests`).
+  - At `REROLL_REQUESTS_NEEDED` (3) requests, or when a version failed, `reroll_card` also accepts a locked commander's version while voting is open. That reroll clears only that version's votes and requests.
+  - `SetView.cards[]` carries `rerollRequests`, `myRerollRequest` and `canReroll` (owner only). A version that isn't finished can't be voted on or asked about.
+  - Tests: `tests/test_reroll_requests.py`.
 - `src/app/services/commander-rules.ts` mirrors the rules for instant form feedback, so keep it in sync with `commander_rules.py` (including `NOT_CREATURE_TYPES`). Its `commanderChecklist` drives the live rules checklist on `/set`; Generate stays disabled until every line passes. Normal create (`count: 1`) is unaffected.
 - Tests: `tests/test_commander_rules.py`, plus the per-CMC cases in `tests/test_storage_sets.py` and `tests/test_api.py`.
 
@@ -98,10 +102,31 @@ Shared custom cards for the paper event: `/pool` in the app. The spec is `docs/s
 - Only colorless or mono-colored finished cards can be entered (`pool_card_eligible`). Players submit from the create screen or a My cards tile (`PoolSubmitComponent`), and withdraw on `/pool`.
 - Voting uses medals: each player gives one gold, silver and bronze (3 / 2 / 1 points) for the whole pool, never to their own card.
 - The top ⌊submitters / 2⌋ cards make the pool, ranked by points, then golds, then silvers; cards level with the last one at the line are also in, and 0 points is never in (`pool_ranking`, `pool_cutoff`).
-- Everything is visible while voting: makers, medals and points.
-- Storage: the `pools` / `pool_entries` / `pool_medals` tables and methods in `storage.py`. On startup the old slot/ban tables are dropped only if empty. `card_colors` is mirrored by `cardColors` / `poolColorOk` in `pool.service.ts`, so keep them in sync.
+- Separately, anyone can **WTF** any number of cards (never their own) to say "this is broken". It's a warning only: shown as "WTF ×n" with names, never counted in `pool_ranking` (`pool_wtfs` table, `POST /pools/wtf[/clear]`).
+- Everything is visible while voting: makers, medals, WTFs and points.
+- Storage: the `pools` / `pool_entries` / `pool_medals` / `pool_wtfs` tables and methods in `storage.py`. On startup the old slot/ban tables are dropped only if empty. `card_colors` is mirrored by `cardColors` / `poolColorOk` in `pool.service.ts`, so keep them in sync.
 - Routes: `/pools/*` and `/admin/pools*` in `api_routes.py`. Each entry carries an advisory `power` check from `power_level.assess`, and every `CardView` carries `poolEntryId` for the open pool.
 - Tests: `tests/test_pool.py`.
+
+### Host errata
+
+On /admin the host can change a card's rules text and P/T after it was made. The spec is `docs/superpowers/specs/2026-10-14-errata-design.md`.
+
+- **Which cards:** cards in the open event's vote, the last closed event's legal commanders (winners or tied versions), and the Knowledge Pool (`Storage.errata_eligible`).
+- **What's locked:** name, mana cost, type and rarity stay as printed, so the commander rules still hold. Flavor isn't editable because the renderer never prints it.
+- **Storage:** `cards.original_card_json` keeps the printed card from the first erratum, so a revert is always possible; `cards.errata_at` marks the latest.
+- **Routes:** `GET /admin/errata`, `POST /admin/cards/<id>/errata` (`preview: true` renders without saving) and `.../errata/revert`.
+- **Rendering:** it goes through `app.render_card_image` (passed in as `render_card`), which shares a lock with the generation queue's renders.
+- **Caching:** an errata'd card's image is rewritten in place, so its `cardImageUrl` carries `?v=`. Card views carry `errata`, and players see the global `.errata-badge`.
+
+### Profile pictures
+
+Optional player faces. The spec is `docs/superpowers/specs/2026-10-14-profile-pictures-design.md`.
+
+- `users.avatar_id` points at `data/avatars/<uuid>.jpg`. Every upload gets a new UUID, so `/api/v1/media/avatars/<uuid>.jpg` never changes content (safe for browser and `MediaService` caching), and the old file is deleted.
+- `GET /me`, `PUT /me/avatar` (the raw image as the body) and `DELETE /me/avatar` live in `api_routes.py`. `avatars.process_avatar` validates the image with Pillow and re-encodes it as a 256px square JPEG, which strips metadata such as GPS. The 64 KB request cap still applies; the browser frames the picture and sends a 320px JPEG.
+- `avatarUrl` rides next to `username` in the login response, set views, shared gallery cards and pool entries.
+- Frontend: `<app-avatar>` shows the picture or the gold initial. `ProfilePictureComponent` (a native `<dialog>` hosted by `AppComponent`) handles choosing a photo or a card's art and framing it; the crop math is in `services/avatar-crop.ts`. It opens after a login without a picture, once per device for players already logged in (`mtgenesis.avatarPrompt.<userId>`), and from the top-bar avatar. Bylines use the global `.byline` class ("by <face> alice").
 
 ### Card renderer (`proxy-server/card_renderer.py`)
 

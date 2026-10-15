@@ -15,7 +15,12 @@
     <div class="nav-right">
       <app-queue-badge></app-queue-badge>
       <div class="nav-user">
-        <span class="avatar" aria-hidden="true" [title]="user.username">{{ user.username.charAt(0) }}</span>
+        <button type="button" class="avatar-btn" (click)="openPicture()"
+                [attr.aria-label]="user.avatarUrl ? 'Change your profile picture' : 'Add a profile picture'"
+                [title]="user.avatarUrl ? 'Change your profile picture' : 'Add a profile picture'">
+          <app-avatar [url]="user.avatarUrl" [name]="user.username" [size]="28"></app-avatar>
+          <span *ngIf="!user.avatarUrl" class="avatar-add material-icons" aria-hidden="true">add</span>
+        </button>
         <span class="username">{{ user.username }}</span>
         <button type="button" class="logout" (click)="logout()" title="Log out">
           <span class="material-icons" aria-hidden="true">logout</span>
@@ -52,3 +57,8 @@
     <span class="tab-label">{{ link.short }}</span>
   </a>
 </nav>
+
+<app-profile-picture *ngIf="pictureOpen && (user$ | async) as user"
+                     [user]="user"
+                     [prompted]="picturePrompted"
+                     (closed)="closePicture()"></app-profile-picture>

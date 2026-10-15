@@ -1,4 +1,5 @@
 import { NO_ERRORS_SCHEMA } from '@angular/core';
+import { AvatarComponent } from '../../components/avatar/avatar.component';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { ReactiveFormsModule } from '@angular/forms';
@@ -28,7 +29,7 @@ describe('AdminPageComponent', () => {
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
-      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe, CmcGroupsPipe],
+      declarations: [AdminPageComponent, WinnersBannerComponent, AvatarComponent, MediaPipe, CmcGroupsPipe],
       schemas: [NO_ERRORS_SCHEMA],
       providers: [{ provide: MediaService, useValue: media }]
     });
@@ -175,7 +176,7 @@ describe('AdminPageComponent', () => {
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
-      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe, CmcGroupsPipe],
+      declarations: [AdminPageComponent, WinnersBannerComponent, AvatarComponent, MediaPipe, CmcGroupsPipe],
       schemas: [NO_ERRORS_SCHEMA],
       providers: [{ provide: MediaService, useValue: media }]
     });
@@ -198,7 +199,7 @@ describe('AdminPageComponent', () => {
     media.src.and.callFake((u: string | null | undefined) => of(u ?? null));
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule, ReactiveFormsModule, RouterTestingModule],
-      declarations: [AdminPageComponent, WinnersBannerComponent, MediaPipe, CmcGroupsPipe],
+      declarations: [AdminPageComponent, WinnersBannerComponent, AvatarComponent, MediaPipe, CmcGroupsPipe],
       schemas: [NO_ERRORS_SCHEMA],
       providers: [{ provide: MediaService, useValue: media }]
     });

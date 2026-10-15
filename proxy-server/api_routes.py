@@ -9,6 +9,10 @@ The blueprint receives its dependencies so it can be tested without importing ap
 CardView.card is the final card dict when set, otherwise the card's card_params,
 so pending cards already show their name and type.
 
+Host errata: GET /admin/errata, POST /admin/cards/<id>/errata[/revert] (docs/superpowers/specs/2026-10-14-errata-design.md).
+Profile pictures: GET /me, PUT/DELETE /me/avatar (docs/superpowers/specs/2026-10-14-profile-pictures-design.md).
+Reroll requests: POST /cards/<id>/reroll-request (docs/superpowers/specs/2026-10-14-reroll-requests-design.md).
+
 Auth: user-scoped routes require X-User-Id (401 if missing or unknown). Read-only
 event/card routes accept it optionally (for myVoteCardId) but still reject an unknown
 id with 401 so a stale browser login is detected. Admin routes require X-Admin-Pin (403);
@@ -20,19 +24,24 @@ CORS/ngrok headers and OPTIONS answers come from app.py's global hooks and Flask
 """
 from __future__ import annotations
 
+import base64
 import collections
 import hmac
+import re
 import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Callable
 
 from flask import Blueprint, jsonify, request, send_file
 
+from avatars import process_avatar
 from commander_rules import COMMANDER_CMCS, commander_params
 from generation_queue import GenerationQueue
-from storage import (MEDAL_POINTS, PENDING_STATUSES, POOL_DEFAULT_ENTRIES, Storage,
-                     StorageError, clean_commander_name, leader_flags, pool_cutoff, pool_ranking)
+from storage import (MEDAL_POINTS, PENDING_STATUSES, POOL_DEFAULT_ENTRIES, REROLL_REQUESTS_NEEDED,
+                     Storage, StorageError, clean_commander_name, leader_flags, pool_cutoff,
+                     pool_ranking)
 
 try:  # the power heuristic is advisory: pools still work without it
     import power_level
@@ -45,8 +54,63 @@ ADMIN_MAX_WRONG_PINS = 5
 ADMIN_LOCKOUT_SECONDS = 300  # also the window the wrong PINs are counted in
 ADMIN_LOCKOUT_MESSAGE = "Too many wrong PINs - wait a few minutes"
 DEFAULT_ADMIN_PIN = "1234"
-MEDIA_KINDS = ("cards", "art")
+# media kind -> (file extension, mimetype); every file is named by a canonical UUID
+MEDIA_KINDS = {"cards": (".png", "image/png"), "art": (".png", "image/png"),
+               "avatars": (".jpg", "image/jpeg")}
 API_PREFIX = "/api/v1"
+
+
+# Host errata (docs/superpowers/specs/2026-10-14-errata-design.md)
+ERRATA_TEXT_MAX = 1000
+# "3", "12", "*", "X", "1+*", "*+1"
+PT_RE = re.compile(r"^(\d{1,2}|\*|X|\d[+-]\*|\*[+-]\d)$")
+NOT_ERRATABLE = ("Errata is for cards in the commander vote, a closed event's results "
+                 "or the Knowledge Pool")
+# (card dict, art as raw base64 PNG or None) -> rendered card as base64 PNG (app.py: the card renderer)
+RenderCard = Callable[[dict, "str | None"], "str | None"]
+
+
+def has_body(card: dict) -> bool:
+    """Creatures and Vehicles print power/toughness."""
+    return ("creature" in str(card.get("type") or "").lower()
+            or "vehicle" in str(card.get("subtype") or "").lower())
+
+
+def errata_card_data(card: dict, data: dict) -> dict:
+    """The card with the host's rules text and P/T; everything else stays as printed (the
+    renderer prints no flavor text, so there is none to errata).
+    ~ and CARDNAME in the rules text become the card's name. StorageError(400) on bad input."""
+    new = dict(card)
+    text = data.get("description")
+    if not isinstance(text, str):
+        raise StorageError(400, "Rules text must be text")
+    text = text.replace("\r\n", "\n").strip()
+    if len(text) > ERRATA_TEXT_MAX:
+        raise StorageError(400, f"Rules text is too long (at most {ERRATA_TEXT_MAX} characters)")
+    name = str(card.get("name") or "")
+    new["description"] = text.replace("CARDNAME", name).replace("~", name)
+
+    if has_body(card):
+        for key, label in (("power", "Power"), ("toughness", "Toughness")):
+            value = data.get(key, card.get(key))
+            value = "" if value is None else str(value).strip().upper()
+            if not PT_RE.fullmatch(value):
+                raise StorageError(400, f"{label} must be a number, * or X")
+            new[key] = value
+    else:
+        new.pop("power", None)
+        new.pop("toughness", None)
+    return new
+
+
+def avatar_url(avatar_id: str | None) -> str | None:
+    return f"{API_PREFIX}/media/avatars/{avatar_id}.jpg" if avatar_id else None
+
+
+def user_json(user: dict) -> dict:
+    """The User the frontend stores: {id, username, avatarUrl}."""
+    return {"id": user["id"], "username": user["username"],
+            "avatarUrl": avatar_url(user.get("avatar_id"))}
 
 
 def power_check(card: dict | None) -> dict | None:
@@ -75,10 +139,12 @@ def admin_pin_warning(admin_pin) -> str | None:
 
 
 def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir: Path,
-                         admin_pin: str, clock=time.monotonic) -> Blueprint:
+                         admin_pin: str, clock=time.monotonic,
+                         render_card: RenderCard | None = None) -> Blueprint:
     """All spec §4 endpoints; app.py registers the result with url_prefix="/api/v1".
 
     `clock` (seconds, monotonic) is injectable so tests can expire the admin lockout.
+    `render_card` re-draws a card for host errata (None: errata answer 503).
     """
     bp = Blueprint("ai_night_api", __name__)
     data_dir = Path(data_dir)
@@ -156,6 +222,8 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         if row["status"] in PENDING_STATUSES and not row["art_ready"]:
             position, eta = gen_queue.position(row["id"])
         cid = row["id"]
+        # An erratum re-renders the same file: the version makes it a new URL for every cache.
+        version = f"?v={re.sub(r'[^0-9]', '', row['errata_at'])}" if row.get("errata_at") else ""
         return {
             "id": cid,
             "userId": row["user_id"],
@@ -169,11 +237,12 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
             "queuePosition": position,
             "etaSeconds": eta,
             "card": row["card"] if row["card"] is not None else row["card_params"],
-            "cardImageUrl": f"{API_PREFIX}/media/cards/{cid}.png" if row["card_path"] else None,
+            "cardImageUrl": f"{API_PREFIX}/media/cards/{cid}.png{version}" if row["card_path"] else None,
             "artImageUrl": f"{API_PREFIX}/media/art/{cid}.png" if row["art_path"] else None,
             "createdAt": row["created_at"],
             "shared": row.get("shared_at") is not None,
             "poolEntryId": pool_entry_ids.get(cid),
+            "errata": row.get("errata_at") is not None,
         }
 
     def set_view(row: dict, voter_id: str | None) -> dict:
@@ -182,10 +251,14 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         flags = leader_flags(storage.vote_tally(row["id"]), [c["id"] for c in cards])
         owner_pick = storage.owner_vote(row["id"])
         owner = storage.get_user(row["user_id"])
+        requests = storage.reroll_request_counts(row["id"])
+        my_requests = storage.my_reroll_requests(voter_id, row["id"]) if voter_id else set()
+        is_owner = voter_id == row["user_id"]
         return {
             "id": row["id"],
             "userId": row["user_id"],
             "username": owner["username"] if owner else "",
+            "avatarUrl": avatar_url(owner["avatar_id"]) if owner else None,
             "eventId": row["event_id"],
             "commanderName": row["commander_name"],
             "prompt": row["prompt"],
@@ -193,10 +266,16 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
             "lockedAt": row["locked_at"],
             "cmc": row["cmc"],
             "rarity": row["rarity"],
-            # votes are weighted: the owner's own vote counts 2 (ownerVote marks that card)
+            # votes are weighted: the owner's own vote counts 2 (ownerVote marks that card).
+            # Reroll requests: players asking the owner to reroll a broken version; canReroll is
+            # only ever true for the owner.
             "cards": [{**card_view(c, pool_entry_ids), **flags[c["id"]],
-                       "ownerVote": c["id"] == owner_pick} for c in cards],
+                       "ownerVote": c["id"] == owner_pick,
+                       "rerollRequests": requests.get(c["id"], 0),
+                       "myRerollRequest": c["id"] in my_requests,
+                       "canReroll": is_owner and storage.can_reroll(c["id"], voter_id)} for c in cards],
             "myVoteCardId": storage.user_vote(voter_id, row["id"]) if voter_id else None,
+            "rerollRequestsNeeded": REROLL_REQUESTS_NEEDED,
         }
 
     def event_summary(row: dict) -> dict:
@@ -222,14 +301,14 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         entries = storage.pool_entries(row["id"])
         ranking = pool_ranking(entries, storage.pool_medal_counts(row["id"]))
         my_medals = storage.my_pool_medals(viewer_id, row["id"]) if viewer_id else {}
+        wtf_voters = storage.pool_wtf_voters(row["id"])
         pool_entry_ids = storage.open_pool_entry_ids()
-        usernames: dict[str, str] = {}
+        users: dict[str, dict] = {}
 
-        def username(user_id: str) -> str:
-            if user_id not in usernames:
-                user = storage.get_user(user_id)
-                usernames[user_id] = user["username"] if user else ""
-            return usernames[user_id]
+        def maker(user_id: str) -> dict:
+            if user_id not in users:
+                users[user_id] = storage.get_user(user_id) or {"username": "", "avatar_id": None}
+            return users[user_id]
 
         entry_views = []
         for e in sorted(entries, key=lambda e: ranking[e["id"]]["rank"]):  # stable: oldest first
@@ -241,11 +320,14 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
                 "id": e["id"],
                 "cardId": e["card_id"],
                 "card": view,
-                "username": username(e["user_id"]),
+                "username": maker(e["user_id"])["username"],
+                "avatarUrl": avatar_url(maker(e["user_id"])["avatar_id"]),
                 "mine": e["user_id"] == viewer_id,
                 "power": power_check(view["card"]),
                 **ranking[e["id"]],
                 "myMedal": my_medals.get(e["id"]),
+                "wtfBy": [maker(v)["username"] for v in wtf_voters.get(e["id"], [])],
+                "myWtf": viewer_id in wtf_voters.get(e["id"], []),
                 "createdAt": e["created_at"],
             })
         return {**pool_summary(row),
@@ -276,7 +358,45 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     # ----- users -----
     @bp.post("/users/login")
     def login():
-        return jsonify(storage.login(required_body().get("username")))
+        return jsonify(user_json(storage.login(required_body().get("username"))))
+
+    @bp.get("/me")
+    def me():
+        return jsonify(user_json(require_user()))
+
+    # Profile pictures (docs/superpowers/specs/2026-10-14-profile-pictures-design.md)
+    def avatar_path(avatar_id: str) -> Path:
+        return data_dir / "avatars" / f"{avatar_id}.jpg"
+
+    def replace_avatar(user_id: str, avatar_id: str | None) -> None:
+        """Points the user at avatar_id and deletes the file it replaced."""
+        previous = storage.set_avatar(user_id, avatar_id)
+        if previous and previous != avatar_id:
+            avatar_path(previous).unlink(missing_ok=True)
+
+    @bp.put("/me/avatar")
+    def set_my_avatar():
+        """The raw image as the body; stored as a fresh 256x256 JPEG under a new id."""
+        user = require_user()
+        jpeg = process_avatar(request.get_data(cache=False))
+        avatar_id = str(uuid.uuid4())
+        path = avatar_path(avatar_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(jpeg)
+        tmp.replace(path)
+        try:
+            replace_avatar(user["id"], avatar_id)
+        except StorageError:
+            path.unlink(missing_ok=True)
+            raise
+        return jsonify(user_json(storage.get_user(user["id"])))
+
+    @bp.delete("/me/avatar")
+    def delete_my_avatar():
+        user = require_user()
+        replace_avatar(user["id"], None)
+        return jsonify(user_json(storage.get_user(user["id"])))
 
     @bp.get("/me/cards")
     def my_cards():
@@ -335,16 +455,23 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     def reroll(card_id):
         user = require_user()
         with create_lock:
-            card = storage.get_card(card_id)
-            if card is None:
-                raise StorageError(404, "Card not found")
-            # Ownership and in-progress problems are reported by reroll_card (403/409)
-            # before the cap, which only applies when a new card would really be queued.
-            if card["user_id"] == user["id"] and card["status"] not in PENDING_STATUSES:
+            # Ownership, in-progress and locked-set problems are reported by reroll_card
+            # (403/409) before the cap, which only applies when a new card would really be queued.
+            if storage.can_reroll(card_id, user["id"]):
                 check_pending_cap(user["id"], 1)
             new = storage.reroll_card(card_id, user["id"])
         gen_queue.enqueue(new["id"])
         return jsonify(card_view(storage.get_card(new["id"])))
+
+    @bp.post("/cards/<card_id>/reroll-request")
+    def reroll_request(card_id):
+        """Ask the owner to reroll a broken version in the vote, or take the request back."""
+        user = require_user()
+        requested = required_body().get("requested")
+        if not isinstance(requested, bool):
+            raise StorageError(400, "requested must be true or false")
+        set_id = storage.set_reroll_request(card_id, user["id"], requested)
+        return jsonify(set_view(storage.get_set(set_id), user["id"]))
 
     @bp.post("/cards/<card_id>/share")
     def share_card(card_id):
@@ -359,7 +486,8 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         """The gallery's Community tab: every shared card, with its maker."""
         optional_user()
         pool_entry_ids = storage.open_pool_entry_ids()
-        return jsonify([{**card_view(c, pool_entry_ids), "username": c["username"]}
+        return jsonify([{**card_view(c, pool_entry_ids), "username": c["username"],
+                         "avatarUrl": avatar_url(c["avatar_id"])}
                         for c in storage.list_shared_cards()])
 
     @bp.get("/cards/<card_id>")
@@ -465,6 +593,18 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
         pool_id = storage.clear_pool_medal(user["id"], entry_id_from_body())
         return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
 
+    @bp.post("/pools/wtf")
+    def flag_pool_wtf():
+        user = require_user()
+        pool_id = storage.flag_pool_wtf(user["id"], entry_id_from_body())
+        return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
+
+    @bp.post("/pools/wtf/clear")
+    def clear_pool_wtf():
+        user = require_user()
+        pool_id = storage.clear_pool_wtf(user["id"], entry_id_from_body())
+        return jsonify(pool_view(pool_or_404(pool_id), user["id"]))
+
     @bp.get("/queue_status")
     def queue_status():
         return jsonify(gen_queue.status())
@@ -473,19 +613,127 @@ def create_api_blueprint(storage: Storage, gen_queue: GenerationQueue, data_dir:
     @bp.get("/media/<kind>/<filename>")
     def media(kind, filename):
         not_found = StorageError(404, "Not found")
-        if kind not in MEDIA_KINDS or not filename.endswith(".png"):
+        if kind not in MEDIA_KINDS:
             raise not_found
-        stem = filename[:-len(".png")]
+        ext, mimetype = MEDIA_KINDS[kind]
+        if not filename.endswith(ext):
+            raise not_found
+        stem = filename[:-len(ext)]
         try:
             canonical = str(uuid.UUID(stem))
         except ValueError:
             raise not_found from None
         if canonical != stem:  # rejects braces, urn: prefixes, hex-only and upper-case forms
             raise not_found
-        path = data_dir / kind / f"{canonical}.png"
+        path = data_dir / kind / f"{canonical}{ext}"
         if not path.is_file():
             raise not_found
-        return send_file(path, mimetype="image/png", max_age=3600)
+        return send_file(path, mimetype=mimetype, max_age=3600)
+
+    # ----- host errata (docs/superpowers/specs/2026-10-14-errata-design.md) -----
+    def errata_item(row: dict, label: str = "", username: str = "", detail: str = "") -> dict:
+        return {"card": card_view(row), "original": row.get("original_card"),
+                "label": label or str((row.get("card") or {}).get("name") or ""),
+                "username": username, "detail": detail}
+
+    def owner_name(user_id: str) -> str:
+        user = storage.get_user(user_id)
+        return user["username"] if user else ""
+
+    def errata_groups() -> list[dict]:
+        """What the host may errata now: the cards being voted on, the last closed event's
+        legal commanders (winners, or every tied version), and the Knowledge Pool."""
+        groups = []
+        event = storage.current_event()
+        if event:
+            items = [errata_item(c, s["commander_name"], owner_name(s["user_id"]), f"Version {c['slot']}")
+                     for s in storage.locked_sets(event["id"]) for c in storage.set_cards(s["id"])]
+            groups.append({"id": "vote", "title": f"Commander vote · {event['name']}", "items": items})
+        closed = next((e for e in storage.list_events() if e["status"] == "closed"), None)
+        if closed:
+            items = []
+            for s in storage.locked_sets(closed["id"]):
+                cards = storage.set_cards(s["id"])
+                flags = leader_flags(storage.vote_tally(s["id"]), [c["id"] for c in cards])
+                items += [errata_item(c, s["commander_name"], owner_name(s["user_id"]),
+                                      "Winner" if flags[c["id"]]["leader"] else "Tied")
+                          for c in cards if flags[c["id"]]["leader"] or flags[c["id"]]["tied"]]
+            groups.append({"id": "legal", "title": f"Legal commanders · {closed['name']}", "items": items})
+        pool = storage.current_pool() or next(iter(storage.list_pools()), None)
+        if pool:
+            entries = storage.pool_entries(pool["id"])
+            ranking = pool_ranking(entries, storage.pool_medal_counts(pool["id"]))
+            items = []
+            for e in sorted(entries, key=lambda e: ranking[e["id"]]["rank"]):
+                rank = ranking[e["id"]]
+                card = storage.get_card(e["card_id"])
+                if card is None or (pool["status"] == "closed" and not rank["in"]):
+                    continue
+                points = f"{rank['points']} {'point' if rank['points'] == 1 else 'points'}"
+                items.append(errata_item(card, "", owner_name(e["user_id"]),
+                                         f"In · {points}" if rank["in"] else points))
+            groups.append({"id": "pool", "title": f"Knowledge Pool · {pool['name']}", "items": items})
+        return groups
+
+    def errata_target(card_id: str) -> dict:
+        card = storage.get_card(card_id)
+        if card is None:
+            raise StorageError(404, "Card not found")
+        if card["status"] != "done" or not storage.errata_eligible(card_id):
+            raise StorageError(409, NOT_ERRATABLE)
+        return card
+
+    def render_errata(row: dict, card: dict) -> str:
+        """The card drawn on its stored art, as raw base64 PNG."""
+        if render_card is None:
+            raise StorageError(503, "Card rendering is not available")
+        art = Path(row["art_path"]) if row.get("art_path") else None
+        art_b64 = base64.b64encode(art.read_bytes()).decode() if art and art.is_file() else None
+        rendered = render_card(card, art_b64)
+        if not rendered:
+            raise StorageError(500, "The card did not render")
+        return rendered.split(",", 1)[1] if rendered.startswith("data:") else rendered
+
+    def save_errata(row: dict, rendered: str, update: Callable[[], dict]) -> dict:
+        """Writes the new image beside the old one, records the change, then swaps the image in."""
+        path = Path(row["card_path"]) if row.get("card_path") else data_dir / "cards" / f"{row['id']}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".errata.tmp")
+        tmp.write_bytes(base64.b64decode(rendered))
+        try:
+            updated = update()
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        tmp.replace(path)
+        return updated
+
+    @bp.get("/admin/errata")
+    def admin_errata():
+        require_admin()
+        return jsonify({"groups": errata_groups()})
+
+    @bp.post("/admin/cards/<card_id>/errata")
+    def admin_errata_card(card_id):
+        """{description, power?, toughness?, preview?}: preview renders without saving."""
+        require_admin()
+        row = errata_target(card_id)
+        data = required_body()
+        card = errata_card_data(row["card"] or {}, data)
+        rendered = render_errata(row, card)
+        if data.get("preview") is True:
+            return jsonify({"image": f"data:image/png;base64,{rendered}", "power": power_check(card)})
+        updated = save_errata(row, rendered, lambda: storage.errata_card(card_id, card))
+        return jsonify(errata_item(updated))
+
+    @bp.post("/admin/cards/<card_id>/errata/revert")
+    def admin_revert_errata(card_id):
+        require_admin()
+        row = errata_target(card_id)
+        if row["original_card"] is None:
+            return jsonify(errata_item(row))
+        rendered = render_errata(row, row["original_card"])
+        return jsonify(errata_item(save_errata(row, rendered, lambda: storage.revert_errata(card_id))))
 
     # ----- admin -----
     @bp.post("/admin/events")

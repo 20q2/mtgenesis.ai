@@ -36,19 +36,6 @@
   padding: 0 0.15rem 0.35rem;
 }
 
-.avatar {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: linear-gradient(150deg, var(--gold-bright), var(--gold-deep));
-  color: var(--text-on-gold);
-  font-family: var(--font-display);
-  font-size: 0.95rem;
-  text-transform: uppercase;
-}
 
 .player-id {
   display: flex;
@@ -206,6 +193,12 @@
   z-index: 5;
   font-size: 1rem;
   line-height: 1;
+}
+
+.fan-blank {
+  border: 1.5px dashed var(--line-gold);
+  background: var(--surface-tint);
+  box-shadow: none;
 }
 
 .fan-ghost {

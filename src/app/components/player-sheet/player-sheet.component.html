@@ -6,7 +6,7 @@
         (keydown)="onKeydown($event)">
   <div class="sheet" [class.mine]="player.mine">
     <header class="sheet-head">
-      <span class="avatar" aria-hidden="true">{{ player.username.charAt(0) }}</span>
+      <app-avatar [url]="player.avatarUrl" [name]="player.username" [size]="40"></app-avatar>
       <div class="sheet-id">
         <h2 id="sheet-title" class="sheet-title" tabindex="-1" autofocus>{{ player.mine ? 'Your commanders' : player.username }}</h2>
         <p class="sheet-sub">
@@ -65,6 +65,7 @@
               </span>
               <span *ngIf="card.tied" class="flag flag-tied">Tied</span>
               <span *ngIf="isPick(set, card)" class="flag flag-mine">Your pick</span>
+              <span *ngIf="card.errata" class="errata-badge" title="The host changed this card's rules text or P/T">Errata</span>
             </div>
 
             <button *ngIf="card.status === 'done'; else notReady"
@@ -77,16 +78,16 @@
                    [alt]="set.commanderName + ', version ' + card.slot">
             </button>
             <ng-template #notReady>
-              <div class="version-card pending">
-                <span class="material-icons" aria-hidden="true">hourglass_empty</span>
-                Version {{ card.slot }} isn't ready
+              <div class="version-card pending" [class.failed]="card.status === 'failed'">
+                <span class="material-icons" aria-hidden="true">{{ card.status === 'failed' ? 'error_outline' : 'hourglass_empty' }}</span>
+                {{ notReadyText(card) }}
               </div>
             </ng-template>
 
             <div class="vote-bar">
               <span class="count">{{ card.votes }} {{ card.votes === 1 ? 'vote' : 'votes' }}</span>
               <span *ngIf="card.ownerVote" class="owner-x2" title="The owner's own vote counts as two">owner ×2</span>
-              <button *ngIf="!closed"
+              <button *ngIf="!closed && card.status === 'done'"
                       type="button"
                       class="btn vote-button"
                       [class.picked]="isPick(set, card)"
@@ -98,6 +99,38 @@
                 <span class="material-icons" aria-hidden="true">{{ isPick(set, card) ? 'check' : 'how_to_vote' }}</span>
                 {{ isPick(set, card) ? 'Your pick' : 'Vote' }}
               </button>
+            </div>
+
+            <!-- Reroll requests: players ask the owner to reroll a version that doesn't work -->
+            <div *ngIf="showRerollBar(card)" class="reroll-bar">
+              <ng-container *ngIf="!player.mine; else ownerReroll">
+                <button type="button"
+                        class="reroll-ask"
+                        [class.asked]="card.myRerollRequest"
+                        [attr.aria-pressed]="card.myRerollRequest"
+                        [attr.aria-label]="'Ask for a reroll of version ' + card.slot"
+                        [disabled]="cardBusy.has(card.id)"
+                        (click)="onRequestReroll(set, card)">
+                  <span class="material-icons" aria-hidden="true">{{ card.myRerollRequest ? 'flag' : 'outlined_flag' }}</span>
+                  {{ card.myRerollRequest ? 'You asked for a reroll' : 'Broken? Ask for a reroll' }}
+                </button>
+                <span *ngIf="card.rerollRequests" class="reroll-count"
+                      [attr.aria-label]="card.rerollRequests + ' of ' + set.rerollRequestsNeeded + ' players asked for a reroll'">
+                  {{ card.rerollRequests }} of {{ set.rerollRequestsNeeded }} asked
+                </span>
+              </ng-container>
+              <ng-template #ownerReroll>
+                <span *ngIf="ownerRerollText(set, card) as note" class="reroll-count">{{ note }}</span>
+                <button *ngIf="card.canReroll"
+                        type="button"
+                        class="btn btn-gold btn-sm reroll-now"
+                        [attr.aria-label]="'Reroll version ' + card.slot"
+                        [disabled]="cardBusy.has(card.id)"
+                        (click)="onReroll(set, card)">
+                  <span class="material-icons" aria-hidden="true">casino</span>
+                  Reroll
+                </button>
+              </ng-template>
             </div>
           </div>
         </div>

@@ -418,43 +418,6 @@ export class CardFormComponent implements OnInit {
   }
 
   // Clear entire form and reset to empty card
-  /**
-   * After a card is generated: the fields the player left empty get what the AI chose for
-   * them (the server's card director fills blanks; see proxy-server/card_fill.py), so they
-   * can tweak and regenerate. Typed fields and the supertype are never touched.
-   */
-  fillBlanks(card: { name?: string; manaCost?: string; type?: string; subtype?: string;
-                    power?: string; toughness?: string }): void {
-    const blank = (key: string) => !String(this.cardForm.get(key)?.value ?? '').trim();
-    const patch: Record<string, unknown> = {};
-    for (const key of ['name', 'type', 'subtype'] as const) {
-      if (blank(key) && card[key]) {
-        patch[key] = card[key];
-      }
-    }
-    if (blank('manaCost') && card.manaCost) {
-      // Colors and mana value follow the filled cost.
-      patch['manaCost'] = card.manaCost;
-      patch['colors'] = this.manaService.extractColorsFromManaCost(card.manaCost);
-      patch['cmc'] = this.manaService.calculateCMC(card.manaCost);
-    }
-    if (blank('powerToughness') && card.power && card.toughness) {
-      patch['power'] = card.power;
-      patch['toughness'] = card.toughness;
-      patch['powerToughness'] = `${card.power}/${card.toughness}`;
-    }
-    if (!Object.keys(patch).length) {
-      return;
-    }
-    // Silently: a cardChange here would make the create page swap the finished card for the
-    // form's preview (it treats any form change as an edit of the generated card).
-    this.cardForm.patchValue(patch, { emitEvent: false });
-    const type = (this.cardForm.get('type')?.value || '').toLowerCase();
-    const subtype = (this.cardForm.get('subtype')?.value || '').toLowerCase();
-    this.updateFilteredSubtypes(this.cardForm.get('type')?.value || '');
-    this.showPowerToughness = type.includes('creature') || subtype.includes('vehicle');
-  }
-
   clearForm(): void {
     const emptyCard = createEmptyCard();
     this.cardForm.patchValue({

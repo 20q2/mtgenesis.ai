@@ -8,6 +8,7 @@ import { BallotPlayer } from '../../services/commander-night';
 import { versionLabel } from '../../services/winners';
 
 export interface SheetVote { set: SetView; card: SetCardView; }
+export interface SheetRerollRequest extends SheetVote { requested: boolean; }
 
 /**
  * One player's commanders, all three versions of each, to vote on in one go. A native modal
@@ -24,6 +25,8 @@ export class PlayerSheetComponent implements OnChanges, AfterViewInit, AfterView
   @Input() closed = false;
   /** Sets with a vote in flight. */
   @Input() busy: ReadonlySet<string> = new Set();
+  /** Versions with a reroll request or a reroll in flight. */
+  @Input() cardBusy: ReadonlySet<string> = new Set();
   @Input() error: string | null = null;
   /** The commander to bring into view when the sheet opens or moves to another player. */
   @Input() focusSetId: string | null = null;
@@ -34,6 +37,10 @@ export class PlayerSheetComponent implements OnChanges, AfterViewInit, AfterView
   @Input() nextPlayer: BallotPlayer | null = null;
 
   @Output() vote = new EventEmitter<SheetVote>();
+  /** Someone else's version: ask its owner to reroll it, or take the request back. */
+  @Output() requestReroll = new EventEmitter<SheetRerollRequest>();
+  /** My version, once enough players asked (or it failed). */
+  @Output() reroll = new EventEmitter<SheetVote>();
   @Output() step = new EventEmitter<number>();
   @Output() goTo = new EventEmitter<BallotPlayer>();
   @Output() dismiss = new EventEmitter<void>();
@@ -109,6 +116,40 @@ export class PlayerSheetComponent implements OnChanges, AfterViewInit, AfterView
   onVote(set: SetView, card: SetCardView): void {
     if (!this.closed && !this.busy.has(set.id)) {
       this.vote.emit({ set, card });
+    }
+  }
+
+  /** While voting: the ask button on others' finished versions; for mine, the count or Reroll. */
+  showRerollBar(card: SetCardView): boolean {
+    if (this.closed) {
+      return false;
+    }
+    return this.player.mine ? card.rerollRequests > 0 || card.canReroll : card.status === 'done';
+  }
+
+  /** What the owner sees about requests on their version (a failed one only needs the button). */
+  ownerRerollText(set: SetView, card: SetCardView): string | null {
+    if (card.status !== 'done' || !card.rerollRequests) {
+      return null;
+    }
+    const n = card.rerollRequests;
+    return card.canReroll ? `${n} ${n === 1 ? 'player says' : 'players say'} it doesn't work`
+      : `${n} of ${set.rerollRequestsNeeded} asked for a reroll`;
+  }
+
+  notReadyText(card: SetCardView): string {
+    return card.status === 'failed' ? `Version ${card.slot} failed` : `Rerolling version ${card.slot}…`;
+  }
+
+  onRequestReroll(set: SetView, card: SetCardView): void {
+    if (!this.closed && !this.player.mine && !this.cardBusy.has(card.id)) {
+      this.requestReroll.emit({ set, card, requested: !card.myRerollRequest });
+    }
+  }
+
+  onReroll(set: SetView, card: SetCardView): void {
+    if (!this.closed && card.canReroll && !this.cardBusy.has(card.id)) {
+      this.reroll.emit({ set, card });
     }
   }
 
