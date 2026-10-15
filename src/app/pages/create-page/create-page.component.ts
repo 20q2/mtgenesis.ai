@@ -161,7 +161,7 @@ export class CreatePageComponent implements OnInit, OnDestroy {
         this.jobView = view;
         if (view.status === 'done') {
           this.currentCard = this.generation.toCard(view, base);
-          this.showSuccess('Card generated successfully! It is saved in your Gallery.');
+          this.showSuccess('Card generated successfully! It is saved in My Gallery.');
         } else if (view.status === 'failed') {
           this.error = `Failed to generate card: ${view.error || 'unknown error'}`;
         }
@@ -172,7 +172,7 @@ export class CreatePageComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** Shares the finished card to the gallery's Community tab, or takes it back. */
+  /** Shares the finished card to the Community Gallery, or takes it back. */
   toggleShare(): void {
     const job = this.jobView;
     if (!job || job.status !== 'done' || this.sharing) {
@@ -185,7 +185,7 @@ export class CreatePageComponent implements OnInit, OnDestroy {
       next: view => {
         this.jobView = view;
         if (view.shared) {
-          this.showSuccess('Shared! Everyone can see it on the Community tab of the Gallery.');
+          this.showSuccess('Shared! Everyone can see it in the Community Gallery.');
         }
       },
       error: err => (this.error = apiErrorMessage(err, 'Could not share the card.'))

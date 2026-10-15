@@ -16,6 +16,7 @@ import { LoginPageComponent } from './pages/login-page/login-page.component';
 import { CreatePageComponent } from './pages/create-page/create-page.component';
 import { SetBuilderPageComponent } from './pages/set-builder-page/set-builder-page.component';
 import { GalleryPageComponent } from './pages/gallery-page/gallery-page.component';
+import { CommunityPageComponent } from './pages/community-page/community-page.component';
 import { VotePageComponent } from './pages/vote-page/vote-page.component';
 import { EventHistoryPageComponent } from './pages/event-history-page/event-history-page.component';
 import { AdminPageComponent } from './pages/admin-page/admin-page.component';
@@ -48,6 +49,7 @@ import { ErrataEditorComponent } from './components/errata-editor/errata-editor.
     CreatePageComponent,
     SetBuilderPageComponent,
     GalleryPageComponent,
+    CommunityPageComponent,
     VotePageComponent,
     EventHistoryPageComponent,
     AdminPageComponent,

@@ -251,6 +251,9 @@ def test_prompt_type_requirements():
     assert "exactly one Crew" in rt.build_messages("", VEHICLE, random.Random(0))[1]["content"]
     assert "Enchant creature" in rt.build_messages("", AURA, random.Random(0))[1]["content"]
     assert "loyalty abilities" in rt.build_messages("", WALKER, random.Random(0))[1]["content"]
+    assert "Starting loyalty: 5 (fixed" in rt.build_messages("", WALKER, random.Random(0))[1]["content"]
+    assert "Starting loyalty: 3 (fixed" in rt.build_messages("", {**WALKER, "loyalty": "3"}, random.Random(0))[1]["content"]
+    assert "Starting loyalty" not in rt.build_messages("", EQUIPMENT, random.Random(0))[1]["content"]
     assert "Use X" in rt.build_messages("", {**INSTANT, "manaCost": "{X}{R}"}, random.Random(0))[1]["content"]
 
 

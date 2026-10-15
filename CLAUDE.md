@@ -68,6 +68,7 @@ Every service and component imports from `src/app/models/` (`card.model.ts`, `ap
   - Most "bad card text" bugs are a new fixer in `_fix_templating`/`clean_abilities` or a new lint rule. Add a case to `tests/test_rules_text.py` (they're real model outputs) and re-run `tools/e2e_rules_text.py`.
   - **Power level (`proxy-server/power_level.py`)** keeps cheap cards from being mega strong:
     - `creature_stats` is the stat curve. The prompt states the body up front ("2/2 (fixed)") and `finalize_card` prints the same stats.
+    - `starting_loyalty` does the same for planeswalkers (by mana value, +1 at mythic): the prompt says "Starting loyalty: 4 (fixed ...)", `finalize_card` stores it as `loyalty`, and `app.render_card_image` fills it for older cards that lack one.
     - `budget` is mana value plus a rarity bonus, minus the body's worth. `describe_budget` turns it into a concrete prompt line ("one small bonus, like ...").
     - `estimate` prices rules text in mana using Limited rates. Repeating triggers and free {T} abilities cost 2–3× a one-shot effect.
     - Generation retries anything more than `WARN_OVER` above its budget and keeps the weakest valid attempt. As a last resort, `trim_to_budget` drops the priciest ability. `FORBIDDEN` patterns in rules_text.py (repeating removal, free spells, filler mana) are never printed.
@@ -137,6 +138,7 @@ Optional player faces. The spec is `docs/superpowers/specs/2026-10-14-profile-pi
 - handles special cases: colored artifacts (masked blend), two-color pinlines and crowns, legendary crowns, P/T boxes
 - draws the name, type line and mana cost, plus rules text with inline mana symbols (`draw_text_with_mana_symbols`) and font auto-sizing
 - adds a rarity-colored site logo
+- planeswalkers get their own layout (`render_planeswalker_body`): the `assets/planeswalker/` frame, art in the tall window, one row per ability on alternating translucent panels, each loyalty cost (`+1`, `−2`, `0`) in a plus/minus/neutral badge on the box's left edge, and `loyalty` in the frame's shield. Positions are `PW_*` constants measured on the 1500×2100 template. Tests: `tests/test_card_renderer_planeswalker.py`. `tools/rerender_planeswalkers.py [--write]` re-renders stored planeswalkers (previews by default; `--write` keeps `<id>.pre-planeswalker.png` backups).
 
 Asset images are cached in memory. `cairosvg`/`wand` are optional imports, and `convert_svg_to_png.py` is a one-off tool for converting mana-symbol SVGs.
 

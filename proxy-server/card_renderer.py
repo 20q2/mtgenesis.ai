@@ -1298,16 +1298,23 @@ class MagicCardRenderer:
     
     def draw_text_with_mana_symbols(self, card_image: Image.Image, text: str, position: Tuple[int, int],
                                    max_width: int, font: ImageFont.ImageFont = None, fill='black',
-                                   max_height: Optional[int] = None) -> int:
+                                   max_height: Optional[int] = None, font_size: Optional[int] = None,
+                                   measure_only: bool = False) -> int:
         """
         Draw text with embedded mana symbols, handling word wrapping and explicit newlines.
         Uses dynamic font sizing to fit text within available space (max_height, default
-        self.available_text_height). Returns the height used by the text
+        self.available_text_height) unless font_size is given. With measure_only nothing
+        is drawn. Returns the height used by the text
         """
         draw = ImageDraw.Draw(card_image)
+        if measure_only:
+            # Same layout, no ink: measure on a throwaway canvas
+            draw = ImageDraw.Draw(Image.new('RGBA', (1, 1)))
 
+        if font_size is not None:
+            font = self.get_text_font(font_size)
         # Calculate optimal font size if no font provided
-        if font is None:
+        elif font is None:
             optimal_font_size = self.calculate_optimal_font_size(
                 text, max_width, max_height or self.available_text_height)
             font = self.get_text_font(optimal_font_size)
@@ -1379,8 +1386,14 @@ class MagicCardRenderer:
                     # Handle mana symbol segment - use exact same logic as mana cost rendering
                     print(f"[ACTIVE ABILITY] Processing rules text symbol: '{segment['content']}'")
                     symbol_image = self.load_mana_symbol(segment['content'], symbol_size)
-                    
-                    if symbol_image:
+
+                    if symbol_image and measure_only:
+                        if current_x + symbol_size > position[0] + max_width and not at_line_start:
+                            current_y += wrapped_line_height
+                            current_x = line_start_x
+                        current_x += symbol_size + 3
+                        at_line_start = False
+                    elif symbol_image:
                         # Check if symbol fits on current line
                         if current_x + symbol_size > position[0] + max_width and not at_line_start:
                             # Symbol doesn't fit, move to next line (within same ability)
@@ -1438,6 +1451,175 @@ class MagicCardRenderer:
         # Return total height used
         return current_y - position[1] + base_line_height
     
+    # ----- Planeswalkers -----
+    # Card Conjurer's planeswalker frame, measured at its native 1500x2100 and scaled by _pw.
+    PW_ART_BOX = (100, 206, 1400, 1166)        # behind the frame's art window
+    PW_TEXT_BOX = (179, 1314, 1385, 1922)      # the frame's see-through rules box
+    PW_SHIELD_CENTER = (1316, 1921)            # starting loyalty, inside the frame's shield
+    PW_BADGE_SCALE = 1.8                       # cost badges (native ~106px wide incl. colon)
+    PW_BADGE_BODY_X = 140                      # badge body centre; it straddles the box's left edge
+    # Centre of each badge's dark body in its native image (the colon dots sit right of it)
+    PW_BADGE_BODY = {'Plus': (54, 36), 'Minus': (54, 31.5), 'Neutral': (54, 27.5)}
+    PW_TEXT_X = 254                            # loyalty ability text starts after the badge's colon
+    PW_STATIC_X = 205                          # static abilities have no badge
+    PW_TEXT_RIGHT = 1360
+    PW_TITLE_SHIFT = -10                       # the name/cost bar sits higher than M15's
+    PW_TYPE_SHIFT = -3
+    PW_FONT_SIZES = [22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12]
+    PW_PANEL_COLORS = ((248, 244, 236, 215), (214, 206, 196, 215))  # alternating rows
+    # "+1: ...", "−2: ...", "0: ...", "−X: ..." (the cleaner prints − and no sign on 0)
+    PW_COST_RE = re.compile(r'^([+\-−–—]?)\s*(\d+|X)\s*:\s*(.+)$')
+
+    def _pw(self, x: float, y: float) -> Tuple[int, int]:
+        """A point on the 1500x2100 planeswalker template, in card pixels."""
+        return round(x * self.card_width / 1500), round(y * self.card_height / 2100)
+
+    @staticmethod
+    def is_planeswalker(card_type: str) -> bool:
+        return 'planeswalker' in (card_type or '').lower()
+
+    def parse_loyalty_abilities(self, text: str) -> List[Tuple[Optional[str], str]]:
+        """Rules text as (cost, text) rows: cost is '+1', '−2', '0', '+X' or None for a
+        static ability. Each line is one row."""
+        rows = []
+        for line in (text or '').split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            m = self.PW_COST_RE.match(line)
+            if m:
+                sign = {'-': '−', '–': '−', '—': '−'}.get(m.group(1), m.group(1))
+                if m.group(2) == '0':
+                    sign = ''
+                rows.append((f'{sign}{m.group(2)}', m.group(3)))
+            else:
+                rows.append((None, line))
+        return rows
+
+    def load_planeswalker_frame(self, colors: List[str]) -> Optional[Image.Image]:
+        """The planeswalker frame for these colors (gold for two or more, gray when colorless)."""
+        code = self.get_color_code(colors)
+        for name in (f'planeswalkerFrame{code}.png', 'planeswalkerFrameM.png'):
+            path = os.path.join(self.assets_dir, 'planeswalker', name)
+            if os.path.exists(path):
+                frame = self._load_image_cached(path).convert('RGBA')
+                return frame.resize((self.card_width, self.card_height), Image.Resampling.LANCZOS)
+        return None
+
+    def _pw_artwork(self, artwork_base64: Optional[str]) -> Image.Image:
+        """The full see-through window: art cover-fitted to the art box, and under the
+        rules box a blurred mirror of the art's bottom so the panels sit on matching color."""
+        from PIL import ImageFilter, ImageOps
+        canvas = Image.new('RGBA', (self.card_width, self.card_height), (20, 20, 20, 255))
+        x0, y0 = self._pw(self.PW_ART_BOX[0], self.PW_ART_BOX[1])
+        x1, y1 = self._pw(self.PW_ART_BOX[2], self.PW_ART_BOX[3])
+        _, text_bottom = self._pw(0, self.PW_TEXT_BOX[3] + 20)
+        if not artwork_base64:
+            canvas.paste((60, 60, 60, 255), (x0, y0, x1, y1))
+            canvas.paste((232, 226, 214, 255), (x0, y1, x1, text_bottom))
+            return canvas
+        try:
+            art = Image.open(io.BytesIO(base64.b64decode(artwork_base64))).convert('RGBA')
+        except Exception as e:
+            print(f"Error processing planeswalker artwork: {e}")
+            return self._pw_artwork(None)
+        art = ImageOps.fit(art, (x1 - x0, y1 - y0), Image.Resampling.LANCZOS)
+        canvas.paste(art, (x0, y0))
+        below = text_bottom - y1
+        strip = art.crop((0, max(0, art.height - below), art.width, art.height))
+        strip = ImageOps.flip(strip).resize((x1 - x0, below)).filter(ImageFilter.GaussianBlur(6))
+        canvas.paste(strip, (x0, y1))
+        return canvas
+
+    def _pw_badge(self, cost: str) -> Optional[Tuple[Image.Image, Tuple[int, int]]]:
+        """The +/−/0 badge for a loyalty cost, scaled, and its body centre in card pixels
+        relative to the badge's top left."""
+        kind = 'Plus' if cost.startswith('+') else 'Minus' if cost.startswith('−') else 'Neutral'
+        path = os.path.join(self.assets_dir, 'planeswalker', f'planeswalker{kind}.png')
+        if not os.path.exists(path):
+            return None
+        badge = self._load_image_cached(path).convert('RGBA')
+        scale = self.PW_BADGE_SCALE
+        w, h = self._pw(badge.width * scale, badge.height * scale)
+        body_x, body_y = self.PW_BADGE_BODY[kind]
+        return badge.resize((w, h), Image.Resampling.LANCZOS), self._pw(body_x * scale, body_y * scale)
+
+    def _pw_fit(self, rows: List[Tuple[Optional[str], str]], box_height: int, pad: int) -> Tuple[int, List[int]]:
+        """Largest font size at which every row's text fits the rules box; returns
+        (font size, each row's text height)."""
+        scratch = Image.new('RGBA', (1, 1))
+        heights: List[int] = []
+        for size in self.PW_FONT_SIZES:
+            heights = [self.draw_text_with_mana_symbols(
+                scratch, text, (0, 0), self._pw_text_width(cost), font_size=size, measure_only=True)
+                for cost, text in rows]
+            if sum(heights) + 2 * pad * len(rows) <= box_height:
+                return size, heights
+        return self.PW_FONT_SIZES[-1], heights
+
+    def _pw_text_width(self, cost: Optional[str]) -> int:
+        left = self.PW_TEXT_X if cost is not None else self.PW_STATIC_X
+        return self._pw(self.PW_TEXT_RIGHT - left, 0)[0]
+
+    def render_planeswalker_body(self, colors: List[str], text: str, loyalty: Optional[str],
+                                 artwork_base64: Optional[str]) -> Image.Image:
+        """
+        Art, rules box, frame, loyalty abilities and starting loyalty for a planeswalker.
+        Each ability gets its own row on alternating translucent panels; a loyalty ability's
+        cost sits in a +/−/0 badge on the box's left edge, and the starting loyalty in the
+        frame's shield at the bottom right. The caller draws name, cost, type line and logo.
+        """
+        card = self._pw_artwork(artwork_base64)
+        rows = self.parse_loyalty_abilities(text)
+
+        bx0, by0 = self._pw(self.PW_TEXT_BOX[0], self.PW_TEXT_BOX[1])
+        bx1, by1 = self._pw(self.PW_TEXT_BOX[2], self.PW_TEXT_BOX[3])
+        pad = 4
+        layout = []  # (cost, text, row top, row height, text height)
+        if rows:
+            font_size, heights = self._pw_fit(rows, by1 - by0, pad)
+            spare = max(0, (by1 - by0) - sum(heights) - 2 * pad * len(rows))
+            y = by0
+            for i, ((cost, row_text), h) in enumerate(zip(rows, heights)):
+                row_h = h + 2 * pad + spare // len(rows) + (1 if i < spare % len(rows) else 0)
+                layout.append((cost, row_text, y, row_h, h))
+                y += row_h
+
+            # Panels under the frame, so its edges overlap them
+            panels = Image.new('RGBA', card.size, (0, 0, 0, 0))
+            pdraw = ImageDraw.Draw(panels)
+            for i, (_, _, top, row_h, _) in enumerate(layout):
+                pdraw.rectangle([bx0, top, bx1, top + row_h], fill=self.PW_PANEL_COLORS[i % 2])
+            card.alpha_composite(panels)
+
+        frame = self.load_planeswalker_frame(colors)
+        if frame is not None:
+            card.alpha_composite(frame)
+
+        draw = ImageDraw.Draw(card)
+        cost_font = ImageFont.truetype(self.beleren_bold_path, 17)
+        for cost, row_text, top, row_h, h in layout:
+            mid = top + row_h // 2
+            if cost is not None:
+                badge = self._pw_badge(cost)
+                if badge is not None:
+                    image, (body_x, body_y) = badge
+                    center_x = self._pw(self.PW_BADGE_BODY_X, 0)[0]
+                    card.alpha_composite(image, (center_x - body_x, mid - body_y))
+                    draw.text((center_x, mid), cost, fill='white', font=cost_font, anchor='mm')
+            left = self._pw(self.PW_TEXT_X if cost is not None else self.PW_STATIC_X, 0)[0]
+            # draw_text_with_mana_symbols starts at the line top, which leaves the glyphs a
+            # little low: centre the block in its row, lifted to line up with the badge colon
+            top = mid - h // 2 - round(font_size * 0.12)
+            self.draw_text_with_mana_symbols(card, row_text, (left, top),
+                                             self._pw_text_width(cost), font_size=font_size)
+
+        if loyalty:
+            loyalty_font = ImageFont.truetype(self.beleren_bold_path, 26)
+            draw.text(self._pw(*self.PW_SHIELD_CENTER), str(loyalty), fill='white',
+                      font=loyalty_font, anchor='mm')
+        return card
+
     def generate_card_image(self, card_data: Dict, artwork_base64: Optional[str] = None) -> str:
         """
         Generate a complete Magic card image using the simplified approach
@@ -1490,13 +1672,19 @@ class MagicCardRenderer:
             # Vehicles also need P/T boxes since they become creatures when crewed
             # Check both main type and subtype for Vehicle (e.g., "Artifact - Vehicle")
             is_vehicle = 'Vehicle' in card_type or ('Vehicle' in subtype if subtype else False)
-            needs_pt_box = is_creature or is_vehicle
+            is_walker = self.is_planeswalker(card_type)
+            needs_pt_box = (is_creature or is_vehicle) and not is_walker
             
             print(f"Is legendary: {is_legendary}, Is creature: {is_creature}, Is vehicle: {is_vehicle}, Needs P/T: {needs_pt_box}")
             
-            # Step 1: Load base frame
+            # Step 1: Load base frame (a planeswalker gets its own frame, art and abilities here)
             frame_start = time.time()
-            card_image = self.load_base_frame(colors, is_legendary, card_type, mana_cost)
+            if is_walker:
+                card_image = self.render_planeswalker_body(
+                    colors, text, card_data.get('loyalty'), artwork_base64)
+                artwork_base64 = None  # already placed in the planeswalker window
+            else:
+                card_image = self.load_base_frame(colors, is_legendary, card_type, mana_cost)
             frame_time = time.time() - frame_start
             print(f"   🖼️ Frame loading: {frame_time:.3f}s")
             
@@ -1539,6 +1727,8 @@ class MagicCardRenderer:
             title_size, _, _ = self.fit_title_font(name, mana_cost)
             name_x, name_y = self.name_pos
             name_y += (self.TITLE_FONT_SIZE - title_size) // 2
+            if is_walker:
+                name_y += self.PW_TITLE_SHIFT
             draw.text((name_x, name_y), name, fill='black', font=self._title_font_at(title_size))
             name_time = time.time() - name_start
             print(f"   📛 Card name: {name_time:.3f}s")
@@ -1546,7 +1736,9 @@ class MagicCardRenderer:
             # Step 6: Render mana cost symbols
             mana_cost_start = time.time()
             if mana_cost:
-                self.render_mana_cost(card_image, mana_cost, self.mana_cost_pos)
+                mana_x, mana_y = self.mana_cost_pos
+                self.render_mana_cost(card_image, mana_cost,
+                                      (mana_x, mana_y + (self.PW_TITLE_SHIFT if is_walker else 0)))
             mana_cost_time = time.time() - mana_cost_start
             print(f"   💎 Mana cost symbols: {mana_cost_time:.3f}s")
             
@@ -1567,7 +1759,9 @@ class MagicCardRenderer:
             else:
                 full_type = main_type
                 
-            draw.text(self.type_pos, full_type, fill='black', font=self.type_font)
+            type_x, type_y = self.type_pos
+            draw.text((type_x, type_y + (self.PW_TYPE_SHIFT if is_walker else 0)), full_type,
+                      fill='black', font=self.type_font)
             print(f"Type line: '{full_type}'")
             type_line_time = time.time() - type_line_start
             print(f"   📋 Type line: {type_line_time:.3f}s")
@@ -1575,6 +1769,7 @@ class MagicCardRenderer:
             # Step 8: Add site logo as set symbol based on rarity
             logo_start = time.time()
             site_logo = self.load_site_logo(rarity)
+            logo_pos = (self.logo_pos[0], self.logo_pos[1] + (self.PW_TYPE_SHIFT if is_walker else 0))
             if site_logo:
                 # Paste without mask for solid, opaque appearance
                 # Only use mask if the logo has transparent areas that need to be preserved
@@ -1583,22 +1778,24 @@ class MagicCardRenderer:
                     has_transparency = any(pixel[3] < 255 for pixel in site_logo.getdata() if len(pixel) == 4)
                     if has_transparency:
                         # Logo has transparency, use it as mask
-                        card_image.paste(site_logo, self.logo_pos, site_logo)
-                        print(f"[SET SYMBOL] Added {rarity} rarity logo with transparency at position {self.logo_pos}")
+                        card_image.paste(site_logo, logo_pos, site_logo)
+                        print(f"[SET SYMBOL] Added {rarity} rarity logo with transparency at position {logo_pos}")
                     else:
                         # Logo is fully opaque, paste without mask for solid appearance
-                        card_image.paste(site_logo, self.logo_pos)
-                        print(f"[SET SYMBOL] Added {rarity} rarity logo (solid) at position {self.logo_pos}")
+                        card_image.paste(site_logo, logo_pos)
+                        print(f"[SET SYMBOL] Added {rarity} rarity logo (solid) at position {logo_pos}")
                 else:
                     # Logo is not RGBA, paste directly
-                    card_image.paste(site_logo, self.logo_pos)
-                    print(f"[SET SYMBOL] Added {rarity} rarity logo (direct) at position {self.logo_pos}")
+                    card_image.paste(site_logo, logo_pos)
+                    print(f"[SET SYMBOL] Added {rarity} rarity logo (direct) at position {logo_pos}")
             logo_time = time.time() - logo_start
             print(f"   🏷️ Set symbol: {logo_time:.3f}s")
             
             # Step 9: Draw card text with mana symbols
             rules_text_start = time.time()
-            if text:
+            if is_walker:
+                pass  # drawn row by row in render_planeswalker_body
+            elif text:
                 print(f"Drawing card text with mana symbols at position {self.text_pos}: '{text}'")
                 # The P/T box overlaps the bottom-right of the text box: fit the text above it
                 text_height = self.available_text_height

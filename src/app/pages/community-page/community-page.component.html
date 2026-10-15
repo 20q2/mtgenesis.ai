@@ -1,0 +1,38 @@
+<div class="page gallery-page">
+  <section class="panel">
+    <h2 class="page-title">Community Gallery</h2>
+    <p class="muted">Cards everyone has shared, most recent first.</p>
+  </section>
+
+  <div *ngIf="error" class="alert alert-error" role="alert">
+    <span class="material-icons">error</span>
+    <span>{{ error }}</span>
+  </div>
+
+  <p *ngIf="cards === null && !error" class="muted loading">Loading shared cards…</p>
+
+  <section *ngIf="cards && !cards.length" class="panel empty-state">
+    <p>Nobody has shared a card yet.</p>
+    <p class="muted">Share one from <a routerLink="/gallery" class="night-link">My Gallery</a> or right after you make it.</p>
+  </section>
+
+  <div class="grid" *ngIf="cards?.length">
+    <div *ngFor="let view of cards; trackBy: trackCard" class="tile panel" [attr.data-card-id]="view.id">
+      <app-card-slot [view]="view" [showReroll]="false"></app-card-slot>
+
+      <div class="tile-info">
+        <strong class="tile-name">{{ view.card?.name || 'Untitled card' }}</strong>
+        <span class="muted maker">by <span class="byline"><app-avatar [url]="view.avatarUrl" [name]="view.username" [size]="20"></app-avatar>{{ view.username }}</span></span>
+      </div>
+
+      <div class="tile-actions">
+        <button type="button" class="btn btn-ghost btn-sm download" (click)="download(view)">
+          <span class="material-icons">download</span> Card
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm download-art" *ngIf="view.artImageUrl" (click)="downloadArt(view)">
+          <span class="material-icons">image</span> Art
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

@@ -17,7 +17,7 @@ export const UNLOCK_CONFIRM = 'This clears votes on this commander';
 export const START_OVER_CONFIRM =
   "The rules say no tweaking: you generate once, and reroll a version only if it doesn't work. "
   + 'Start this commander over only to fix a mistake in its design. Start over? '
-  + '(Its current versions stay in your Gallery.)';
+  + '(Its current versions stay in My Gallery.)';
 export const REROLL_CONFIRM =
   'Rerolls are only for a version that doesn\'t function under any circumstance. Reroll it?';
 

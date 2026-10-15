@@ -86,9 +86,27 @@ describe('AppComponent (shell)', () => {
 
   it('shows the nav links and the username when logged in', () => {
     const el: HTMLElement = fixture.nativeElement;
-    const links = Array.from(el.querySelectorAll('nav.nav-links a')).map(a => a.textContent!.trim());
+    const links = Array.from(el.querySelectorAll('nav.nav-links > a, nav.nav-links .nav-menu-toggle'))
+      .map(a => a.textContent!.replace('expand_more', '').trim());
     expect(links).toEqual(['Create', 'Commanders', 'Gallery', 'Vote', 'Knowledge Pool']);
     expect(el.querySelector('.username')!.textContent).toContain('Alice');
+  });
+
+  it('Gallery opens a dropdown of My Gallery and Community Gallery', () => {
+    const el: HTMLElement = fixture.nativeElement;
+    const toggle = el.querySelector('nav.nav-links .nav-menu-toggle') as HTMLButtonElement;
+    expect(el.querySelector('.nav-menu-list')).toBeNull();
+
+    toggle.click();
+    fixture.detectChanges();
+    const items = Array.from(el.querySelectorAll('.nav-menu-list a'));
+    expect(items.map(a => a.textContent!.trim())).toEqual(['personMy Gallery', 'publicCommunity Gallery']);
+    expect(items.map(a => a.getAttribute('href'))).toEqual(['/gallery', '/community']);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    document.body.click();
+    fixture.detectChanges();
+    expect(el.querySelector('.nav-menu-list')).toBeNull();
   });
 
   it('shows the queue badge in the nav', () => {

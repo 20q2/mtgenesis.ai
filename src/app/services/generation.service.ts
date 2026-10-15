@@ -36,7 +36,7 @@ export class GenerationService {
     return this.http.get<CardView[]>(api('/me/cards'));
   }
 
-  /** Shares a finished card of mine to the Community tab, or takes it back. */
+  /** Shares a finished card of mine to the Community Gallery, or takes it back. */
   share(cardId: string, shared: boolean): Observable<CardView> {
     return this.http.post<CardView>(api(`/cards/${encodeURIComponent(cardId)}/share`), { shared });
   }

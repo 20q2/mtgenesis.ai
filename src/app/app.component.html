@@ -6,10 +6,30 @@
 
   <ng-container *ngIf="user$ | async as user">
     <nav class="nav-links" aria-label="Main">
-      <a *ngFor="let link of navLinks"
-         [routerLink]="link.path"
-         routerLinkActive="active"
-         ariaCurrentWhenActive="page">{{ link.label }}</a>
+      <ng-container *ngFor="let link of navLinks">
+        <a *ngIf="link.path; else navMenu"
+           [routerLink]="link.path"
+           routerLinkActive="active"
+           ariaCurrentWhenActive="page">{{ link.label }}</a>
+        <ng-template #navMenu>
+          <div class="nav-menu">
+            <button type="button" class="nav-menu-toggle" [class.active]="isMenuActive(link)"
+                    aria-haspopup="true" [attr.aria-expanded]="openMenu === link.label"
+                    (click)="toggleMenu(link.label, $event)">
+              {{ link.label }}
+              <span class="material-icons" aria-hidden="true">expand_more</span>
+            </button>
+            <div class="nav-menu-list" *ngIf="openMenu === link.label">
+              <a *ngFor="let item of link.children"
+                 [routerLink]="item.path"
+                 routerLinkActive="active"
+                 ariaCurrentWhenActive="page">
+                <span class="material-icons" aria-hidden="true">{{ item.icon }}</span>{{ item.label }}
+              </a>
+            </div>
+          </div>
+        </ng-template>
+      </ng-container>
     </nav>
 
     <div class="nav-right">
@@ -49,13 +69,33 @@
 
 <!-- Phones: the main destinations live in a thumb-reach tab bar -->
 <nav class="tab-bar" *ngIf="user$ | async" aria-label="Main">
-  <a *ngFor="let link of navLinks"
-     [routerLink]="link.path"
-     routerLinkActive="active"
-     ariaCurrentWhenActive="page">
-    <span class="material-icons" aria-hidden="true">{{ link.icon }}</span>
-    <span class="tab-label">{{ link.short }}</span>
-  </a>
+  <ng-container *ngFor="let link of navLinks">
+    <a *ngIf="link.path; else tabMenu"
+       [routerLink]="link.path"
+       routerLinkActive="active"
+       ariaCurrentWhenActive="page">
+      <span class="material-icons" aria-hidden="true">{{ link.icon }}</span>
+      <span class="tab-label">{{ link.short }}</span>
+    </a>
+    <ng-template #tabMenu>
+      <div class="tab-menu">
+        <button type="button" class="tab-menu-toggle" [class.active]="isMenuActive(link)"
+                aria-haspopup="true" [attr.aria-expanded]="openMenu === link.label"
+                (click)="toggleMenu(link.label, $event)">
+          <span class="material-icons" aria-hidden="true">{{ link.icon }}</span>
+          <span class="tab-label">{{ link.short }}</span>
+        </button>
+        <div class="tab-menu-list" *ngIf="openMenu === link.label">
+          <a *ngFor="let item of link.children"
+             [routerLink]="item.path"
+             routerLinkActive="active"
+             ariaCurrentWhenActive="page">
+            <span class="material-icons" aria-hidden="true">{{ item.icon }}</span>{{ item.label }}
+          </a>
+        </div>
+      </div>
+    </ng-template>
+  </ng-container>
 </nav>
 
 <app-profile-picture *ngIf="pictureOpen && (user$ | async) as user"

@@ -102,31 +102,6 @@ describe('GalleryPageComponent', () => {
     undo.flush(doneCard({ id: 'd1', shared: false }));
   });
 
-  it('the Community tab lists shared cards with their maker', () => {
-    http.expectOne(url).flush([]);
-    fixture.detectChanges();
-    (el().querySelector('button.tab-community') as HTMLElement).click();
-    fixture.detectChanges();
-    http.expectOne(`${environment.apiUrl}/api/v1/cards/shared`).flush([
-      { ...doneCard({ id: 'x1', shared: true }), username: 'Beth' }
-    ]);
-    fixture.detectChanges();
-
-    const tile = el().querySelector('[data-card-id="x1"]') as HTMLElement;
-    expect(tile.querySelector('.maker')!.textContent).toContain('by');
-    expect(tile.querySelector('.byline app-avatar')).not.toBeNull();
-    expect(tile.querySelector('.byline')!.textContent!.trim()).toMatch(/Beth$/);
-    expect(tile.querySelector('button.share')).toBeNull();
-    expect(tile.querySelector('button.pool-submit')).toBeNull();
-    expect(tile.querySelector('.download')).not.toBeNull();
-    expect(el().querySelector('button.tab-community')!.getAttribute('aria-selected')).toBe('true');
-
-    // switching back doesn't refetch My cards; switching again doesn't refetch Community
-    (el().querySelector('button.tab-mine') as HTMLElement).click();
-    (el().querySelector('button.tab-community') as HTMLElement).click();
-    http.expectNone(`${environment.apiUrl}/api/v1/cards/shared`);
-  });
-
   it('done My cards tiles offer Submit to pool; pending tiles do not', () => {
     http.expectOne(url).flush([doneCard({ id: 'd1' }), cardView({ id: 'p1', status: 'queued' })]);
     fixture.detectChanges();

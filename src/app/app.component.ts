@@ -1,9 +1,18 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
-import { Router } from '@angular/router';
-import { Observable, Subscription } from 'rxjs';
+import { Component, HostListener, OnDestroy, OnInit } from '@angular/core';
+import { NavigationEnd, Router } from '@angular/router';
+import { Observable, Subscription, filter } from 'rxjs';
 import { User } from './models/api.model';
 import { ADMIN_PIN_STORAGE_KEY } from './pages/admin-page/admin-page.component';
 import { UserService } from './services/user.service';
+
+interface NavLink {
+  label: string;
+  short: string;
+  icon: string;
+  /** A plain link; without one, the entry is a dropdown of its children. */
+  path?: string;
+  children?: { path: string; label: string; icon: string }[];
+}
 
 /**
  * App shell: header, nav, avatar + username + Log out, and the routed page. It also hosts the
@@ -23,19 +32,28 @@ export class AppComponent implements OnInit, OnDestroy {
   picturePrompted = false;
   private sub = new Subscription();
 
-  readonly navLinks = [
+  readonly navLinks: NavLink[] = [
     { path: '/create', label: 'Create', short: 'Create', icon: 'auto_awesome' },
     { path: '/set', label: 'Commanders', short: 'Commanders', icon: 'style' },
-    { path: '/gallery', label: 'Gallery', short: 'Gallery', icon: 'collections' },
+    {
+      label: 'Gallery', short: 'Gallery', icon: 'collections', children: [
+        { path: '/gallery', label: 'My Gallery', icon: 'person' },
+        { path: '/community', label: 'Community Gallery', icon: 'public' }
+      ]
+    },
     { path: '/vote', label: 'Vote', short: 'Vote', icon: 'how_to_vote' },
     { path: '/pool', label: 'Knowledge Pool', short: 'Pool', icon: 'auto_stories' }
   ];
+  /** Label of the open nav dropdown, if any. */
+  openMenu: string | null = null;
 
   constructor(private users: UserService, private router: Router) {
     this.user$ = users.user$;
   }
 
   ngOnInit(): void {
+    this.sub.add(this.router.events.pipe(filter(e => e instanceof NavigationEnd))
+      .subscribe(() => (this.openMenu = null)));
     this.sub.add(this.users.loggedIn$.subscribe(user => {
       if (!user.avatarUrl) {
         this.openPicture(true);
@@ -57,6 +75,23 @@ export class AppComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.sub.unsubscribe();
+  }
+
+  toggleMenu(label: string, event: Event): void {
+    event.stopPropagation();
+    this.openMenu = this.openMenu === label ? null : label;
+  }
+
+  /** A dropdown lights up while one of its pages is showing. */
+  isMenuActive(link: NavLink): boolean {
+    const url = this.router.url.split(/[?#]/)[0];
+    return !!link.children?.some(item => url === item.path || url.startsWith(item.path + '/'));
+  }
+
+  @HostListener('document:click')
+  @HostListener('document:keydown.escape')
+  closeMenu(): void {
+    this.openMenu = null;
   }
 
   openPicture(prompted = false): void {

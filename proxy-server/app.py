@@ -51,6 +51,9 @@ _RENDER_LOCK = threading.Lock()
 
 def render_card_image(card_data, art_b64):
     """A finished card as base64 PNG (card_renderer.generate_card_image), one render at a time."""
+    if 'planeswalker' in (card_data.get('type') or '').lower() and not card_data.get('loyalty'):
+        # Cards stored before planeswalkers printed loyalty (and their errata) still get one
+        card_data = {**card_data, 'loyalty': str(power_level.starting_loyalty(card_data))}
     with _RENDER_LOCK:
         return card_renderer.generate_card_image(card_data, art_b64)
 
@@ -246,7 +249,7 @@ def finalize_card(card_params, generated_text, art_b64, force_name=None):
     - parse the LLM text (JSON with name/description/flavorText, or plain rules text)
     - apply force_name, so a set's commander name overrides any name the LLM chose
     - replace ~ with the card name, fix bullet points and periods
-    - generate missing creature P/T and Vehicle crew cost
+    - generate missing creature P/T and Vehicle crew cost, and planeswalker starting loyalty
     - render with card_renderer.generate_card_image
 
     Returns (final card dict, rendered card as raw base64 PNG or None).
@@ -355,6 +358,11 @@ def finalize_card(card_params, generated_text, art_b64, force_name=None):
                     updated_card_data['description'] = crew_text
                 print(f"✅ Generated vehicle crew cost: Crew {crew_cost}")
                 vehicle_crew_generated = True
+
+    # Step 2.75: Planeswalker starting loyalty (the same number the rules prompt announced)
+    if 'planeswalker' in (updated_card_data.get('type') or '').lower() and not updated_card_data.get('loyalty'):
+        updated_card_data['loyalty'] = str(power_level.starting_loyalty(updated_card_data))
+        print(f"✅ Starting loyalty: {updated_card_data['loyalty']}")
 
     stats_generation_time = time.time() - stats_generation_start
     if stats_generated or vehicle_crew_generated:

@@ -5,6 +5,7 @@ import { LoginPageComponent } from './pages/login-page/login-page.component';
 import { CreatePageComponent } from './pages/create-page/create-page.component';
 import { SetBuilderPageComponent } from './pages/set-builder-page/set-builder-page.component';
 import { GalleryPageComponent } from './pages/gallery-page/gallery-page.component';
+import { CommunityPageComponent } from './pages/community-page/community-page.component';
 import { VotePageComponent } from './pages/vote-page/vote-page.component';
 import { EventHistoryPageComponent } from './pages/event-history-page/event-history-page.component';
 import { AdminPageComponent } from './pages/admin-page/admin-page.component';
@@ -16,7 +17,8 @@ export const routes: Routes = [
   { path: 'login', component: LoginPageComponent, title: 'Log in · MTGenesis.AI' },
   { path: 'create', component: CreatePageComponent, canActivate: [authGuard], title: 'Create · MTGenesis.AI' },
   { path: 'set', component: SetBuilderPageComponent, canActivate: [authGuard], title: 'Commanders · MTGenesis.AI' },
-  { path: 'gallery', component: GalleryPageComponent, canActivate: [authGuard], title: 'Gallery · MTGenesis.AI' },
+  { path: 'gallery', component: GalleryPageComponent, canActivate: [authGuard], title: 'My Gallery · MTGenesis.AI' },
+  { path: 'community', component: CommunityPageComponent, canActivate: [authGuard], title: 'Community Gallery · MTGenesis.AI' },
   { path: 'vote', component: VotePageComponent, canActivate: [authGuard], title: 'Vote · MTGenesis.AI' },
   { path: 'events', component: EventHistoryPageComponent, canActivate: [authGuard], title: 'Past Events · MTGenesis.AI' },
   { path: 'events/:id', component: EventHistoryPageComponent, canActivate: [authGuard], title: 'Event · MTGenesis.AI' },

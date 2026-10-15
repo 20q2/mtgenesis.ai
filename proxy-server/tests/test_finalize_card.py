@@ -65,3 +65,16 @@ def test_finalize_does_not_mutate_input():
     params = _params()
     finalize_card(params, '{"name": "Other", "description": "Flying"}', None)
     assert params == _params()
+
+
+def test_finalize_gives_planeswalkers_their_starting_loyalty():
+    text = "+1: Scry 1.\n−2: Draw two cards."
+    card, rendered = finalize_card(_params(type="Planeswalker", supertype="Legendary", rarity="mythic", cmc=4),
+                                   text, None)
+    assert card["loyalty"] == "5"
+    assert card["description"] == text
+    assert _is_png_b64(rendered)
+    card, _ = finalize_card(_params(type="Planeswalker", loyalty="3"), text, None)
+    assert card["loyalty"] == "3"
+    card, _ = finalize_card(_params(), "Draw a card.", None)
+    assert "loyalty" not in card

@@ -93,7 +93,7 @@ export interface CardView {
   cardImageUrl: string | null;
   artImageUrl: string | null;
   createdAt: string;
-  /** True while the card is shared to the gallery's Community tab */
+  /** True while the card is shared to the Community Gallery */
   shared: boolean;
   /** The card's entry in the open Knowledge Pool, if it has one */
   poolEntryId: string | null;
@@ -101,7 +101,7 @@ export interface CardView {
   errata: boolean;
 }
 
-/** A card on the gallery's Community tab (GET /cards/shared), with its maker. */
+/** A card on the Community Gallery (GET /cards/shared), with its maker. */
 export interface SharedCardView extends CardView { username: string; avatarUrl: string | null; }
 
 /** votes are weighted: the set owner's own vote counts 2, and ownerVote marks that card. */

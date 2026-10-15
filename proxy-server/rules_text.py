@@ -635,6 +635,10 @@ def build_messages(prompt: str, card: dict | None, rng) -> list[dict]:
         # model can spend the budget knowing what the creature already is
         p, t = power.creature_stats(card)
         facts.append(f'Power/toughness: {p}/{t} (fixed; design the abilities around this body)')
+    if 'planeswalker' in card_type:
+        # Printed in the loyalty box, not the text: the model sizes its minus costs to it
+        loyalty = card.get('loyalty') or power.starting_loyalty(card)
+        facts.append(f'Starting loyalty: {loyalty} (fixed and printed separately; do not write it)')
     facts.append(power.describe_budget(card))
     brief = card.get('brief')
     concept = re.sub(r',?\s*(detailed digital art|magic: the gathering style|fantasy art of)', '', prompt or '', flags=re.I).strip(' ,')

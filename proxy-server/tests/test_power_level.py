@@ -82,3 +82,10 @@ def test_budget_line_names_concrete_sizes():
     assert 'almost nothing' not in P.describe_budget(card(2))  # creatures always get a small bonus
     assert 'small bonus' in P.describe_budget(card(2))
     assert 'land' in P.describe_budget(card(0, 'rare', 'Land'))
+
+
+@pytest.mark.parametrize("mv, rarity, loyalty", [
+    (2, "uncommon", 3), (3, "rare", 3), (4, "rare", 4), (4, "mythic", 5), (5, "rare", 5),
+    (6, "mythic", 6), (9, "mythic", 7), (0, "common", 2)])
+def test_starting_loyalty_by_mana_value_and_rarity(mv, rarity, loyalty):
+    assert P.starting_loyalty({"cmc": mv, "rarity": rarity, "type": "Planeswalker"}) == loyalty

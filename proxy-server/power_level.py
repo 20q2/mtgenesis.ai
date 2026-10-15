@@ -63,6 +63,25 @@ def creature_stats(card: dict) -> tuple[int, int]:
     return max(power, 0), max(toughness, 1)
 
 
+# Starting loyalty by mana value, as printed on real planeswalkers (a 3-drop starts at
+# 3 or 4, a 6-drop at 5 or 6). Mythics get one more, capped at LOYALTY_MAX.
+STARTING_LOYALTY = {0: 2, 1: 2, 2: 3, 3: 3, 4: 4, 5: 5, 6: 5}
+LOYALTY_MAX = 7
+
+
+def starting_loyalty(card: dict) -> int:
+    """
+    The printed starting loyalty for a planeswalker of this mana value and rarity.
+    Deterministic like creature_stats: the prompt states it before the abilities are
+    written and finalize_card prints the same number.
+    """
+    card = card or {}
+    mv = int(card.get('cmc') or 0)
+    rarity = (card.get('rarity') or 'common').lower()
+    loyalty = STARTING_LOYALTY.get(mv, 6)
+    return min(loyalty + (1 if rarity == 'mythic' else 0), LOYALTY_MAX)
+
+
 def lean(power: int, toughness: int, subtype: str) -> tuple[int, int]:
     """Moves one point toward power for evasive or aggressive creature types, and toward
     toughness for defensive ones. The total stays the same."""
