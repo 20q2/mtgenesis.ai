@@ -20,7 +20,7 @@ export const MEDALS: { medal: Medal; label: string; points: number }[] = [
 /**
  * /pool: the open Knowledge Pool (spec docs/superpowers/specs/2026-09-29-knowledge-pool-design.md).
  * Every entry in one ranked list; each player gives one gold, silver and bronze (3/2/1, never
- * their own card) and the top floor(players / 2) make the pool. Anyone can also WTF any card they
+ * their own card) and the top 2 cards per player make the pool. Anyone can also WTF any card they
  * think is broken, or Like one they enjoy but aren't medaling: visible with names, never changing the
  * ranking. Cards are submitted from the
  * create screen and the gallery. /pool/:id shows a pool read-only. Polls every 10s while visible.

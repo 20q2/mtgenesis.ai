@@ -18,7 +18,7 @@ This year players submit cards, everyone votes with medals, and the best-voted h
 | Medals | Each player has **one gold (3 points), one silver (2) and one bronze (1) for the whole pool**. Giving a medal that is already on another card moves it. A player gives at most one medal per card, and **never to their own card**. |
 | WTF | Added 2026-10-14. Separate from medals, any player can **WTF** any number of entries to say "this card is broken and shouldn't be in the pool": one per player per card, never their own, pressed again to take it back. It is **a warning only**: it never changes points, rank or the pool line. Every card shows how many WTFs it has and who gave them. Withdrawing a card clears its WTFs. |
 | Like | Added 2026-10-14. The friendly opposite of WTF: "I like this, but I'm not medaling it." Same rules: any number of entries, one per player per card, never their own, pressed again to take it back, **never counted** in points, rank or the pool line. Every card shows how many likes it has and who gave them. Withdrawing a card clears its likes. |
-| Cutoff | **N = ⌊submitters / 2⌋**, where submitters are players with at least one entry. It is computed live, so the line moves as players join. |
+| Cutoff | **N = 2 × submitters** (`POOL_CARDS_PER_PLAYER`), where submitters are players with at least one entry. Changed 2026-10-15 from ⌊submitters / 2⌋. It is computed live, so the line moves as players join. With more places than entries, every card with points is in. |
 | Ranking | Entries rank by points, then golds, then silvers. The top N are **in**. Every card level with the Nth card on points, golds and silvers is also in (`tiedAtCutoff`), so the pool can be slightly bigger than N. A card with 0 points is never in. |
 | Visibility | Everything is open while voting: who submitted each card, live medal counts and points. |
 | Power check | Each entry shows `power_level.assess(rules text, card)` as *Fair*, *Pushed* (≥ 1 mana over its budget) or *Over the curve* (≥ 2 over). It is advisory, to make a Pot of Green obvious to voters. |
@@ -73,7 +73,7 @@ Shapes (`src/app/models/api.model.ts`):
 ```ts
 interface PoolView extends PoolSummary {
   submitters: number;        // players with at least one entry
-  cutoff: number;            // floor(submitters / 2)
+  cutoff: number;            // 2 × submitters
   myEntryCount: number;
   myMedals: Record<Medal, string | null>;   // entry id each of my medals is on
   entries: PoolEntryView[];  // sorted by rank, then oldest first
@@ -100,7 +100,7 @@ interface PoolEntryView {
 ## 5. Frontend
 
 - **`/pool` (the "Knowledge Pool" nav item):**
-  - Header: pool name and status; a rules line ("Colorless or mono-colored cards only · up to 3 per player · gold 3 / silver 2 / bronze 1 · the top half make the pool"); "*S* players → top *N* make the pool"; "your entries *k* / cap"; three medal chips lit when given.
+  - Header: pool name and status; a rules line ("Colorless or mono-colored cards only · up to 3 per player · gold 3 / silver 2 / bronze 1 · 2 cards per player make the pool"); "*S* players → top *N* make the pool"; "your entries *k* / cap"; three medal chips lit when given.
   - One grid of entries sorted by rank. Each tile: the card, maker, power check, points and medal counts, then Gold / Silver / Bronze buttons (pressed when it's the viewer's medal) and separate red WTF and blue Like toggles, or Withdraw on the viewer's own card. A red "WTF ×n" and a blue "Like ×n" flag (hover: who) sit in the tile's flags when n > 0, open or closed.
   - A visible "pool line" divider after the last card that is in. Cards above it carry an "In" badge, and cards tied at the line "Tied · in".
   - Empty state: points to the create screen.

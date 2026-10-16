@@ -102,7 +102,7 @@ Shared custom cards for the paper event: `/pool` in the app. The spec is `docs/s
 - The host opens a pool from `/admin` (`PoolAdminComponent`) with a name and a per-player entry cap (default 3).
 - Only colorless or mono-colored finished cards can be entered (`pool_card_eligible`). Players submit from the create screen or a My cards tile (`PoolSubmitComponent`), and withdraw on `/pool`.
 - Voting uses medals: each player gives one gold, silver and bronze (3 / 2 / 1 points) for the whole pool, never to their own card.
-- The top ⌊submitters / 2⌋ cards make the pool, ranked by points, then golds, then silvers; cards level with the last one at the line are also in, and 0 points is never in (`pool_ranking`, `pool_cutoff`).
+- The top 2 cards per submitter (`POOL_CARDS_PER_PLAYER`) make the pool, ranked by points, then golds, then silvers; cards level with the last one at the line are also in, and 0 points is never in (`pool_ranking`, `pool_cutoff`).
 - Separately, anyone can **WTF** any number of cards (never their own) to say "this is broken". It's a warning only: shown as "WTF ×n" with names, never counted in `pool_ranking` (`pool_wtfs` table, `POST /pools/wtf[/clear]`).
 - **Like** is the friendly twin of WTF ("I like this, but I'm not medaling it"): same rules, shown as "Like ×n", never counted (`pool_likes`, `POST /pools/like[/clear]`).
 - Everything is visible while voting: makers, medals, WTFs, likes and points.

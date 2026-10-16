@@ -252,7 +252,7 @@ export interface PoolSummary {
 export interface PoolView extends PoolSummary {
   /** Players with at least one entry. */
   submitters: number;
-  /** floor(submitters / 2): how many cards make the pool (ties at the line add more). */
+  /** 2 × submitters: how many cards make the pool (ties at the line add more). */
   cutoff: number;
   myEntryCount: number;
   /** The entry id each of my medals is on. */

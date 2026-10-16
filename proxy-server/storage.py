@@ -1097,9 +1097,13 @@ def leader_flags(tally: dict[str, int], card_ids: list[str]) -> dict[str, dict]:
     }
 
 
+# How many cards make the Knowledge Pool for each player with at least one entry.
+POOL_CARDS_PER_PLAYER = 2
+
+
 def pool_cutoff(entries: list[dict]) -> int:
-    """How many cards make the pool: half the players with at least one entry, rounded down."""
-    return len({e["user_id"] for e in entries}) // 2
+    """How many cards make the pool: POOL_CARDS_PER_PLAYER for each player with an entry."""
+    return len({e["user_id"] for e in entries}) * POOL_CARDS_PER_PLAYER
 
 
 def pool_ranking(entries: list[dict], medals: dict[str, dict[str, int]]) -> dict[str, dict]:
@@ -1116,9 +1120,11 @@ def pool_ranking(entries: list[dict], medals: dict[str, dict[str, int]]) -> dict
     key = {eid: (row["points"], row["gold"], row["silver"]) for eid, row in table.items()}
     ordered = sorted(key.values(), reverse=True)
     cutoff = pool_cutoff(entries)
-    line = ordered[cutoff - 1] if 0 < cutoff <= len(ordered) else None
+    # More places than entries: the line is the last card, and nothing is cut at it
+    line = ordered[min(cutoff, len(ordered)) - 1] if cutoff > 0 and ordered else None
+    cuts = cutoff < len(ordered)
     for eid, row in table.items():
         row["rank"] = 1 + sum(1 for k in key.values() if k > key[eid])
         row["in"] = line is not None and row["points"] > 0 and key[eid] >= line
-        row["tiedAtCutoff"] = row["in"] and key[eid] == line and ordered.count(line) > 1
+        row["tiedAtCutoff"] = cuts and row["in"] and key[eid] == line and ordered.count(line) > 1
     return table

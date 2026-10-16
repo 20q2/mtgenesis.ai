@@ -1,4 +1,4 @@
-"""Knowledge Pool: one medal-voted list; the top half of the submitters' count make the pool.
+"""Knowledge Pool: one medal-voted list; the top 2 cards per submitter make the pool.
 
 Spec: docs/superpowers/specs/2026-09-29-knowledge-pool-design.md.
 """
@@ -102,14 +102,14 @@ def test_withdraw_frees_medals_and_moves_cutoff(tmp_storage, pool):
     ids = {n: user(tmp_storage, n) for n in names}
     entries = {n: tmp_storage.submit_pool_entry(ids[n], done_card(tmp_storage, ids[n]))
                for n in names}
-    assert pool_cutoff(tmp_storage.pool_entries(pool["id"])) == 2
+    assert pool_cutoff(tmp_storage.pool_entries(pool["id"])) == 8
 
     tmp_storage.award_pool_medal(ids["bob"], entries["alice"]["id"], "gold")
     assert status_of(lambda: tmp_storage.withdraw_pool_entry(entries["alice"]["id"], ids["bob"])) == 403
     assert tmp_storage.withdraw_pool_entry(entries["alice"]["id"], ids["alice"]) == pool["id"]
 
     remaining = tmp_storage.pool_entries(pool["id"])
-    assert pool_cutoff(remaining) == 1
+    assert pool_cutoff(remaining) == 6
     assert tmp_storage.pool_medal_counts(pool["id"]) == {}
     assert tmp_storage.my_pool_medals(ids["bob"], pool["id"]) == {}
     tmp_storage.award_pool_medal(ids["bob"], entries["carl"]["id"], "gold")
@@ -248,7 +248,7 @@ def test_ranking_points_then_golds_then_silvers():
     # points 9, 7, 6 (1 gold), 6 (0 gold, 3 silver), 6 (0 gold, 2 silver), 2, 0, 0
     table = rank({"a": (3, 0, 0), "b": (1, 2, 0), "c": (1, 1, 1), "d": (0, 3, 0),
                   "e": (0, 2, 2), "f": (0, 1, 0), "g": (0, 0, 0), "h": (0, 0, 0)},
-                 submitters=8)
+                 submitters=2)  # 2 players: the top 4 make it
     assert [table[e]["points"] for e in "abcdef"] == [9, 7, 6, 6, 6, 2]
     assert ins(table) == {"a", "b", "c", "d"}
     assert not any(row["tiedAtCutoff"] for row in table.values())
@@ -258,7 +258,7 @@ def test_ranking_points_then_golds_then_silvers():
 def test_ranking_tie_at_the_line_all_get_in():
     table = rank({"a": (3, 0, 0), "b": (1, 2, 0), "c": (1, 1, 1), "d": (0, 3, 0),
                   "e": (0, 3, 0), "f": (0, 1, 0), "g": (0, 0, 0), "h": (0, 0, 0)},
-                 submitters=8)
+                 submitters=2)  # 2 players: the top 4 make it
     assert ins(table) == {"a", "b", "c", "d", "e"}
     assert table["d"]["tiedAtCutoff"] and table["e"]["tiedAtCutoff"]
     assert not table["c"]["tiedAtCutoff"]
@@ -272,12 +272,16 @@ def test_ranking_zero_points_never_in():
     assert ins(table) == set()
 
 
-def test_ranking_cutoff_from_submitters():
+def test_ranking_cutoff_is_two_cards_per_submitter():
     assert pool_cutoff([]) == 0
-    assert ins(rank({"a": (5, 0, 0), "b": (1, 0, 0)}, submitters=1)) == set()
+    assert ins(rank({"a": (5, 0, 0), "b": (1, 0, 0), "c": (0, 0, 1)}, submitters=1)) == {"a", "b"}
     entries = [{"id": "a", "user_id": "u1"}, {"id": "b", "user_id": "u1"},
                {"id": "c", "user_id": "u2"}, {"id": "d", "user_id": "u3"}]
-    assert pool_cutoff(entries) == 1
+    assert pool_cutoff(entries) == 6
+    # More places than entries: every card with points is in, and none is "tied at the line"
+    table = rank({"a": (1, 0, 0), "b": (1, 0, 0), "c": (0, 0, 1), "d": (0, 0, 0)}, submitters=3)
+    assert ins(table) == {"a", "b", "c"}
+    assert not any(row["tiedAtCutoff"] for row in table.values())
 
 
 # ----- migration -----
@@ -397,7 +401,7 @@ def test_api_full_flow(client, tmp_storage):
         assert res.status_code == 200, res.get_json()
         view = res.get_json()
         entries[n] = next(e for e in view["entries"] if e["cardId"] == cards[n])
-    assert view["submitters"] == 4 and view["cutoff"] == 2 and view["myEntryCount"] == 1
+    assert view["submitters"] == 4 and view["cutoff"] == 8 and view["myEntryCount"] == 1
     assert set(entries["Dana"]) == ENTRY_KEYS
     assert entries["Dana"]["mine"] is True and entries["Dana"]["username"] == "Dana"
     assert entries["Bob"]["power"]["verdict"] == "over"
@@ -418,7 +422,8 @@ def test_api_full_flow(client, tmp_storage):
     view = medal("Carl", "Dana", "gold")
     view = medal("Bob", "Alice", "silver")
     assert [e["id"] for e in view["entries"][:3]] == [entries[n]["id"] for n in ("Carl", "Dana", "Alice")]
-    assert [e["in"] for e in view["entries"]] == [True, True, False, False]
+    # 4 players -> 8 places: every card with points is in; Bob's has none
+    assert [e["in"] for e in view["entries"]] == [True, True, True, False]
     assert [e["rank"] for e in view["entries"][:3]] == [1, 2, 3]
     assert view["myMedals"] == {"gold": entries["Carl"]["id"], "silver": entries["Alice"]["id"],
                                 "bronze": None}

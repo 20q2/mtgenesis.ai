@@ -106,7 +106,7 @@ describe('PoolPageComponent', () => {
     expect(rules).toContain('Giving a medal again moves it');
     expect(rules).toContain('good faith');
     expect(rules).toContain('WTF a card you think is broken');
-    expect(rules).toContain('As many cards as half the players make the pool');
+    expect(rules).toContain('Two cards per player make the pool');
     expect(rules).toContain('A card with no medals never does');
     expect(rules).not.toContain('top half');
   });
