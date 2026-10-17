@@ -43,7 +43,8 @@ export class AppComponent implements OnInit, OnDestroy {
       ]
     },
     { path: '/vote', label: 'Vote', short: 'Vote', icon: 'how_to_vote' },
-    { path: '/pool', label: 'Knowledge Pool', short: 'Pool', icon: 'auto_stories' }
+    { path: '/pool', label: 'Knowledge Pool', short: 'Pool', icon: 'auto_stories' },
+    { path: '/results', label: 'Results', short: 'Results', icon: 'emoji_events' }
   ];
   /** Label of the open nav dropdown, if any. */
   openMenu: string | null = null;

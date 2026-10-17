@@ -88,7 +88,7 @@ describe('AppComponent (shell)', () => {
     const el: HTMLElement = fixture.nativeElement;
     const links = Array.from(el.querySelectorAll('nav.nav-links > a, nav.nav-links .nav-menu-toggle'))
       .map(a => a.textContent!.replace('expand_more', '').trim());
-    expect(links).toEqual(['Create', 'Commanders', 'Gallery', 'Vote', 'Knowledge Pool']);
+    expect(links).toEqual(['Create', 'Token Maker', 'Commanders', 'Gallery', 'Vote', 'Knowledge Pool', 'Results']);
     expect(el.querySelector('.username')!.textContent).toContain('Alice');
   });
 

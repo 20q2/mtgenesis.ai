@@ -1,0 +1,125 @@
+.loading,
+.empty-state {
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+/* ===== Header ===== */
+.results-header {
+  background:
+    linear-gradient(135deg, rgba(212, 175, 55, 0.16), transparent 55%),
+    var(--surface);
+  border-color: var(--line-gold);
+
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.2rem;
+    font-family: var(--font-caps);
+    font-size: 0.9rem;
+    letter-spacing: 0.04em;
+    color: var(--accent-text);
+
+    .material-icons {
+      font-size: 1.15rem;
+      color: var(--accent);
+    }
+  }
+
+  .share-hint {
+    margin-top: 0.35rem;
+  }
+
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.25rem;
+    margin-top: 0.5rem;
+    font-size: 0.92rem;
+  }
+}
+
+/* ===== A group: heading, export buttons, cards ===== */
+.group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.9rem;
+
+  .section-title {
+    margin-bottom: 0.1rem;
+  }
+}
+
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.export {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+
+  .drawing {
+    font-size: 0.85rem;
+  }
+}
+
+.commanders-heading {
+  margin: 0.5rem 0 0.75rem;
+}
+
+.pool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+/* A player's three commanders stay on one row; it just gets smaller on phones */
+.commander-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(30%, 230px), 1fr));
+  gap: 1rem;
+
+  @media (max-width: 700px) {
+    gap: 0.5rem;
+  }
+}
+
+.result-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  min-width: 0;
+
+  figcaption {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+  }
+
+  .commander-name {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.95rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  .detail {
+    font-size: 0.85rem;
+  }
+
+  /* Tied or unvoted: the host picks one of these at the table */
+  &.undecided .detail {
+    color: var(--accent-text);
+  }
+}

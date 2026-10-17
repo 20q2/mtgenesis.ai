@@ -110,6 +110,13 @@ Shared custom cards for the paper event: `/pool` in the app. The spec is `docs/s
 - Routes: `/pools/*` and `/admin/pools*` in `api_routes.py`. Each entry carries an advisory `power` check from `power_level.assess`, and every `CardView` carries `poolEntryId` for the open pool.
 - Tests: `tests/test_pool.py`.
 
+### Results
+
+`/results` (`ResultsPageComponent`) shows the newest closed event's legal commanders per player (the winning version, or the tied/unvoted versions marked "host picks") and the cards that made the newest closed Knowledge Pool. Grouping lives in `services/results.ts`.
+
+- Each group (the pool, each player) has **PNG** and **Copy**: `services/results-export.ts` draws the cards onto a dark canvas sheet (title, face, captions, footer) from the MediaService blob URLs, so the canvas is never tainted, and shrinks it until the PNG is under Discord's 10 MB (`DISCORD_MAX_BYTES`).
+- Frontend only: it reads `GET /events`, `/events/<id>`, `/pools` and `/pools/<id>`.
+
 ### Host errata
 
 On /admin the host can change a card's rules text and P/T after it was made. The spec is `docs/superpowers/specs/2026-10-14-errata-design.md`.

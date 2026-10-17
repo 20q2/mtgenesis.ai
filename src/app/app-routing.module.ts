@@ -11,6 +11,7 @@ import { EventHistoryPageComponent } from './pages/event-history-page/event-hist
 import { AdminPageComponent } from './pages/admin-page/admin-page.component';
 import { PoolPageComponent } from './pages/pool-page/pool-page.component';
 import { TokenMakerPageComponent } from './pages/token-maker-page/token-maker-page.component';
+import { ResultsPageComponent } from './pages/results-page/results-page.component';
 
 /** Spec §7 routes. Everything except /login needs a stored user. */
 export const routes: Routes = [
@@ -26,6 +27,7 @@ export const routes: Routes = [
   { path: 'events/:id', component: EventHistoryPageComponent, canActivate: [authGuard], title: 'Event · MTGenesis.AI' },
   { path: 'pool', component: PoolPageComponent, canActivate: [authGuard], title: 'Knowledge Pool · MTGenesis.AI' },
   { path: 'pool/:id', component: PoolPageComponent, canActivate: [authGuard], title: 'Knowledge Pool · MTGenesis.AI' },
+  { path: 'results', component: ResultsPageComponent, canActivate: [authGuard], title: 'Results · MTGenesis.AI' },
   { path: 'admin', component: AdminPageComponent, canActivate: [authGuard], title: 'Host · MTGenesis.AI' },
   { path: '**', redirectTo: 'create' }
 ];
