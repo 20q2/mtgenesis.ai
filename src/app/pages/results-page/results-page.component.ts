@@ -5,11 +5,13 @@ import { apiErrorMessage, safeFileName } from '../../services/api.util';
 import { EventService } from '../../services/event.service';
 import { MediaService } from '../../services/media.service';
 import { PoolService } from '../../services/pool.service';
-import { SheetCard, SheetSpec, loadImage, sheetBlob } from '../../services/results-export';
+import {
+  OverviewSpec, SheetCard, SheetSpec, loadImage, overviewBlob, sheetBlob
+} from '../../services/results-export';
 import { PlayerCommanders, latestClosed, playerCommanders, pointsLabel, poolWinners } from '../../services/results';
 
-/** Which export sheet: the pool, or one player's commanders. */
-type SheetKey = 'pool' | `player:${string}`;
+/** Which export sheet: everything, the pool, or one player's commanders. */
+type SheetKey = 'all' | 'pool' | `player:${string}`;
 
 /**
  * /results: the last closed event's legal commanders for each player, and the cards that made the
@@ -113,49 +115,92 @@ export class ResultsPageComponent implements OnInit {
   private sheet(key: SheetKey): Promise<Blob> {
     let blob = this.sheets.get(key);
     if (!blob) {
-      blob = this.spec(key).then(spec => sheetBlob(spec));
+      blob = this.sheetFor(key);
       this.sheets.set(key, blob);
     }
     return blob;
+  }
+
+  private sheetFor(key: SheetKey): Promise<Blob> {
+    return key === 'all'
+      ? this.overviewSpec().then(spec => overviewBlob(spec))
+      : this.spec(key).then(spec => sheetBlob(spec));
   }
 
   private async spec(key: SheetKey): Promise<SheetSpec> {
     const logo = loadImage('assets/site_logo.png');
     const footer = this.closedDate();
     if (key === 'pool') {
-      const pool = this.pool!;
-      const cards = await Promise.all(this.poolCards.map(async (e): Promise<SheetCard> => ({
-        image: await this.image(e.card.cardImageUrl),
-        caption: `by ${e.username}`,
-        detail: [`#${e.rank}`, pointsLabel(e.points), e.tiedAtCutoff ? 'tied at the line' : '',
-                 e.card.errata ? 'errata' : ''].filter(Boolean).join(' · '),
-        person: { image: await this.image(e.avatarUrl), name: e.username }
-      })));
-      return {
-        eyebrow: pool.name, title: 'Knowledge Pool',
-        subtitle: `${cards.length} ${cards.length === 1 ? 'card' : 'cards'} made the pool, ` +
-                  `legal in every deck · ${pool.entries.length} entered`,
-        cards, logo: await logo, footer
-      };
+      const cards = await this.poolSheetCards();
+      return { eyebrow: this.pool!.name, title: 'Knowledge Pool', subtitle: this.poolSubtitle(),
+               cards, logo: await logo, footer };
     }
     const player = this.players.find(p => this.playerKey(p) === key)!;
-    const cards: SheetCard[] = [];
-    for (const lc of player.commanders) {
-      for (const card of lc.cards) {
-        const tie = lc.outcome !== 'winner' ? ' · host picks' : '';
-        cards.push({
-          image: await this.image(card.cardImageUrl),
-          caption: lc.set.cmc != null ? `${lc.set.cmc} CMC${tie}` : `${lc.set.commanderName}${tie}`,
-          detail: lc.label + (card.errata ? ' · errata' : '')
-        });
-      }
-    }
     return {
       eyebrow: this.event!.name, title: player.username,
       subtitle: `Legal commanders · ${player.commanders.map(c => c.set.commanderName).join(' · ')}`,
       person: { image: await this.image(player.avatarUrl), name: player.username },
-      cards, logo: await logo, footer
+      cards: await this.playerSheetCards(player), logo: await logo, footer
     };
+  }
+
+  /** The pool and every player's commanders on one sheet. */
+  private async overviewSpec(): Promise<OverviewSpec> {
+    const logo = loadImage('assets/site_logo.png');
+    const groups = await Promise.all(this.players.map(async p => ({
+      person: { image: await this.image(p.avatarUrl), name: p.username },
+      cards: await this.playerSheetCards(p)
+    })));
+    return {
+      eyebrow: 'Results', title: this.event?.name || this.pool?.name || 'Results',
+      subtitle: this.summary(),
+      pool: this.pool && this.poolCards.length
+        ? { title: 'Knowledge Pool', subtitle: this.poolSubtitle(), cards: await this.poolSheetCards() }
+        : null,
+      players: this.event && groups.length
+        ? { title: 'Legal commanders', subtitle: 'The winning version of each commander, by player', groups }
+        : null,
+      logo: await logo, footer: this.closedDate()
+    };
+  }
+
+  private poolSheetCards(): Promise<SheetCard[]> {
+    return Promise.all(this.poolCards.map(async (e): Promise<SheetCard> => ({
+      image: await this.image(e.card.cardImageUrl),
+      caption: `by ${e.username}`,
+      detail: [`#${e.rank}`, pointsLabel(e.points), e.tiedAtCutoff ? 'tied at the line' : '',
+               e.card.errata ? 'errata' : ''].filter(Boolean).join(' · '),
+      person: { image: await this.image(e.avatarUrl), name: e.username }
+    })));
+  }
+
+  private async playerSheetCards(player: PlayerCommanders): Promise<SheetCard[]> {
+    const cards = player.commanders.flatMap(lc => lc.cards.map(card => ({ lc, card })));
+    return Promise.all(cards.map(async ({ lc, card }): Promise<SheetCard> => {
+      const tie = lc.outcome !== 'winner' ? ' · host picks' : '';
+      return {
+        image: await this.image(card.cardImageUrl),
+        caption: lc.set.cmc != null ? `${lc.set.cmc} CMC${tie}` : `${lc.set.commanderName}${tie}`,
+        detail: lc.label + (card.errata ? ' · errata' : '')
+      };
+    }));
+  }
+
+  private poolSubtitle(): string {
+    const n = this.poolCards.length;
+    return `${n} ${n === 1 ? 'card' : 'cards'} made the pool, legal in every deck · ${this.pool!.entries.length} entered`;
+  }
+
+  /** "9 players · 27 commanders · 7 pool cards". */
+  summary(): string {
+    const parts = [
+      `${this.players.length} ${this.players.length === 1 ? 'player' : 'players'}`,
+      `${this.commanderCount} ${this.commanderCount === 1 ? 'commander' : 'commanders'}`
+    ];
+    if (this.pool) {
+      parts.push(`${this.poolCards.length} pool ${this.poolCards.length === 1 ? 'card' : 'cards'}`);
+    }
+    return parts.join(' · ');
   }
 
   private async image(url: string | null): Promise<HTMLImageElement | null> {
@@ -163,6 +208,9 @@ export class ResultsPageComponent implements OnInit {
   }
 
   private fileName(key: SheetKey): string {
+    if (key === 'all') {
+      return `${safeFileName(this.event?.name || this.pool?.name, 'event')}_results.png`;
+    }
     if (key === 'pool') {
       return `${safeFileName(this.pool?.name, 'event')}_knowledge_pool.png`;
     }

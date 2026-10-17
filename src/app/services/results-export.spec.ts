@@ -1,4 +1,4 @@
-import { SheetSpec, drawSheet, sheetBlob, sheetLayout } from './results-export';
+import { SheetSpec, drawOverview, drawSheet, overviewLayout, sheetBlob, sheetLayout } from './results-export';
 
 /** A card-sized image of noise, so the PNG doesn't compress to nothing. */
 function noiseCard(): Promise<HTMLImageElement> {
@@ -51,6 +51,44 @@ describe('results export', () => {
     const layout = sheetLayout(1);
     expect(canvas.width).toBe(Math.round(layout.width * 0.5));
     expect(canvas.height).toBe(Math.round(layout.height * 0.5));
+  });
+
+  it('overview: the pool in one row above nine players in a 3×3 grid of blocks', () => {
+    const layout = overviewLayout(7, Array(9).fill(3));
+    const pool = layout.pool!;
+    const blocks = layout.players!.blocks;
+    expect(new Set(pool.slots.map(s => s.y)).size).toBe(1);
+    expect(blocks.length).toBe(9);
+    expect(new Set(blocks.map(b => b.y)).size).toBe(3);
+    expect(new Set(blocks.map(b => b.x)).size).toBe(3);
+    expect(layout.players!.headY).toBeGreaterThan(pool.slots[0].y);
+    // Every card sits inside its block, and the sheet is as wide as three blocks
+    for (const b of blocks) {
+      for (const s of b.slots) {
+        expect(s.x).toBeGreaterThanOrEqual(b.x);
+        expect(s.x + 496).toBeLessThanOrEqual(b.x + b.w);
+        expect(s.y + 693).toBeLessThan(b.y + b.h);
+      }
+    }
+    expect(layout.height).toBeGreaterThan(blocks[8].y + blocks[8].h);
+  });
+
+  it('overview: a tie makes a taller block and its row grows with it', () => {
+    const layout = overviewLayout(0, [3, 4, 3]);
+    expect(layout.pool).toBeNull();
+    const [a, b, c] = layout.players!.blocks;
+    expect(b.slots.length).toBe(4);
+    expect(b.slots[3].y).toBeGreaterThan(b.slots[0].y);
+    expect(a.h).toBe(b.h);
+    expect(c.h).toBe(b.h);
+  });
+
+  it('overview draws with only a pool or only players', () => {
+    const card = { image: null, caption: 'x', detail: 'y' };
+    const base = { eyebrow: 'Results', title: 'AI Night', subtitle: 's', logo: null, footer: 'f' };
+    expect(drawOverview({ ...base, pool: { title: 'Pool', subtitle: '', cards: [card] }, players: null }, 0.25).width).toBeGreaterThan(0);
+    expect(drawOverview({ ...base, pool: null, players: { title: 'Commanders', subtitle: '', groups: [
+      { person: { image: null, name: 'amy' }, cards: [card, card, card] }] } }, 0.25).width).toBeGreaterThan(0);
   });
 
   it('shrinks the PNG until it fits under the limit', async () => {

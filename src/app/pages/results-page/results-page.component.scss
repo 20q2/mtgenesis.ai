@@ -31,6 +31,23 @@
     margin-top: 0.35rem;
   }
 
+  .everything {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    margin-top: 0.75rem;
+    padding: 0.65rem 0.85rem;
+    border-radius: var(--r-md);
+    background: var(--surface-raised);
+    border: 1px solid var(--line-gold);
+
+    .muted {
+      font-size: 0.85rem;
+    }
+  }
+
   .links {
     display: flex;
     flex-wrap: wrap;

@@ -18,14 +18,18 @@
       </p>
       <h2 class="page-title">{{ event?.name || pool?.name }}</h2>
       <p class="muted">
-        <ng-container *ngIf="event?.closedAt as closed">Closed {{ closed | date:'mediumDate' }} · </ng-container>
-        {{ players.length }} {{ players.length === 1 ? 'player' : 'players' }} ·
-        {{ commanderCount }} {{ commanderCount === 1 ? 'commander' : 'commanders' }}
-        <ng-container *ngIf="pool"> · {{ poolCards.length }} pool {{ poolCards.length === 1 ? 'card' : 'cards' }}</ng-container>
+        <ng-container *ngIf="event?.closedAt as closed">Closed {{ closed | date:'mediumDate' }} · </ng-container>{{ summary() }}
       </p>
       <p class="muted share-hint">
         Every group below has <strong>PNG</strong> to save an image<ng-container *ngIf="canCopy"> and <strong>Copy</strong> to paste it straight into Discord</ng-container>.
       </p>
+      <div class="everything" data-sheet="all">
+        <div>
+          <strong>Everything in one image</strong>
+          <p class="muted">The pool and every player's commanders. The cards come out smaller to fit Discord's 10 MB.</p>
+        </div>
+        <ng-container *ngTemplateOutlet="exportButtons; context: { key: 'all', title: 'everything' }"></ng-container>
+      </div>
       <p class="links">
         <a *ngIf="event" [routerLink]="['/events', event.id]" class="night-link">Every version and vote</a>
         <a *ngIf="pool" [routerLink]="['/pool', pool.id]" class="night-link">Every pool entry and medal</a>
@@ -98,17 +102,22 @@
         <p class="muted">{{ sub }}</p>
       </div>
     </div>
-    <div class="export" role="group" [attr.aria-label]="'Share ' + title">
-      <span *ngIf="busy === key" class="muted drawing" aria-live="polite">Drawing…</span>
-      <button type="button" class="btn btn-ghost btn-sm export-png" [disabled]="!!busy" (click)="download(key)"
-              title="Save this group as one PNG">
-        <span class="material-icons" aria-hidden="true">download</span> PNG
-      </button>
-      <button *ngIf="canCopy" type="button" class="btn btn-ghost btn-sm export-copy" [disabled]="!!busy" (click)="copy(key)"
-              title="Copy the image to paste into Discord">
-        <span class="material-icons" aria-hidden="true">{{ copied === key ? 'check' : 'content_copy' }}</span>
-        {{ copied === key ? 'Copied' : 'Copy' }}
-      </button>
-    </div>
+    <ng-container *ngTemplateOutlet="exportButtons; context: { key: key, title: title }"></ng-container>
+  </div>
+</ng-template>
+
+<!-- PNG and Copy for one sheet -->
+<ng-template #exportButtons let-key="key" let-title="title">
+  <div class="export" role="group" [attr.aria-label]="'Share ' + title">
+    <span *ngIf="busy === key" class="muted drawing" aria-live="polite">Drawing…</span>
+    <button type="button" class="btn btn-ghost btn-sm export-png" [disabled]="!!busy" (click)="download(key)"
+            title="Save as one PNG">
+      <span class="material-icons" aria-hidden="true">download</span> PNG
+    </button>
+    <button *ngIf="canCopy" type="button" class="btn btn-ghost btn-sm export-copy" [disabled]="!!busy" (click)="copy(key)"
+            title="Copy the image to paste into Discord">
+      <span class="material-icons" aria-hidden="true">{{ copied === key ? 'check' : 'content_copy' }}</span>
+      {{ copied === key ? 'Copied' : 'Copy' }}
+    </button>
   </div>
 </ng-template>

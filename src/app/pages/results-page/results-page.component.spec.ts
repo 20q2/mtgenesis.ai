@@ -120,6 +120,17 @@ describe('ResultsPageComponent', () => {
     expect(clicked).toEqual(['ai_night_oct_2026_bo_commanders.png']);
   });
 
+  it('Everything draws one sheet with the pool and every player', async () => {
+    setup();
+    const clicked: string[] = [];
+    spyOn(HTMLAnchorElement.prototype, 'click').and.callFake(function (this: HTMLAnchorElement) {
+      clicked.push(this.download);
+    });
+    (el().querySelector('[data-sheet="all"] .export-png') as HTMLButtonElement).click();
+    await waitFor(() => clicked.length > 0);
+    expect(clicked).toEqual(['ai_night_oct_2026_results.png']);
+  });
+
   async function waitFor(done: () => boolean, ms = 5000): Promise<void> {
     const start = Date.now();
     while (!done() && Date.now() - start < ms) {
